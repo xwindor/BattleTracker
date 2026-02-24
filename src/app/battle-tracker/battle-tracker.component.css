@@ -166,6 +166,274 @@ input:checked + .slider:before {
   padding: 1px;
 }
 
+.dropdown-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.interrupt-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.interrupt-action {
+  flex: 1 1 auto;
+}
+
+.interrupt-twirl {
+  min-width: 2rem;
+  padding: 0 0.4rem;
+  line-height: 1.2;
+}
+
+.interrupt-details {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #ced4da;
+  border-radius: 0.25rem;
+  background: #f8f9fa;
+  color: #212529;
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+  white-space: normal;
+}
+
+.action-dropdown-menu {
+  max-height: 22rem;
+  overflow-y: auto;
+  min-width: 16rem;
+}
+
+.action-category-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+
+.action-state {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #495057;
+  cursor: default;
+}
+
+.action-item {
+  padding-left: 1.9rem;
+}
+
+.action-item-selected {
+  font-weight: 700;
+  background-color: #dbeafe;
+}
+
+.action-validation {
+  font-size: 0.85rem;
+  border: 1px solid #166534;
+  background: #ecfdf5;
+  color: #166534;
+  border-radius: 0.25rem;
+  padding: 0.45rem 0.55rem;
+}
+
+.action-validation-ok {
+  border-color: #166534;
+  background: #ecfdf5;
+  color: #166534;
+}
+
+.action-validation-error {
+  border-color: #b91c1c;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.action-modal-group .action-item {
+  border-top: none;
+}
+
+.action-item-container {
+  border-top: 1px solid #e2e8f0;
+}
+
+.action-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.action-item {
+  flex: 1 1 auto;
+}
+
+.action-item-twirl {
+  min-width: 2rem;
+  padding: 0 0.4rem;
+}
+
+.action-item-details {
+  margin: 0 0.65rem 0.5rem 0.65rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.3rem;
+  background: #f8fafc;
+  color: #1f2937;
+  font-size: 0.8rem;
+  line-height: 1.3rem;
+}
+
+.action-economy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.economy-chip {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.economy-blocked {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.economy-label {
+  display: block;
+  font-size: 0.7rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.economy-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.action-item-disabled {
+  opacity: 0.45;
+}
+
+.twirly {
+  width: 0.9rem;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.action-check {
+  color: #15803d;
+  font-weight: 800;
+  margin-right: 0.4rem;
+}
+
+.gm-stats-roll-group {
+  flex-wrap: nowrap;
+}
+
+.gm-stat-input {
+  min-width: 2.7rem;
+  max-width: 3.2rem;
+  padding-left: 0.2rem;
+  padding-right: 0.2rem;
+}
+
+.gm-dice-input {
+  min-width: 3rem;
+  max-width: 3.6rem;
+}
+
+.gm-roll-btn {
+  min-width: 2.2rem;
+  height: 31px;
+}
+
 .cm {
   text-align: center;
 }
+
+.gm-log-list {
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.log-entry-new {
+  animation: logEntryFlash 1.5s ease-out;
+}
+
+@keyframes logEntryFlash {
+  0% { background-color: #dbeafe; }
+  100% { background-color: transparent; }
+}
+
+.log-time {
+  display: inline-block;
+  min-width: 4.5rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  margin-right: 0.35rem;
+}
+
+.log-text {
+  display: inline-block;
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.25rem;
+}
+
+.log-text-action {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.log-text-roll {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.log-text-system {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+:host ::ng-deep .log-keyword-action {
+  background: #dbeafe;
+  color: #1e3a8a;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+}
+
+:host ::ng-deep .log-keyword-roll {
+  background: #fef3c7;
+  color: #92400e;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+}
+
+:host ::ng-deep .log-keyword-physical {
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+}
+
+:host ::ng-deep .log-keyword-stun {
+  background: #ffedd5;
+  color: #9a3412;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+}
+
+:host ::ng-deep .log-keyword-heal {
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+}
+

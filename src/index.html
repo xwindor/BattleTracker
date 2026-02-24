@@ -2,11 +2,13 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="google-signin-client_id" content="1083239497169-0on29tsqb0ek89c469e0o4gqrefgiq10.apps.googleusercontent.com">
   <title>BattleTracker</title>
   <base href="/">
-
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=(), usb=()">
 
   <link rel="shortcut icon" type="image/x-icon" href="assets/favicon.ico">
   <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png">
@@ -17,14 +19,6 @@
   <link rel="shortcut icon" href="assets/icons/favicon.ico">
   <meta name="msapplication-config" content="assets/icons/browserconfig.xml">
   <meta name="theme-color" content="#ffffff">
-
-  <script src="https://apis.google.com/js/platform.js" async defer></script>
-  <!--<script src="https://cdn.jsdelivr.net/rangeslider.js/2.3.0/rangeslider.min.js"></script>-->
-  <!-- Auth0 Lock script -->
-  <script src="https://cdn.auth0.com/js/lock/10.14/lock.min.js"></script>
-
-  <!-- Setting the right viewport -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 </head>
 <body>
 <app-root>Loading...</app-root>

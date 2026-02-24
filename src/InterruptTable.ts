@@ -15,12 +15,7 @@ export const interruptTable: Action[] = [
     iniMod: -5
   },
   {
-    key: "counterstrike",
-    iniMod: -7,
-    martialArt: true
-  },
-  {
-    key: "diveForCover",
+    key: "hitTheDirt",
     iniMod: -5
   },
   {
@@ -30,47 +25,5 @@ export const interruptTable: Action[] = [
   {
     key: "parry",
     iniMod: -5
-  },
-  {
-    key: "reversal",
-    iniMod: -7,
-    martialArt: true
-  },
-  {
-    key: "rightBackAtYa",
-    iniMod: -10
-  },
-  {
-    key: "runForYourLife",
-    iniMod: -5
-  },
-  {
-    key: "diveOnTheGrenade",
-    iniMod: -5
-  },
-  {
-    key: "sacrificeThrow",
-    iniMod: -10,
-    martialArt: true
-  },
-  {
-    key: "riposte",
-    iniMod: -7,
-    martialArt: true
-  },
-  {
-    key: "protectingThePrinciple",
-    iniMod: -5,
-    edge: true,
-  },
-  {
-    key: "shadowBlock",
-    iniMod: -5,
-    martialArt: true
-  },
-  {
-    key: "iAmTheFirewall",
-    iniMod: -5,
-    martialArt: false
   }
 ];

@@ -1,23 +1,11 @@
 <div class="content">
-  <nav class="navbar navbar-dark bg-dark py-0 mb-3 navbar-expand-lg">
+  <nav class="navbar navbar-dark bg-dark py-0 mb-3 navbar-expand-lg" [hidden]="mode === 'player'">
     <div class="container-fluid">
       <a class="navbar-brand" rel="home" href="#" title="BattleTracker">
         <img style="height: 50px; object-fit: contain;" src="assets/logo.svg" alt="BattleTracker Logo">
       </a>
       <a id="navbar-title" class="navbar-brand" href="#">BattleTracker</a>
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <li>
-          <div class="btn-group" style="display: inline-block">
-            @for(lang of supportedLanguages; track lang)
-            {
-            <button (click)="selectLang(lang.value)" class="btn nav-item"
-              [class.btn-secondary]="!isCurrentLang(lang.value)" [class.btn-primary]="isCurrentLang(lang.value)">
-              {{ lang.display }}
-            </button>
-            }
-          </div>
-        </li>
-      </ul>
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0"></ul>
       <div class="d-flex">
         <span class="navbar-text">Version: {{ versionService.version }}</span>
         <!--<li *ngIf="!auth.authenticated()">
@@ -30,11 +18,16 @@
     </div>
   </nav>
   <div class="container-fluid">
+    @if (mode === "player") {
+    <app-player-view></app-player-view>
+    }
+    @else {
     <app-battle-tracker></app-battle-tracker>
+    }
   </div>
 </div>
 
-<div class="footer">
+<div class="footer" [hidden]="mode === 'player'">
   <span>
     BattleTracker - made by <a href="https://github.com/MerGatto/BattleTracker">MerGatto</a>.
   </span>

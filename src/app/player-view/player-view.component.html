@@ -1,0 +1,256 @@
+<div class="player-view container py-3">
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-2">
+        <div class="col-md-3">
+          <label class="form-label">Room</label>
+          <input type="text" class="form-control" [(ngModel)]="room" [disabled]="connected" placeholder="Room code">
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button type="button" class="btn btn-primary w-100" (click)="join()" [disabled]="connected || !room">
+            Join Session
+          </button>
+        </div>
+      </div>
+      @if (error) {
+      <div class="text-danger mt-2">{{ error }}</div>
+      }
+      @if (info) {
+      <div class="text-info mt-2">{{ info }}</div>
+      }
+    </div>
+  </div>
+
+  @if (connected && state) {
+  @if (ownParticipants.length === 0) {
+  <div class="card mb-3">
+    <div class="card-header">Claim Or Create Character</div>
+    <div class="card-body">
+      @if (unclaimedParticipants.length > 0) {
+      <div class="mb-2">
+        <label class="form-label">Claim existing unclaimed character</label>
+        <div class="d-flex gap-2">
+          <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
+            <option value="">Select character</option>
+            @for (participant of unclaimedParticipants; track participant.id) {
+            <option [value]="participant.id">#{{ participant.order }} {{ participant.name }}</option>
+            }
+          </select>
+          <button type="button" class="btn btn-outline-primary" (click)="claimSelectedCharacter()">
+            Claim
+          </button>
+        </div>
+      </div>
+      }
+      <div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-3">
+            <label class="form-label">Character</label>
+            <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
+          </div>
+          <div class="col-md-1">
+            <label class="form-label">Init Dice</label>
+            <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Edge</label>
+            <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Reaction</label>
+            <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Intuition</label>
+            <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Overflow</label>
+            <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-2">
+            <label class="form-label">Physical</label>
+            <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Stun</label>
+            <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary" (click)="createCharacter()">
+          Create New Character
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between">
+      <span>Initiative Order</span>
+      <span>Combat Turn {{ state.round }} | Pass {{ state.pass }}</span>
+    </div>
+    <div class="card-body">
+      @if (promptRoll) {
+      <div class="roll-banner mb-3">
+        <div class="fw-semibold mb-1">GM requested initiative rolls.</div>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+          <input type="number" class="form-control roll-input" [(ngModel)]="manualRoll" placeholder="Manual roll total">
+          <button class="btn btn-outline-primary btn-sm" type="button" (click)="submitManualRoll()">Submit Manual Roll</button>
+          <button class="btn btn-primary btn-sm" type="button" (click)="submitAutoRoll()">Auto Roll</button>
+        </div>
+      </div>
+      }
+      <div class="row bg-dark text-light player-header">
+        <div class="col-4 col-lg-3"><b>Name</b></div>
+        <div class="col-2 col-lg-1 text-center"><b>Ini</b></div>
+        <div class="col-6 col-lg-8"><b>Actions</b></div>
+      </div>
+      @for (participant of visibleParticipants; track participant.id) {
+      <div class="row participant player-participant" [class.active-actor]="participant.active">
+        <div class="col-4 col-lg-3 d-flex align-items-center">
+          <div>
+            #{{ participant.order }} {{ participant.name }}
+            @if (canControl(participant)) {
+            <span class="badge text-bg-primary ms-1">You</span>
+            }
+          </div>
+        </div>
+        <div class="col-2 col-lg-1 text-center d-flex align-items-center justify-content-center">
+          <strong>{{ getVisibleInitiative(participant) }}</strong>
+        </div>
+        <div class="col-6 col-lg-8 participant-actions-wrap">
+          <div class="participant-actions">
+          <button type="button" class="btn btn-sm btn-primary"
+            [disabled]="!canControl(participant) || !participant.canAct" (click)="openActPlanner(participant, actModalContent)">Act</button>
+          <button type="button" class="btn btn-sm btn-warning"
+            [disabled]="!canControl(participant) || !participant.canDelay" (click)="sendDelay(participant)">Delay</button>
+          <details class="interrupt-list" [class.disabled]="!canControl(participant) || !participant.canInterrupt">
+            <summary>Interrupts</summary>
+            <div class="interrupt-menu">
+              @for (action of getInterruptActions(); track action.key) {
+              <button type="button" class="btn btn-sm btn-outline-secondary interrupt-item"
+                [disabled]="!canControl(participant) || !participant.canInterrupt"
+                (click)="sendInterrupt(participant, action.key)">
+                  {{ action.label }}
+              </button>
+              }
+            </div>
+          </details>
+          @if (participant.active) {
+          <span class="badge text-bg-success">Acting</span>
+          }
+          </div>
+        </div>
+      </div>
+      }
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">Action Log</div>
+    <ul class="list-group list-group-flush log-list" #logListContainer>
+      @if (log.length === 0) {
+      <li class="list-group-item text-muted">No log entries yet.</li>
+      }
+      @for (entry of log; track $index) {
+      <li class="list-group-item" [class.log-entry-new]="isLogEntryNew($index)">
+        <strong>{{ entry.actor }}</strong>:
+        <span [innerHTML]="formatLogText(entry.text)"></span>
+      </li>
+      }
+    </ul>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header">Your Character</div>
+    <div class="card-body">
+      @if (primaryCharacter) {
+      <div>{{ primaryCharacter.name }}</div>
+      <div class="small text-muted">Init Dice: {{ primaryCharacter.initiativeDice }}</div>
+      }
+      @else {
+      <div class="small text-muted">Waiting for GM to sync your character.</div>
+      }
+    </div>
+  </div>
+  }
+</div>
+
+<ng-template #actModalContent>
+  <div class="modal-header">
+    <h5 class="modal-title">
+      Declare Actions @if (actModalParticipant) { - {{ actModalParticipant.name }} }
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="closeActPlanner()"></button>
+  </div>
+  <div class="modal-body">
+    <div class="action-economy-grid mb-2">
+      <div class="economy-chip">
+        <span class="economy-label">Free</span>
+        <span class="economy-value">{{ getFreeUsageText() }}</span>
+      </div>
+      <div class="economy-chip" [class.economy-blocked]="getComplexUsageText() === '1/1'">
+        <span class="economy-label">Simple</span>
+        <span class="economy-value">{{ getSimpleUsageText() }}</span>
+      </div>
+      <div class="economy-chip" [class.economy-blocked]="getSimpleUsageText() !== '0/2'">
+        <span class="economy-label">Complex</span>
+        <span class="economy-value">{{ getComplexUsageText() }}</span>
+      </div>
+    </div>
+    <div class="action-validation" [class.action-validation-error]="!isDeclaredActionSelectionValid()"
+      [class.action-validation-ok]="isDeclaredActionSelectionValid()">
+      {{ getDeclaredActionValidationMessage() }}
+    </div>
+    <div class="list-group mt-3">
+      @for(actionCategory of declaredActions; track actionCategory.id) {
+      <button type="button" class="list-group-item list-group-item-action action-category-toggle"
+        (click)="toggleDeclaredActionCategory(actionCategory.id)"
+        [attr.aria-expanded]="isDeclaredActionCategoryOpen(actionCategory.id)">
+        <span class="twirly">{{ isDeclaredActionCategoryOpen(actionCategory.id) ? "v" : ">" }}</span>
+        <span>{{ actionCategory.category }} Actions</span>
+      </button>
+      @if (isDeclaredActionCategoryOpen(actionCategory.id)) {
+      <div class="action-modal-group">
+        @for(actionName of actionCategory.items; track actionName.name) {
+        <div class="action-item-container">
+          <div class="action-item-row">
+            <button type="button" class="list-group-item list-group-item-action action-item"
+              (click)="toggleDeclaredAction(actionName)"
+              [class.action-item-selected]="isDeclaredActionSelected(actionName)"
+              [class.action-item-disabled]="!canUseDeclaredAction(actionName)"
+              [disabled]="!canUseDeclaredAction(actionName)">
+              @if (isDeclaredActionSelected(actionName)) {
+              <span class="action-check">x</span>
+              }
+              {{ actionName.name }}
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm action-item-twirl"
+              (click)="toggleDeclaredActionDetails($event, actionName)"
+              [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
+              [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
+              {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+            </button>
+          </div>
+          @if (isDeclaredActionDetailsOpen(actionName)) {
+          <div class="action-item-details">
+            {{ getDeclaredActionDetails(actionName) }}
+          </div>
+          }
+        </div>
+        }
+      </div>
+      }
+      }
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-outline-secondary" (click)="closeActPlanner()">Cancel</button>
+    <button type="button" class="btn btn-primary" (click)="submitActPlanner()"
+      [disabled]="!isDeclaredActionSelectionValid()">
+      Submit Actions
+    </button>
+  </div>
+</ng-template>
