@@ -154,9 +154,13 @@ app.get("/health", (_req, res) => {
 
 // Serve Angular production build from the same origin as Socket.IO.
 const distRoot = path.join(__dirname, "dist");
-const distBrowser = path.join(distRoot, "browser");
-const staticRoot = fs.existsSync(distBrowser) ? distBrowser : distRoot;
-if (fs.existsSync(staticRoot)) {
+const staticCandidates = [
+  path.join(distRoot, "battle-tracker", "browser"),
+  path.join(distRoot, "browser"),
+  distRoot
+];
+const staticRoot = staticCandidates.find((candidate) => fs.existsSync(path.join(candidate, "index.html")));
+if (staticRoot) {
   app.use(express.static(staticRoot));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/socket.io") || req.path === "/health") {
