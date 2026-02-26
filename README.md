@@ -2,6 +2,10 @@
 
 BattleTracker is an initiative tracker for Shadowrun 5th edition that makes your life as a GM a bit easier in combat situation by managing initiative and condition tracks.
 
+## Documentation
+
+- Full app documentation (overview + deep technical details): `docs/APP_DOCUMENTATION.md`
+
 ## Features
  - Tracking Initiative in Combat Rounds and Initative Passes
    - Enter your Dice Roll or let the App roll for you

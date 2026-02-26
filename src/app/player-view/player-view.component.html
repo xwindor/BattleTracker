@@ -89,19 +89,36 @@
   <div class="card mb-3">
     <div class="card-header d-flex justify-content-between">
       <span>Initiative Order</span>
-      <span>Combat Turn {{ state.round }} | Pass {{ state.pass }}</span>
+      <span>
+        @if (state.started) {
+        Combat Turn {{ state.round }} | Pass {{ state.pass }}
+        }
+        @else {
+        Combat not active
+        }
+      </span>
     </div>
     <div class="card-body">
       @if (promptRoll) {
       <div class="roll-banner mb-3">
         <div class="fw-semibold mb-1">GM requested initiative rolls.</div>
         <div class="d-flex gap-2 align-items-center flex-wrap">
-          <input type="number" class="form-control roll-input" [(ngModel)]="manualRoll" placeholder="Manual roll total">
+          <input type="number" class="form-control roll-input" [(ngModel)]="manualRoll"
+            (ngModelChange)="onManualRollChanged($event)"
+            [min]="0"
+            [max]="getPrimaryCharacterManualRollMax()"
+            placeholder="Manual roll total">
           <button class="btn btn-outline-primary btn-sm" type="button" (click)="submitManualRoll()">Submit Manual Roll</button>
           <button class="btn btn-primary btn-sm" type="button" (click)="submitAutoRoll()">Auto Roll</button>
         </div>
       </div>
       }
+      @if (!state.started) {
+      <div class="text-muted small">
+        Combat turn not active. Waiting for GM to start the next combat turn.
+      </div>
+      }
+      @else {
       <div class="row bg-dark text-light player-header">
         <div class="col-4 col-lg-3"><b>Name</b></div>
         <div class="col-2 col-lg-1 text-center"><b>Ini</b></div>
@@ -144,6 +161,7 @@
           </div>
         </div>
       </div>
+      }
       }
     </div>
   </div>

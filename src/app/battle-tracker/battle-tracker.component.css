@@ -345,6 +345,13 @@ input:checked + .slider:before {
   padding-right: 0.2rem;
 }
 
+.gm-dice-count-input {
+  min-width: 2.7rem;
+  max-width: 3.2rem;
+  padding-left: 0.2rem;
+  padding-right: 0.2rem;
+}
+
 .gm-dice-input {
   min-width: 3rem;
   max-width: 3.6rem;

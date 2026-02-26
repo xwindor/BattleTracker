@@ -14,7 +14,7 @@ import ActionHandler from "Combat/ActionHandler";
 import { ConditionMonitorComponent } from "app/condition-monitor/condition-monitor.component";
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
-import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem } from "app/shared/declared-actions";
+import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -75,6 +75,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     "Throw Weapon",
     "Reckless Spellcasting"
   ]);
+  private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
   private readonly callShotCompatibleActions = new Set<string>([
     "Fire Bow",
     "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
@@ -404,7 +405,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (!target) {
         return;
       }
-      target.diceIni = Math.max(0, roll);
+      target.diceIni = this.clampInitiativeRoll(roll, target);
       this.appendSharedLog(target.name || "Player", `initiative roll: ${target.diceIni}`);
       if (this.initiativePrepActive) {
         this.updateInitiativePrepInfo();
@@ -785,7 +786,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
     const selection = this.getDeclaredActionSelection(sender);
-    if (this.isDeclaredActionSelected(sender, action)) {
+    if (action.economy !== "simple" && this.isDeclaredActionSelected(sender, action)) {
       return true;
     }
     if (action.economy === "free") {
@@ -795,6 +796,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return true;
     }
     if (action.economy === "simple") {
+      if (this.getSimpleActionSelectionCount(selection, action.name) > 0) {
+        return true;
+      }
       if (this.simpleAttackActions.has(action.name) && this.getSimpleAttackCount(selection) >= 1) {
         return false;
       }
@@ -859,6 +863,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   getActionDisabledReason(sender: IParticipant, action: DeclaredActionItem): string {
     if (this.isDeclaredActionSelected(sender, action)) {
+      const selection = this.getDeclaredActionSelection(sender);
+      if (action.economy === "simple"
+        && this.isRepeatableSimpleAction(action.name)
+        && this.getSimpleActionSelectionCount(selection, action.name) === 1
+        && this.canAddSimpleDuplicate(selection, action.name)) {
+        return "Click to add this action a second time.";
+      }
       return "Selected. Click again to deselect.";
     }
     if (this.canUseDeclaredAction(sender, action)) {
@@ -936,8 +947,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     if (action.economy === "simple") {
-      if (selection.simple.includes(action.name)) {
-        selection.simple = selection.simple.filter(a => a !== action.name);
+      const simpleCount = this.getSimpleActionSelectionCount(selection, action.name);
+      if (simpleCount > 0) {
+        if (this.canAddSimpleDuplicate(selection, action.name)) {
+          selection.simple = [ ...selection.simple, action.name ];
+        } else if (this.isRepeatableSimpleAction(action.name)) {
+          selection.simple = selection.simple.filter(a => a !== action.name);
+        } else {
+          selection.simple = this.removeOneSimpleActionSelection(selection.simple, action.name);
+        }
       } else {
         selection.simple = [ ...selection.simple, action.name ];
       }
@@ -956,7 +974,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       parts.push(`Free: ${selection.free}`);
     }
     if (selection.simple.length > 0) {
-      parts.push(`Simple: ${selection.simple.join(", ")}`);
+      parts.push(`Simple: ${this.formatActionListWithCounts(selection.simple).join(", ")}`);
     }
     if (selection.complex) {
       parts.push(`Complex: ${selection.complex}`);
@@ -986,6 +1004,54 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       free: null,
       simple: [],
       complex: null
+    });
+  }
+
+  private isRepeatableSimpleAction(actionName: string): boolean {
+    return this.repeatableSimpleActions.has(actionName);
+  }
+
+  private getSimpleActionSelectionCount(selection: DeclaredActionSelection, actionName: string): number {
+    return selection.simple.filter(action => action === actionName).length;
+  }
+
+  private canAddSimpleDuplicate(selection: DeclaredActionSelection, actionName: string): boolean {
+    if (!this.isRepeatableSimpleAction(actionName)) {
+      return false;
+    }
+    if (selection.complex !== null || selection.simple.length >= 2) {
+      return false;
+    }
+    if (this.getSimpleActionSelectionCount(selection, actionName) >= 2) {
+      return false;
+    }
+    if (this.simpleAttackActions.has(actionName) && this.getSimpleAttackCount(selection) >= 1) {
+      return false;
+    }
+    return !this.hasConflictingSelectedAction(selection, actionName);
+  }
+
+  private removeOneSimpleActionSelection(actions: string[], actionName: string): string[] {
+    const next = [ ...actions ];
+    const index = next.indexOf(actionName);
+    if (index !== -1) {
+      next.splice(index, 1);
+    }
+    return next;
+  }
+
+  private formatActionListWithCounts(actions: string[]): string[] {
+    const counts = new Map<string, number>();
+    const ordered: string[] = [];
+    for (const action of actions) {
+      if (!counts.has(action)) {
+        ordered.push(action);
+      }
+      counts.set(action, (counts.get(action) || 0) + 1);
+    }
+    return ordered.map(action => {
+      const count = counts.get(action) || 0;
+      return count > 1 ? `${action} x${count}` : action;
     });
   }
 
@@ -1113,6 +1179,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.declaredActionSelections.clear();
     this.combatManager.endCombat();
     this.initiativePrepActive = false;
+    this.appendSharedLog("GM", "End Combat");
+    if (this.shareRoomCode) {
+      this.sessionSync.sendCommand({
+        type: "combat_ended",
+        player: "GM",
+        payload: {}
+      });
+      this.sessionSync.sendCommand({
+        type: "clear_roll_prompt",
+        player: "GM",
+        payload: {}
+      });
+    }
     this.sort()
   }
 
@@ -1376,11 +1455,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   iniChange(e: Event, p: IParticipant) {
-    if (p.diceIni < 0) {
+    const clamped = this.clampInitiativeRoll(p.diceIni, p);
+    if (clamped !== p.diceIni) {
       e.preventDefault();
-      p.diceIni = 0;
-      const target = e.target as HTMLInputElement
-      target.value = '0';
+      p.diceIni = clamped;
+      const target = e.target as HTMLInputElement;
+      target.value = String(clamped);
     }
   }
 
@@ -1389,6 +1469,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   onParticipantUpdated() {
+    this.enforceParticipantRollBounds();
+    this.syncSharedState();
+  }
+
+  onParticipantDiceCountChanged(p: IParticipant, value: number) {
+    const normalizedDiceCount = Math.max(1, Math.floor(Number(value || 1)));
+    p.dices = normalizedDiceCount;
+    p.diceIni = this.clampInitiativeRoll(p.diceIni, p);
     this.syncSharedState();
   }
 
@@ -1661,6 +1749,29 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     el.scrollTop = el.scrollHeight;
+  }
+
+  getParticipantInitiativeRollMax(p: IParticipant): number {
+    return this.getInitiativeRollMax(p);
+  }
+
+  private getInitiativeRollMax(p: IParticipant): number {
+    const diceCount = Math.max(1, Number(p.dices || 1));
+    return diceCount * 6;
+  }
+
+  private clampInitiativeRoll(value: number, p: IParticipant): number {
+    const normalized = Math.floor(Number(value) || 0);
+    return Math.max(0, Math.min(this.getInitiativeRollMax(p), normalized));
+  }
+
+  private enforceParticipantRollBounds() {
+    for (const participant of this.combatManager.participants.items) {
+      const clamped = this.clampInitiativeRoll(participant.diceIni, participant);
+      if (participant.diceIni !== clamped) {
+        participant.diceIni = clamped;
+      }
+    }
   }
 
   // Helper to find the closest ancestor with a given class

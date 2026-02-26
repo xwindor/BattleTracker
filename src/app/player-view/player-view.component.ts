@@ -3,7 +3,7 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { NgbModal, NgbModalModule, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
-import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem } from "app/shared/declared-actions";
+import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -47,10 +47,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     simple: [],
     complex: null
   };
+  private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
   readonly declaredActions = DECLARED_ACTIONS;
   private pendingLogScroll = false;
   private flashedLogIndex = -1;
   private clearLogFlashTimeout: number | null = null;
+  private lastKnownCombatStarted = false;
+  private explicitCombatEndedNotice = false;
   
   private readonly interruptActions = [
     { key: "block", label: "Block" },
@@ -102,11 +105,11 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.session.connect();
       const { state, log } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
       this.connected = true;
-      this.state = state;
+      this.applyIncomingState(state);
       this.log = log || [];
       this.pendingLogScroll = true;
       this.session.onState((next) => {
-        this.state = next;
+        this.applyIncomingState(next);
       });
       this.session.onLog((entry) => {
         this.log = [ ...this.log, entry ];
@@ -118,6 +121,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           this.promptRoll = true;
         } else if (command.type === "clear_roll_prompt") {
           this.promptRoll = false;
+        } else if (command.type === "combat_ended") {
+          this.explicitCombatEndedNotice = true;
+          this.promptRoll = false;
+          this.manualRoll = "";
+          this.closeActPlanner();
+          this.info = "GM ended combat.";
         }
       });
       this.session.onSessionClosed(() => {
@@ -172,15 +181,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   submitManualRoll() {
     const actor = this.primaryCharacter;
     const value = Number(this.manualRoll);
-    if (!actor || Number.isNaN(value) || value < 0) {
+    if (!actor || Number.isNaN(value)) {
       return;
     }
+    const roll = this.clampInitiativeRoll(value, actor.initiativeDice);
     this.session.sendCommand({
       type: "roll_submission",
       player: this.playerToken,
       payload: {
         participantId: actor.id,
-        roll: value
+        roll
       }
     });
     this.promptRoll = false;
@@ -207,6 +217,26 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     });
     this.promptRoll = false;
     this.manualRoll = "";
+  }
+
+  onManualRollChanged(value: string | number | null) {
+    if (value === null || value === undefined || value === "") {
+      this.manualRoll = "";
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+      this.manualRoll = "";
+      return;
+    }
+    const max = this.getPrimaryCharacterManualRollMax();
+    const clamped = this.clampRollToBounds(numeric, max);
+    this.manualRoll = String(clamped);
+  }
+
+  getPrimaryCharacterManualRollMax(): number {
+    const actor = this.primaryCharacter;
+    return this.getInitiativeRollMax(actor?.initiativeDice);
   }
 
   openActPlanner(actor: SharedParticipantState, modalContent: TemplateRef<unknown>) {
@@ -378,13 +408,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   canUseDeclaredAction(action: DeclaredActionItem): boolean {
-    if (this.isDeclaredActionSelected(action)) {
+    if (action.economy !== "simple" && this.isDeclaredActionSelected(action)) {
       return true;
     }
     if (action.economy === "free") {
       return true;
     }
     if (action.economy === "simple") {
+      if (this.getSimpleActionSelectionCount(action.name) > 0) {
+        return true;
+      }
       return this.declaredActionSelection.complex === null && this.declaredActionSelection.simple.length < 2;
     }
     return this.declaredActionSelection.simple.length === 0 && this.declaredActionSelection.complex === null;
@@ -399,8 +432,15 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       return;
     }
     if (action.economy === "simple") {
-      if (this.declaredActionSelection.simple.includes(action.name)) {
-        this.declaredActionSelection.simple = this.declaredActionSelection.simple.filter(a => a !== action.name);
+      const simpleCount = this.getSimpleActionSelectionCount(action.name);
+      if (simpleCount > 0) {
+        if (this.canAddSimpleDuplicate(action.name)) {
+          this.declaredActionSelection.simple = [ ...this.declaredActionSelection.simple, action.name ];
+        } else if (this.isRepeatableSimpleAction(action.name)) {
+          this.declaredActionSelection.simple = this.declaredActionSelection.simple.filter(a => a !== action.name);
+        } else {
+          this.declaredActionSelection.simple = this.removeOneSimpleActionSelection(this.declaredActionSelection.simple, action.name);
+        }
       } else {
         this.declaredActionSelection.simple = [ ...this.declaredActionSelection.simple, action.name ];
       }
@@ -441,12 +481,69 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       parts.push(`Free: ${this.declaredActionSelection.free}`);
     }
     if (this.declaredActionSelection.simple.length > 0) {
-      parts.push(`Simple: ${this.declaredActionSelection.simple.join(", ")}`);
+      parts.push(`Simple: ${this.formatActionListWithCounts(this.declaredActionSelection.simple).join(", ")}`);
     }
     if (this.declaredActionSelection.complex) {
       parts.push(`Complex: ${this.declaredActionSelection.complex}`);
     }
     return parts.length > 0 ? parts.join(" | ") : "Act";
+  }
+
+  private clampInitiativeRoll(value: number, initiativeDice: number | undefined): number {
+    const max = this.getInitiativeRollMax(initiativeDice);
+    return this.clampRollToBounds(value, max);
+  }
+
+  private getInitiativeRollMax(initiativeDice: number | undefined): number {
+    const diceCount = Math.max(1, Number(initiativeDice || 1));
+    return diceCount * 6;
+  }
+
+  private clampRollToBounds(value: number, max: number): number {
+    const normalized = Math.floor(Number(value) || 0);
+    return Math.max(0, Math.min(max, normalized));
+  }
+
+  private isRepeatableSimpleAction(actionName: string): boolean {
+    return this.repeatableSimpleActions.has(actionName);
+  }
+
+  private getSimpleActionSelectionCount(actionName: string): number {
+    return this.declaredActionSelection.simple.filter(action => action === actionName).length;
+  }
+
+  private canAddSimpleDuplicate(actionName: string): boolean {
+    if (!this.isRepeatableSimpleAction(actionName)) {
+      return false;
+    }
+    if (this.declaredActionSelection.complex !== null || this.declaredActionSelection.simple.length >= 2) {
+      return false;
+    }
+    return this.getSimpleActionSelectionCount(actionName) < 2;
+  }
+
+  private removeOneSimpleActionSelection(actions: string[], actionName: string): string[] {
+    const next = [ ...actions ];
+    const index = next.indexOf(actionName);
+    if (index !== -1) {
+      next.splice(index, 1);
+    }
+    return next;
+  }
+
+  private formatActionListWithCounts(actions: string[]): string[] {
+    const counts = new Map<string, number>();
+    const ordered: string[] = [];
+    for (const action of actions) {
+      if (!counts.has(action)) {
+        ordered.push(action);
+      }
+      counts.set(action, (counts.get(action) || 0) + 1);
+    }
+    return ordered.map(action => {
+      const count = counts.get(action) || 0;
+      return count > 1 ? `${action} x${count}` : action;
+    });
   }
 
   private scrollLogToBottom() {
@@ -470,5 +567,25 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.flashedLogIndex = -1;
       this.clearLogFlashTimeout = null;
     }, 1500);
+  }
+
+  private applyIncomingState(next: SharedCombatState | null) {
+    const started = Boolean(next?.started);
+    if (this.lastKnownCombatStarted && !started) {
+      this.promptRoll = false;
+      this.manualRoll = "";
+      this.closeActPlanner();
+      if (!this.explicitCombatEndedNotice) {
+        this.info = "Combat turn complete. Waiting for GM to start the next combat turn.";
+      }
+    }
+    if (started) {
+      this.explicitCombatEndedNotice = false;
+      if (this.info === "Combat turn complete. Waiting for GM to start the next combat turn." || this.info === "GM ended combat.") {
+        this.info = "";
+      }
+    }
+    this.state = next;
+    this.lastKnownCombatStarted = started;
   }
 }

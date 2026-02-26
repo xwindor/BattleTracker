@@ -21,6 +21,10 @@ export interface DeclaredActionCategory {
   items: DeclaredActionItem[];
 }
 
+export const REPEATABLE_SIMPLE_ACTIONS: readonly string[] = [
+  "Take Aim"
+];
+
 export const DECLARED_ACTIONS: DeclaredActionCategory[] = [
   {
     id: "free",

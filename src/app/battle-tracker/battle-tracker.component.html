@@ -140,9 +140,16 @@
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
                 (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
+              <span class="input-group-text" title="Initiative Dice">D</span>
+              <input class="form-control text-center gm-dice-count-input" type="number"
+                [ngModel]="p.dices"
+                (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
+                [min]="1"
+                title="Initiative Dice">
               <input class="form-control inpDiceIni text-center gm-dice-input" name="diceIni" type="number"
                 (keydown)="inpDiceIni_KeyDown($event)" (focus)="inp_Focus($event)" (input)="iniChange($event, p)"
-                [(ngModel)]="p.diceIni" (ngModelChange)="onParticipantUpdated()" #field="ngModel" [min]="0">
+                [(ngModel)]="p.diceIni" (ngModelChange)="onParticipantUpdated()" #field="ngModel" [min]="0"
+                [max]="getParticipantInitiativeRollMax(p)">
               <div class="input-group-append">
                 <button type="button" class="btn btn-dark p-0 gm-roll-btn" (click)="btnRollInitiative_Click(p)"
                   [disabled]="p.diceIni !== 0" data-toggle="tooltip" data-placement="bottom" title="Roll Initiative">
