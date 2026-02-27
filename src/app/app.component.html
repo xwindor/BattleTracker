@@ -7,6 +7,17 @@
       <a id="navbar-title" class="navbar-brand" href="#">BattleTracker</a>
       <ul class="navbar-nav me-auto mb-2 mb-lg-0"></ul>
       <div class="d-flex">
+        <div class="btn-group btn-group-sm me-3" role="group" aria-label="Skin selection">
+          @for (option of skinOptions; track option.id) {
+          <button type="button"
+            class="btn"
+            [class.btn-light]="skin === option.id"
+            [class.btn-outline-light]="skin !== option.id"
+            (click)="setSkin(option.id)">
+            {{ option.label }}
+          </button>
+          }
+        </div>
         <span class="navbar-text">Version: {{ versionService.version }}</span>
         <!--<li *ngIf="!auth.authenticated()">
     <a href="#" (click)="auth.login()"><i class="fa fa-sign-in-alt fa-lg fa-inverse"></i> Login</a>

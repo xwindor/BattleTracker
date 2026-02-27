@@ -334,8 +334,14 @@ input:checked + .slider:before {
   margin-right: 0.4rem;
 }
 
+.gm-stats-col {
+  overflow: hidden;
+}
+
 .gm-stats-roll-group {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  row-gap: 0.2rem;
+  width: 100%;
 }
 
 .gm-stat-input {
@@ -360,6 +366,16 @@ input:checked + .slider:before {
 .gm-roll-btn {
   min-width: 2.2rem;
   height: 31px;
+}
+
+@media (max-width: 1400px) {
+  .gm-stats-roll-group .input-group-append {
+    width: 100%;
+  }
+
+  .gm-roll-btn {
+    width: 100%;
+  }
 }
 
 .cm {

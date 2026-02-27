@@ -22,6 +22,11 @@ interface DeclaredActionSelection {
   complex: string | null;
 }
 
+interface LocalLogEntry {
+  timestamp: Date;
+  text: string;
+}
+
 @Component({
   standalone: true,
   selector: "app-battle-tracker",
@@ -116,6 +121,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private pendingLogScroll = false;
   private flashedSharedLogIndex = -1;
   private clearSharedLogFlashTimeout: number | null = null;
+  private readonly matrixChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$#@%*+-";
+  private readonly sharedLogDecodeTimers = new Map<number, number>();
+  private readonly sharedLogDecodeText = new Map<number, string>();
+  private readonly localLogDecodeTimers = new Map<string, number>();
+  private readonly localLogDecodeText = new Map<string, string>();
+  private observedLocalLogCount = 0;
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
   private readonly participantClaimable = new Map<IParticipant, boolean>();
@@ -162,6 +173,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   async ngOnInit() {
     UndoHandler.Initialize();
     UndoHandler.StartActions();
+    this.observedLocalLogCount = this.logHandler.logbook.length;
   }
 
   ngOnDestroy() {
@@ -169,6 +181,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       window.clearTimeout(this.clearSharedLogFlashTimeout);
       this.clearSharedLogFlashTimeout = null;
     }
+    this.clearSharedLogDecodeAnimations();
+    this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
   }
 
@@ -205,6 +219,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.shareRoomCode = room;
       this.shareJoinCode = room;
       this.sharedLogEntries = [];
+      this.clearSharedLogDecodeAnimations();
       this.attachShareListeners();
       this.syncSharedState();
     } catch (err) {
@@ -225,6 +240,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const { state, log } = await this.sessionSync.joinAsGm(room);
       this.shareRoomCode = room;
       this.sharedLogEntries = log || [];
+      this.clearSharedLogDecodeAnimations();
       this.pendingLogScroll = true;
       this.attachShareListeners();
       this.restoreFromSharedState(state);
@@ -239,7 +255,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return "";
     }
     const base = window.location.origin + window.location.pathname;
-    return `${base}?mode=player&room=${this.shareRoomCode}`;
+    const params = new URLSearchParams({
+      mode: "player",
+      room: this.shareRoomCode
+    });
+    const skin = window.localStorage.getItem("battle-tracker-skin");
+    if (skin === "alternate" || skin === "vintage" || skin === "cyberdeck") {
+      params.set("skin", skin);
+    }
+    return `${base}?${params.toString()}`;
   }
 
   async btnCopyRoomCode_Click() {
@@ -284,6 +308,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.shareRoomCode = "";
       this.shareJoinCode = "";
       this.sharedLogEntries = [];
+      this.clearSharedLogDecodeAnimations();
       this.initiativePrepActive = false;
       this.isClosingSession = false;
     }
@@ -295,6 +320,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.sharedLogEntries = [ ...this.sharedLogEntries, entry ];
       this.pendingLogScroll = true;
       this.flashSharedLogEntry(this.sharedLogEntries.length - 1);
+      this.startSharedLogDecode(this.sharedLogEntries.length - 1, entry.text);
       if (entry.actor !== "GM") {
         LogHandler.log(this.currentBTTime, `${entry.actor} ${entry.text}`);
       }
@@ -307,6 +333,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.shareRoomCode = "";
       this.shareJoinCode = "";
       this.sharedLogEntries = [];
+      this.clearSharedLogDecodeAnimations();
       this.initiativePrepActive = false;
       this.sessionSync.disconnect();
     });
@@ -1242,12 +1269,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return `${description} Initiative cost: ${action.iniMod}.`;
   }
 
-  getVisibleLogEntries() {
+  getVisibleLogEntries(): LocalLogEntry[] {
+    this.ensureLocalLogAnimations();
     return [ ...this.logHandler.logbook ].reverse();
   }
 
   getVisibleSharedLogEntries(): SharedLogEntry[] {
     return [ ...this.sharedLogEntries ];
+  }
+
+  getSharedLogDisplayText(entry: SharedLogEntry, index: number): string {
+    return this.sharedLogDecodeText.get(index) || entry.text;
+  }
+
+  getLocalLogDisplayText(entry: LocalLogEntry): string {
+    return this.localLogDecodeText.get(this.getLocalLogKey(entry)) || entry.text;
   }
 
   getLogTextClass(text: string): string {
@@ -1741,6 +1777,104 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.flashedSharedLogIndex = -1;
       this.clearSharedLogFlashTimeout = null;
     }, 1500);
+  }
+
+  private startSharedLogDecode(index: number, finalText: string) {
+    const existingTimer = this.sharedLogDecodeTimers.get(index);
+    if (existingTimer !== undefined) {
+      window.clearInterval(existingTimer);
+      this.sharedLogDecodeTimers.delete(index);
+    }
+    const decodeDuration = Math.min(1200, Math.max(420, finalText.length * 28));
+    const startTime = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(1, elapsed / decodeDuration);
+      const revealedChars = Math.floor(finalText.length * progress);
+      this.sharedLogDecodeText.set(index, this.buildDecodeFrame(finalText, revealedChars));
+      if (progress >= 1) {
+        window.clearInterval(timer);
+        this.sharedLogDecodeTimers.delete(index);
+        this.sharedLogDecodeText.delete(index);
+      }
+    }, 36);
+    this.sharedLogDecodeTimers.set(index, timer);
+  }
+
+  private ensureLocalLogAnimations() {
+    const logCount = this.logHandler.logbook.length;
+    if (logCount <= this.observedLocalLogCount) {
+      return;
+    }
+    for (let i = this.observedLocalLogCount; i < logCount; i++) {
+      const entry = this.logHandler.logbook[i];
+      this.startLocalLogDecode(entry);
+    }
+    this.observedLocalLogCount = logCount;
+  }
+
+  private startLocalLogDecode(entry: LocalLogEntry) {
+    const key = this.getLocalLogKey(entry);
+    const existingTimer = this.localLogDecodeTimers.get(key);
+    if (existingTimer !== undefined) {
+      window.clearInterval(existingTimer);
+      this.localLogDecodeTimers.delete(key);
+    }
+    const finalText = entry.text;
+    const decodeDuration = Math.min(1200, Math.max(420, finalText.length * 28));
+    const startTime = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(1, elapsed / decodeDuration);
+      const revealedChars = Math.floor(finalText.length * progress);
+      this.localLogDecodeText.set(key, this.buildDecodeFrame(finalText, revealedChars));
+      if (progress >= 1) {
+        window.clearInterval(timer);
+        this.localLogDecodeTimers.delete(key);
+        this.localLogDecodeText.delete(key);
+      }
+    }, 36);
+    this.localLogDecodeTimers.set(key, timer);
+  }
+
+  private buildDecodeFrame(finalText: string, revealedChars: number): string {
+    let frame = "";
+    for (let i = 0; i < finalText.length; i++) {
+      const currentChar = finalText[i];
+      if (currentChar === " " || i < revealedChars) {
+        frame += currentChar;
+      } else if (/[A-Za-z0-9]/.test(currentChar)) {
+        frame += this.randomMatrixChar();
+      } else {
+        frame += currentChar;
+      }
+    }
+    return frame;
+  }
+
+  private randomMatrixChar(): string {
+    const index = Math.floor(Math.random() * this.matrixChars.length);
+    return this.matrixChars[index];
+  }
+
+  private getLocalLogKey(entry: LocalLogEntry): string {
+    return `${entry.timestamp.getTime()}-${entry.text}`;
+  }
+
+  private clearSharedLogDecodeAnimations() {
+    for (const timer of this.sharedLogDecodeTimers.values()) {
+      window.clearInterval(timer);
+    }
+    this.sharedLogDecodeTimers.clear();
+    this.sharedLogDecodeText.clear();
+  }
+
+  private clearLocalLogDecodeAnimations() {
+    for (const timer of this.localLogDecodeTimers.values()) {
+      window.clearInterval(timer);
+    }
+    this.localLogDecodeTimers.clear();
+    this.localLogDecodeText.clear();
   }
 
   private scrollLogToBottom() {

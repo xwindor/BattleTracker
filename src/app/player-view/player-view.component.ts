@@ -54,6 +54,9 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   private clearLogFlashTimeout: number | null = null;
   private lastKnownCombatStarted = false;
   private explicitCombatEndedNotice = false;
+  private readonly matrixChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$#@%*+-";
+  private readonly activeLogDecodeTimers = new Map<number, number>();
+  private readonly activeLogDecodeText = new Map<number, string>();
   
   private readonly interruptActions = [
     { key: "block", label: "Block" },
@@ -80,6 +83,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       window.clearTimeout(this.clearLogFlashTimeout);
       this.clearLogFlashTimeout = null;
     }
+    this.clearLogDecodeAnimations();
     if (this.connected && this.session.currentRoom) {
       this.session.sendCommand({
         type: "release_claims",
@@ -107,6 +111,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.connected = true;
       this.applyIncomingState(state);
       this.log = log || [];
+      this.clearLogDecodeAnimations();
       this.pendingLogScroll = true;
       this.session.onState((next) => {
         this.applyIncomingState(next);
@@ -115,6 +120,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         this.log = [ ...this.log, entry ];
         this.pendingLogScroll = true;
         this.flashLogEntry(this.log.length - 1);
+        this.startLogDecode(this.log.length - 1, entry.text);
       });
       this.session.onCommand((command) => {
         if (command.type === "request_rolls") {
@@ -134,6 +140,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         this.state = null;
         this.promptRoll = false;
         this.error = "Session was closed by GM.";
+        this.clearLogDecodeAnimations();
       });
       if (this.ownParticipants.length === 0) {
         this.info = "Claim a character from the list or create a new one.";
@@ -332,6 +339,10 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       return "log-text-roll";
     }
     return "log-text-system";
+  }
+
+  getLogDisplayText(entry: SharedLogEntry, index: number): string {
+    return this.activeLogDecodeText.get(index) || entry.text;
   }
 
   formatLogText(text: string): string {
@@ -567,6 +578,56 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.flashedLogIndex = -1;
       this.clearLogFlashTimeout = null;
     }, 1500);
+  }
+
+  private startLogDecode(index: number, finalText: string) {
+    const existingTimer = this.activeLogDecodeTimers.get(index);
+    if (existingTimer !== undefined) {
+      window.clearInterval(existingTimer);
+      this.activeLogDecodeTimers.delete(index);
+    }
+    const decodeDuration = Math.min(1200, Math.max(420, finalText.length * 28));
+    const startTime = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(1, elapsed / decodeDuration);
+      const revealedChars = Math.floor(finalText.length * progress);
+      this.activeLogDecodeText.set(index, this.buildDecodeFrame(finalText, revealedChars));
+      if (progress >= 1) {
+        window.clearInterval(timer);
+        this.activeLogDecodeTimers.delete(index);
+        this.activeLogDecodeText.delete(index);
+      }
+    }, 36);
+    this.activeLogDecodeTimers.set(index, timer);
+  }
+
+  private buildDecodeFrame(finalText: string, revealedChars: number): string {
+    let frame = "";
+    for (let i = 0; i < finalText.length; i++) {
+      const currentChar = finalText[i];
+      if (currentChar === " " || i < revealedChars) {
+        frame += currentChar;
+      } else if (/[A-Za-z0-9]/.test(currentChar)) {
+        frame += this.randomMatrixChar();
+      } else {
+        frame += currentChar;
+      }
+    }
+    return frame;
+  }
+
+  private randomMatrixChar(): string {
+    const index = Math.floor(Math.random() * this.matrixChars.length);
+    return this.matrixChars[index];
+  }
+
+  private clearLogDecodeAnimations() {
+    for (const timer of this.activeLogDecodeTimers.values()) {
+      window.clearInterval(timer);
+    }
+    this.activeLogDecodeTimers.clear();
+    this.activeLogDecodeText.clear();
   }
 
   private applyIncomingState(next: SharedCombatState | null) {

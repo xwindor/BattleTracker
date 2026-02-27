@@ -126,21 +126,21 @@
           <div class="col-2 col-xl text-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
           </div>
-          <div class="col-6 col-xl-3 text-center">
+          <div class="col-6 col-xl-3 text-center gm-stats-col">
             <div class="input-group input-group-sm gm-stats-roll-group">
-              <span class="input-group-text" title="Edge">E</span>
+              <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantEdgeRatingValue(p)"
                 (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              <span class="input-group-text" title="Reaction">R</span>
+              <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantReactionValue(p)"
                 (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
-              <span class="input-group-text" title="Intuition">I</span>
+              <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
                 (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
-              <span class="input-group-text" title="Initiative Dice">D</span>
+              <span class="input-group-text gm-stat-chip gm-chip-initdice" title="Initiative Dice">D</span>
               <input class="form-control text-center gm-dice-count-input" type="number"
                 [ngModel]="p.dices"
                 (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
@@ -299,7 +299,7 @@
             @for (entry of getVisibleSharedLogEntries(); track $index) {
             <li class="list-group-item" [class.log-entry-new]="isSharedLogEntryNew($index)">
               <strong>{{ entry.actor }}</strong>:
-              <span [innerHTML]="formatLogText(entry.text)"></span>
+              <span [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
             </li>
             }
           } @else {
@@ -309,7 +309,7 @@
             @for (entry of getVisibleLogEntries(); track $index) {
             <li class="list-group-item">
               <span class="log-time">{{ entry.timestamp | date:'HH:mm:ss' }}</span>
-              <span class="log-text" [class]="getLogTextClass(entry.text)">{{ entry.text }}</span>
+              <span class="log-text" [class]="getLogTextClass(entry.text)">{{ getLocalLogDisplayText(entry) }}</span>
             </li>
             }
           }

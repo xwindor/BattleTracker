@@ -27,9 +27,9 @@
     <div class="card-header">Claim Or Create Character</div>
     <div class="card-body">
       @if (unclaimedParticipants.length > 0) {
-      <div class="mb-2">
+      <div class="mb-2 cli-claim-panel">
         <label class="form-label">Claim existing unclaimed character</label>
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 cli-claim-row">
           <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
             <option value="">Select character</option>
             @for (participant of unclaimedParticipants; track participant.id) {
@@ -42,43 +42,45 @@
         </div>
       </div>
       }
-      <div>
-        <div class="row g-2 mb-2">
-          <div class="col-md-3">
-            <label class="form-label">Character</label>
+      <div class="cli-create-grid mb-2">
+        <div class="row g-0 mb-0 cli-create-row">
+          <div class="col-md-3 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-character">Character</label>
             <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
           </div>
-          <div class="col-md-1">
-            <label class="form-label">Init Dice</label>
+          <div class="col-md-1 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
             <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Edge</label>
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-edge">Edge</label>
             <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Reaction</label>
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
             <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Intuition</label>
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
             <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Overflow</label>
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-overflow">Overflow</label>
             <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
           </div>
         </div>
-        <div class="row g-2 mb-2">
-          <div class="col-md-2">
-            <label class="form-label">Physical</label>
+        <div class="row g-0 mb-0 cli-create-row">
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-physical">Physical</label>
             <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
           </div>
-          <div class="col-md-2">
-            <label class="form-label">Stun</label>
+          <div class="col-md-2 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-stun">Stun</label>
             <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
           </div>
         </div>
+      </div>
+      <div>
         <button type="button" class="btn btn-primary" (click)="createCharacter()">
           Create New Character
         </button>
@@ -175,7 +177,7 @@
       @for (entry of log; track $index) {
       <li class="list-group-item" [class.log-entry-new]="isLogEntryNew($index)">
         <strong>{{ entry.actor }}</strong>:
-        <span [innerHTML]="formatLogText(entry.text)"></span>
+        <span [innerHTML]="formatLogText(getLogDisplayText(entry, $index))"></span>
       </li>
       }
     </ul>
