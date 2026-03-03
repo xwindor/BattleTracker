@@ -1,0 +1,94 @@
+<div class="dice-roller-panel">
+
+  <!-- Controls -->
+  <div class="dice-roller-controls">
+    <label class="dice-roller-label">Dice (d6)</label>
+    <input
+      type="number"
+      class="form-control form-control-sm dice-count-input"
+      [(ngModel)]="diceCount"
+      [min]="1"
+      [max]="20"
+      [disabled]="localRolling">
+    <button
+      type="button"
+      class="btn btn-sm btn-primary"
+      (click)="roll()"
+      [disabled]="localRolling">
+      Roll
+    </button>
+  </div>
+
+  <!-- ── Your Roll ── -->
+  <div class="dice-section">
+    <div class="dice-section-label">Your Roll</div>
+    @if (localValues.length > 0) {
+    <div class="dice-tray">
+      @for (value of localValues; track $index) {
+      <div class="die-scene" [class.is-rolling]="localRolling" [style]="getLocalDieStyle($index)">
+        <div class="die-cube">
+          <div class="die-face die-face--1"><span class="pip p-c"></span></div>
+          <div class="die-face die-face--2"><span class="pip p-tr"></span><span class="pip p-bl"></span></div>
+          <div class="die-face die-face--3"><span class="pip p-tr"></span><span class="pip p-c"></span><span class="pip p-bl"></span></div>
+          <div class="die-face die-face--4"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+          <div class="die-face die-face--5"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-c"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+          <div class="die-face die-face--6"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-ml"></span><span class="pip p-mr"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+        </div>
+      </div>
+      }
+    </div>
+    @if (!localRolling) {
+    <div class="dice-result-row">
+      @for (value of localValues; track $index) {
+      <span class="die-result-badge" [class.die-result-hit]="isHit(value)" [class.die-result-miss]="!isHit(value)">{{ value }}</span>
+      }
+      <span class="dice-hits-summary">Hits: {{ localHitCount }}</span>
+    </div>
+    }
+    } @else {
+    <div class="dice-section-empty">Roll some dice!</div>
+    }
+  </div>
+
+  <!-- ── Other Players ── -->
+  <div class="dice-section dice-section-remote">
+    <button type="button" class="dice-section-toggle" (click)="otherPlayersVisible = !otherPlayersVisible">
+      <span class="twirly">{{ otherPlayersVisible ? "v" : ">" }}</span>
+      Other Players
+    </button>
+    @if (otherPlayersVisible) {
+      @if (remoteRolls.length > 0) {
+        @for (roll of remoteRolls; track roll.id) {
+        <div class="remote-roll-entry">
+          <div class="dice-roller-attribution">{{ roll.roller }}</div>
+          <div class="dice-tray">
+            @for (value of roll.values; track $index) {
+            <div class="die-scene" [class.is-rolling]="roll.rolling" [style]="getRemoteDieStyle(roll, $index)">
+              <div class="die-cube">
+                <div class="die-face die-face--1"><span class="pip p-c"></span></div>
+                <div class="die-face die-face--2"><span class="pip p-tr"></span><span class="pip p-bl"></span></div>
+                <div class="die-face die-face--3"><span class="pip p-tr"></span><span class="pip p-c"></span><span class="pip p-bl"></span></div>
+                <div class="die-face die-face--4"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+                <div class="die-face die-face--5"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-c"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+                <div class="die-face die-face--6"><span class="pip p-tl"></span><span class="pip p-tr"></span><span class="pip p-ml"></span><span class="pip p-mr"></span><span class="pip p-bl"></span><span class="pip p-br"></span></div>
+              </div>
+            </div>
+            }
+          </div>
+          @if (!roll.rolling) {
+          <div class="dice-result-row">
+            @for (value of roll.values; track $index) {
+            <span class="die-result-badge" [class.die-result-hit]="isHit(value)" [class.die-result-miss]="!isHit(value)">{{ value }}</span>
+            }
+            <span class="dice-hits-summary">Hits: {{ getHitCount(roll.values) }}</span>
+          </div>
+          }
+        </div>
+        }
+      } @else {
+      <div class="dice-section-empty">No recent rolls.</div>
+      }
+    }
+  </div>
+
+</div>

@@ -1,0 +1,242 @@
+// ── Container ──────────────────────────────────────────────────────────────
+.dice-roller-panel {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dice-roller-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dice-roller-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  color: #00ff41;
+}
+
+.dice-count-input {
+  width: 4.5rem;
+}
+
+// ── Sections ──────────────────────────────────────────────────────────────
+.dice-section {
+  border: 1px solid #00ff41;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.65rem;
+  background: #000;
+  box-shadow: 0 0 6px rgba(0, 255, 65, 0.2);
+}
+
+.dice-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #00ff41;
+  margin-bottom: 0.4rem;
+}
+
+.dice-section-remote {
+  background: #000;
+  border-color: #00ff41;
+}
+
+.dice-section-toggle {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #00ff41;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 0.2rem;
+
+  &:hover {
+    background: rgba(0, 255, 65, 0.12);
+  }
+}
+
+.dice-section-empty {
+  font-size: 0.75rem;
+  color: rgba(0, 255, 65, 0.4);
+  font-style: italic;
+  padding: 0.2rem 0;
+}
+
+.dice-roller-attribution {
+  font-size: 0.75rem;
+  color: #00ff41;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+// Each stacked remote roll entry
+.remote-roll-entry {
+  padding: 0.35rem 0;
+
+  & + .remote-roll-entry {
+    border-top: 1px solid rgba(0, 255, 65, 0.3);
+    padding-top: 0.5rem;
+  }
+}
+
+// ── Dice tray ──────────────────────────────────────────────────────────────
+.dice-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+  padding: 0.35rem 0;
+}
+
+// ── Individual die ─────────────────────────────────────────────────────────
+.die-scene {
+  width: 2.8rem;
+  height: 2.8rem;
+  perspective: 200px;
+}
+
+.die-cube {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(0deg) rotateY(0deg);
+}
+
+.die-scene.is-rolling .die-cube {
+  animation: dieRoll 1.5s ease-out forwards;
+}
+
+// Resting state — NO transition here.
+// The animation ends at (1440+tx, 1080+ty). When is-rolling is removed the
+// browser instantly snaps to (tx, ty). Because 1440 and 1080 are exact
+// multiples of 360 the two rotations show the identical face, so the
+// instantaneous change is invisible.
+.die-scene:not(.is-rolling) .die-cube {
+  transform: rotateX(var(--target-x, 0deg)) rotateY(var(--target-y, 0deg));
+}
+
+@keyframes dieRoll {
+  0% {
+    transform: rotateX(0deg) rotateY(0deg);
+  }
+  100% {
+    // 1440 = 4×360, 1080 = 3×360 — both are exact full rotations added on top
+    // of the target face, so the die lands precisely on the correct face.
+    transform:
+      rotateX(calc(1440deg + var(--target-x, 0deg)))
+      rotateY(calc(1080deg + var(--target-y, 0deg)));
+  }
+}
+
+// ── Die faces ──────────────────────────────────────────────────────────────
+.die-face {
+  position: absolute;
+  width: 2.8rem;
+  height: 2.8rem;
+  border: 1px solid #00ff41;
+  border-radius: 0.3rem;
+  background: #000;
+  box-shadow: 0 0 5px rgba(0, 255, 65, 0.4), inset 0 0 8px rgba(0, 255, 65, 0.05);
+  // Pip grid: 3 columns × 3 rows
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  padding: 0.3rem;
+  box-sizing: border-box;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+// Standard die positioning — translateZ = half the die width (1.4rem)
+.die-face--1 { transform: rotateX(0deg)   rotateY(0deg)    translateZ(1.4rem); }
+.die-face--6 { transform: rotateX(0deg)   rotateY(180deg)  translateZ(1.4rem); }
+.die-face--2 { transform: rotateX(90deg)  rotateY(0deg)    translateZ(1.4rem); }
+.die-face--5 { transform: rotateX(-90deg) rotateY(0deg)    translateZ(1.4rem); }
+.die-face--3 { transform: rotateX(0deg)   rotateY(-90deg)  translateZ(1.4rem); }
+.die-face--4 { transform: rotateX(0deg)   rotateY(90deg)   translateZ(1.4rem); }
+
+// ── Pips ──────────────────────────────────────────────────────────────────
+.pip {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 50%;
+  background: #00ff41;
+  box-shadow: 0 0 4px #00ff41;
+  place-self: center;
+  // Default position: center cell (overridden by position classes below)
+  grid-column: 2;
+  grid-row: 2;
+}
+
+// 5s and 6s get red pips — hits
+.die-face--5 .pip,
+.die-face--6 .pip {
+  background: #ff3030;
+  box-shadow: 0 0 4px #ff3030;
+}
+
+// Grid position classes (col, row)
+.p-tl { grid-column: 1; grid-row: 1; }
+.p-tr { grid-column: 3; grid-row: 1; }
+.p-ml { grid-column: 1; grid-row: 2; }
+.p-c  { grid-column: 2; grid-row: 2; }
+.p-mr { grid-column: 3; grid-row: 2; }
+.p-bl { grid-column: 1; grid-row: 3; }
+.p-br { grid-column: 3; grid-row: 3; }
+
+// ── Results row ───────────────────────────────────────────────────────────
+.dice-result-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.die-result-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.die-result-hit {
+  background: #000;
+  color: #ff3030;
+  border: 1px solid #ff3030;
+  box-shadow: 0 0 5px rgba(255, 48, 48, 0.5);
+}
+
+.die-result-miss {
+  background: #000;
+  color: #00ff41;
+  border: 1px solid rgba(0, 255, 65, 0.4);
+}
+
+.dice-hits-summary {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #00ff41;
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+
+.twirly {
+  font-size: 0.65rem;
+}

@@ -87,6 +87,7 @@ export const DECLARED_ACTIONS: DeclaredActionCategory[] = [
       { name: "Banish Spirit", economy: "complex" },
       { name: "Rigger Jump In", economy: "complex" },
       { name: "Summoning", economy: "complex" },
+      { name: "Suppressive Fire", economy: "complex" },
       { name: "Use Skill", economy: "complex" }
     ]
   },
@@ -206,6 +207,7 @@ export const DECLARED_ACTION_DESCRIPTIONS: Record<string, string> = {
   "Rigger Jump In": "Jump into rigged vehicle/device.",
   "Sprint": "Increase running distance with Running test.",
   "Summoning": "Summon a spirit.",
+  "Suppressive Fire": "Pin down targets in a zone with burst or full-auto fire (Core p.180). Requires a weapon capable of burst fire or full-auto. All targets in the suppression zone must make a Reaction + Edge (3) test or immediately go prone.",
   "Use Skill": "Use an appropriate skill.",
   "Load Program": "Matrix Free Action.",
   "Switch Two Matrix Attributes": "Matrix Free Action.",

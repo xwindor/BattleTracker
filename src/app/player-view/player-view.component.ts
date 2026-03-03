@@ -4,6 +4,7 @@ import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { NgbModal, NgbModalModule, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
 import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -14,7 +15,7 @@ interface DeclaredActionSelection {
 @Component({
   standalone: true,
   selector: "app-player-view",
-  imports: [ CommonModule, FormsModule, NgbModalModule ],
+  imports: [ CommonModule, FormsModule, NgbModalModule, DiceRollerComponent ],
   templateUrl: "./player-view.component.html",
   styleUrls: [ "./player-view.component.css" ]
 })
@@ -49,6 +50,33 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   };
   private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
   readonly declaredActions = DECLARED_ACTIONS;
+
+  get physicalActionCategories() {
+    return this.declaredActions.filter(c => !c.id.startsWith("matrix"));
+  }
+
+  get matrixActionCategories() {
+    return this.declaredActions.filter(c => c.id.startsWith("matrix"));
+  }
+
+  matrixGroupOpen = false;
+
+  toggleMatrixGroup() {
+    this.matrixGroupOpen = !this.matrixGroupOpen;
+  }
+
+  incomingDiceRoll: { roller: string; values: number[] } | null = null;
+
+  onPlayerDiceRolled(values: number[]): void {
+    if (!this.connected) return;
+    const rollerName = this.characterName || this.playerToken;
+    this.session.sendCommand({
+      type: "dice_roll",
+      player: this.playerToken,
+      payload: { roller: rollerName, diceCount: values.length, values }
+    });
+  }
+
   private pendingLogScroll = false;
   private flashedLogIndex = -1;
   private clearLogFlashTimeout: number | null = null;
@@ -133,6 +161,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           this.manualRoll = "";
           this.closeActPlanner();
           this.info = "GM ended combat.";
+        } else if (command.type === "dice_roll") {
+          if (command.player === this.playerToken) return; // skip echo of our own roll
+          const roller = String(command.payload?.["roller"] || command.player || "Unknown");
+          const rawValues = command.payload?.["values"];
+          const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+          if (values.length > 0) {
+            this.incomingDiceRoll = { roller, values };
+          }
         }
       });
       this.session.onSessionClosed(() => {

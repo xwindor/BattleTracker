@@ -315,6 +315,13 @@
           }
         </ul>
       </div>
+      <div class="card mt-3">
+        <div class="card-header">Dice Roller</div>
+        <app-dice-roller
+          [incomingRoll]="incomingDiceRoll"
+          (rolledEvent)="onGmDiceRolled($event)">
+        </app-dice-roller>
+      </div>
     </div>
 
     @if (selectedActor !== null && selectActor !== undefined)
@@ -453,7 +460,7 @@
       {{ getDeclaredActionValidationMessage(actModalParticipant) }}
     </div>
     <div class="list-group mt-3">
-      @for(actionCategory of declaredActions; track actionCategory.id) {
+      @for(actionCategory of physicalActionCategories; track actionCategory.id) {
       <button type="button" class="list-group-item list-group-item-action action-category-toggle"
         (click)="toggleDeclaredActionCategory(actionCategory.id)"
         [attr.aria-expanded]="isDeclaredActionCategoryOpen(actionCategory.id)">
@@ -492,6 +499,57 @@
         }
       </div>
       }
+      }
+      <button type="button" class="list-group-item list-group-item-action action-category-toggle action-category-matrix-parent"
+        (click)="toggleMatrixGroup()"
+        [attr.aria-expanded]="matrixGroupOpen">
+        <span class="twirly">{{ matrixGroupOpen ? "v" : ">" }}</span>
+        <span>Matrix Actions</span>
+        <span class="matrix-group-badge">{{ matrixActionCategories.length }} categories</span>
+      </button>
+      @if (matrixGroupOpen) {
+      <div class="action-modal-group action-matrix-group">
+        @for(actionCategory of matrixActionCategories; track actionCategory.id) {
+        <button type="button" class="list-group-item list-group-item-action action-category-toggle action-category-matrix-sub"
+          (click)="toggleDeclaredActionCategory(actionCategory.id)"
+          [attr.aria-expanded]="isDeclaredActionCategoryOpen(actionCategory.id)">
+          <span class="twirly">{{ isDeclaredActionCategoryOpen(actionCategory.id) ? "v" : ">" }}</span>
+          <span>{{ actionCategory.category }} Actions</span>
+        </button>
+        @if (isDeclaredActionCategoryOpen(actionCategory.id)) {
+        <div class="action-modal-group">
+          @for(actionName of actionCategory.items; track actionName.name) {
+          <div class="action-item-container">
+            <div class="action-item-row">
+              <button type="button" class="list-group-item list-group-item-action action-item"
+                (click)="btnDeclaredAct_Click(actModalParticipant, actionName)"
+                [class.action-item-selected]="isDeclaredActionSelected(actModalParticipant, actionName)"
+                [class.action-item-disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
+                [disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
+                [attr.title]="getActionDisabledReason(actModalParticipant, actionName)">
+                @if (isDeclaredActionSelected(actModalParticipant, actionName)) {
+                <span class="action-check">x</span>
+                }
+                {{ actionName.name }}
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm action-item-twirl"
+                (click)="toggleDeclaredActionDetails($event, actionName)"
+                [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
+                [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
+                {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+              </button>
+            </div>
+            @if (isDeclaredActionDetailsOpen(actionName)) {
+            <div class="action-item-details">
+              {{ getDeclaredActionDetails(actionName) }}
+            </div>
+            }
+          </div>
+          }
+        </div>
+        }
+        }
+      </div>
       }
     </div>
     }

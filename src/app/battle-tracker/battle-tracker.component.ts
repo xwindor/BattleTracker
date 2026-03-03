@@ -13,6 +13,7 @@ import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import ActionHandler from "Combat/ActionHandler";
 import { ConditionMonitorComponent } from "app/condition-monitor/condition-monitor.component";
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
+import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
@@ -39,7 +40,8 @@ interface LocalLogEntry {
     NgbDropdownModule,
     FormsModule,
     DragDropModule,
-    ConditionMonitorComponent
+    ConditionMonitorComponent,
+    DiceRollerComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -56,6 +58,38 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private actModalRef: NgbModalRef | null = null;
   actModalParticipant: IParticipant | null = null;
   readonly declaredActions = DECLARED_ACTIONS;
+
+  get physicalActionCategories() {
+    return this.declaredActions.filter(c => !c.id.startsWith("matrix"));
+  }
+
+  get matrixActionCategories() {
+    return this.declaredActions.filter(c => c.id.startsWith("matrix"));
+  }
+
+  matrixGroupOpen = false;
+
+  toggleMatrixGroup() {
+    this.matrixGroupOpen = !this.matrixGroupOpen;
+  }
+
+  incomingDiceRoll: { roller: string; values: number[] } | null = null;
+
+  onGmDiceRolled(values: number[]): void {
+    const hits = values.filter(v => v >= 5).length;
+    const logText = `rolled ${values.length}d6: [${values.join(", ")}] — ${hits} hit${hits !== 1 ? "s" : ""}`;
+    if (this.shareRoomCode) {
+      this.appendSharedLog("GM", logText);
+      this.sessionSync.sendCommand({
+        type: "dice_roll",
+        player: "GM",
+        payload: { roller: "GM", diceCount: values.length, values }
+      });
+    } else {
+      LogHandler.log(this.currentBTTime, `GM ${logText}`);
+    }
+  }
+
   private readonly actionLabels: Record<string, string> = {
     fullDefense: "Full Defense",
     block: "Block",
@@ -475,6 +509,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         return;
       }
       this.btnAction_Click(target, action, target.name || "Player");
+      return;
+    }
+    if (command.type === "dice_roll") {
+      if (command.player === "GM") return; // skip echo of our own roll
+      const roller = String(command.payload?.["roller"] || command.player || "Unknown");
+      const rawValues = command.payload?.["values"];
+      const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+      if (values.length > 0) {
+        const hits = values.filter(v => v >= 5).length;
+        const logText = `rolled ${values.length}d6: [${values.join(", ")}] — ${hits} hit${hits !== 1 ? "s" : ""}`;
+        this.appendSharedLog(roller, logText);
+        this.incomingDiceRoll = { roller, values };
+      }
       return;
     }
   }

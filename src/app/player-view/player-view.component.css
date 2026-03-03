@@ -253,3 +253,29 @@
   border-radius: 0.25rem;
   padding: 0.03rem 0.2rem;
 }
+
+/* Matrix action group styles */
+.action-category-matrix-parent {
+  background: #f0f4ff;
+  border-left: 3px solid #6366f1;
+  display: flex;
+  align-items: center;
+}
+
+.action-category-matrix-sub {
+  padding-left: 1.5rem;
+  font-size: 0.9rem;
+  background: #fafafa;
+}
+
+.action-matrix-group {
+  border-left: 3px solid #e0e7ff;
+  margin-left: 0.5rem;
+}
+
+.matrix-group-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: #6366f1;
+  font-weight: 400;
+}
