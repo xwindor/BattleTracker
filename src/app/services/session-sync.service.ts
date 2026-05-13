@@ -18,6 +18,34 @@ export interface SharedParticipantState {
   edgeRating?: number;
   reaction?: number;
   intuition?: number;
+
+  // Matrix-specific (populated when participant instanceof MatrixParticipant).
+  isMatrix?: boolean;
+  vrMode?: string;          // 'AR' | 'cold-sim' | 'hot-sim'
+  overwatch?: number;
+  overwatchAlert?: string;  // 'none' | 'ic-alert' | 'convergence'
+  jackedIn?: boolean;
+  isVRCatatonic?: boolean;  // mirrors blocksPhysicalActions for the player view
+}
+
+export interface SharedMatrixParticipantState extends SharedParticipantState {
+  isMatrix?: boolean;
+  vrMode?: string;
+  overwatch?: number;
+  overwatchAlert?: string;
+  jackedIn?: boolean;
+  isVRCatatonic?: boolean;
+}
+
+export interface SharedMatrixTarget {
+  id: string;
+  name: string;
+  type: string;
+  revealedToPlayers: boolean;
+  spotted: string;
+  marks: Record<string, number>;
+  matrixDamage: number;
+  matrixHealth: number;
 }
 
 export interface SharedCombatState {
@@ -27,6 +55,11 @@ export interface SharedCombatState {
   passEnded?: boolean;
   currentInitiative?: number;
   participants: SharedParticipantState[];
+
+  // Matrix extensions (Phase 4 wires broadcasting; defined here so the
+  // shared types are stable from Phase 1 onward).
+  matrixTargets?: SharedMatrixTarget[];
+  currentHostName?: string;
 }
 
 export interface SharedLogEntry {

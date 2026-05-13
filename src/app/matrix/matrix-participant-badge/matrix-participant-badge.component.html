@@ -1,0 +1,16 @@
+<div class="matrix-badge" *ngIf="participant">
+  <span class="vr-chip" [ngClass]="vrModeClass" [title]="'VR mode: ' + vrModeLabel">{{ vrModeLabel }}</span>
+
+  <button
+    type="button"
+    class="os-chip"
+    [ngClass]="'os-' + osTier"
+    (click)="onOsClick($event)"
+    [title]="'Overwatch Score: ' + participant.overwatch">
+    OS {{ participant.overwatch }}
+  </button>
+
+  <span *ngIf="blocksPhysical" class="phys-locked" title="Decker is in VR — physical actions are locked">
+    PHYS LOCKED
+  </span>
+</div>

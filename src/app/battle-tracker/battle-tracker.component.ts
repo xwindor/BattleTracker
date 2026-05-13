@@ -15,6 +15,10 @@ import { ConditionMonitorComponent } from "app/condition-monitor/condition-monit
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
+import { MatrixStateService } from "app/services/matrix-state.service";
+import { OsTrackingService } from "app/services/os-tracking.service";
+import { MatrixParticipant } from "Matrix";
+import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
@@ -41,7 +45,8 @@ interface LocalLogEntry {
     FormsModule,
     DragDropModule,
     ConditionMonitorComponent,
-    DiceRollerComponent
+    DiceRollerComponent,
+    MatrixParticipantBadgeComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -188,11 +193,32 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     private ref: ChangeDetectorRef,
     private confirmationDialog: ConfirmationDialogService,
     private modalService: NgbModal,
-    private sessionSync: SessionSyncService
+    private sessionSync: SessionSyncService,
+    public matrixState: MatrixStateService,
+    public osTracking: OsTrackingService
   ) {
     super();
     this.addParticipant();
     this.changeDetector = ref;
+  }
+
+  /**
+   * Type guard so templates and methods can branch on Matrix-aware
+   * participants without sprinkling `instanceof` everywhere.
+   */
+  isMatrix(p: IParticipant): p is MatrixParticipant {
+    return p instanceof MatrixParticipant;
+  }
+
+  /**
+   * Action-planner gate. Physical action categories should be hidden when
+   * the participant is a Matrix decker who is currently VR-catatonic.
+   */
+  getPhysicalActionCategoriesFor(p: IParticipant | null) {
+    if (p && this.isMatrix(p) && p.blocksPhysicalActions) {
+      return [];
+    }
+    return this.physicalActionCategories;
   }
 
   drop(event: CdkDragDrop<string[]>) {
@@ -545,24 +571,37 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private getSharedParticipants(): SharedParticipantState[] {
     return this.combatManager.participants.items
       .filter(p => !p.ooc)
-      .map((p, index) => ({
-        id: this.getParticipantId(p),
-        name: p.name || `Participant ${index + 1}`,
-        order: index + 1,
-        active: this.combatManager.currentActors.contains(p),
-        initiativeScore: p.getCurrentInitiative(),
-        playerControlled: this.participantOwners.has(p),
-        claimable: this.participantClaimable.get(p) === true,
-        ownerName: this.participantOwners.get(p),
-        canAct: p.status === StatusEnum.Active,
-        canDelay: p.status === StatusEnum.Active,
-        canInterrupt: p.getCurrentInitiative() >= 1,
-        initiativeDice: p.dices,
-        pendingRoll: p.diceIni <= 0,
-        edgeRating: this.getParticipantEdgeRating(p),
-        reaction: this.getParticipantReaction(p),
-        intuition: this.getParticipantIntuition(p)
-      }));
+      .map((p, index) => {
+        const base: SharedParticipantState = {
+          id: this.getParticipantId(p),
+          name: p.name || `Participant ${index + 1}`,
+          order: index + 1,
+          active: this.combatManager.currentActors.contains(p),
+          initiativeScore: p.getCurrentInitiative(),
+          playerControlled: this.participantOwners.has(p),
+          claimable: this.participantClaimable.get(p) === true,
+          ownerName: this.participantOwners.get(p),
+          canAct: p.status === StatusEnum.Active,
+          canDelay: p.status === StatusEnum.Active,
+          canInterrupt: p.getCurrentInitiative() >= 1,
+          initiativeDice: p.dices,
+          pendingRoll: p.diceIni <= 0,
+          edgeRating: this.getParticipantEdgeRating(p),
+          reaction: this.getParticipantReaction(p),
+          intuition: this.getParticipantIntuition(p)
+        };
+
+        if (this.isMatrix(p)) {
+          base.isMatrix = true;
+          base.vrMode = p.vrMode;
+          base.overwatch = p.overwatch;
+          base.overwatchAlert = p.overwatchAlert;
+          base.jackedIn = p.jackedIn;
+          base.isVRCatatonic = p.blocksPhysicalActions;
+        }
+
+        return base;
+      });
   }
 
   private appendSharedLog(actor: string, text: string) {
@@ -1968,4 +2007,3 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return el;
   }
 }
-

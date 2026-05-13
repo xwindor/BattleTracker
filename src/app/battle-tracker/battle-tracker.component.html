@@ -122,6 +122,13 @@
           <div class="col-4 col-xl-2">
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
+            @if (isMatrix(p)) {
+              <app-matrix-participant-badge
+                class="participant-matrix-badge"
+                [participant]="$any(p)"
+                (osClick)="onParticipantUpdated()">
+              </app-matrix-participant-badge>
+            }
           </div>
           <div class="col-2 col-xl text-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
@@ -460,7 +467,7 @@
       {{ getDeclaredActionValidationMessage(actModalParticipant) }}
     </div>
     <div class="list-group mt-3">
-      @for(actionCategory of physicalActionCategories; track actionCategory.id) {
+      @for(actionCategory of getPhysicalActionCategoriesFor(actModalParticipant); track actionCategory.id) {
       <button type="button" class="list-group-item list-group-item-action action-category-toggle"
         (click)="toggleDeclaredActionCategory(actionCategory.id)"
         [attr.aria-expanded]="isDeclaredActionCategoryOpen(actionCategory.id)">
@@ -562,5 +569,3 @@
     </button>
   </div>
 </ng-template>
-
-
