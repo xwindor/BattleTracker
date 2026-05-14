@@ -31,8 +31,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   overflowHealth = 4;
   physicalHealth = 10;
   stunHealth = 10;
-  isDecker = false;
+  deckConfigExpanded = false;
   dataProcessing = 6;
+  attack = 0;
+  sleaze = 0;
+  firewall = 0;
+  deviceRating = 0;
   vrMode = "AR"; // "AR" | "cold-sim" | "hot-sim"
   manualRoll = "";
   connected = false;
@@ -203,18 +207,45 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         overflowHealth: this.overflowHealth,
         physicalHealth: this.physicalHealth,
         stunHealth: this.stunHealth,
-        isMatrix: this.isDecker,
-        dataProcessing: this.isDecker ? this.dataProcessing : 0,
-        vrMode: this.isDecker ? this.vrMode : undefined
+        isMatrix: false
       }
     });
     this.info = "Create character request sent.";
   }
 
-  /** Re-send character registration with a new VR mode (decker only). */
+  applyDeckConfig() {
+    if (!this.primaryCharacter) return;
+    this.info = "";
+    this.session.sendCommand({
+      type: "configure_deck",
+      player: this.playerToken,
+      payload: {
+        isMatrix: true,
+        dataProcessing: this.dataProcessing,
+        attack: this.attack,
+        sleaze: this.sleaze,
+        firewall: this.firewall,
+        deviceRating: this.deviceRating,
+        vrMode: this.vrMode
+      }
+    });
+    this.info = "Deck configuration sent.";
+  }
+
+  removeDeckConfig() {
+    this.info = "";
+    this.session.sendCommand({
+      type: "configure_deck",
+      player: this.playerToken,
+      payload: { isMatrix: false }
+    });
+    this.deckConfigExpanded = false;
+    this.info = "Deck removed.";
+  }
+
   switchVRMode(mode: string) {
     this.vrMode = mode;
-    this.createCharacter();
+    this.applyDeckConfig();
   }
 
   claimSelectedCharacter() {

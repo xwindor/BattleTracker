@@ -166,6 +166,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly localLogDecodeTimers = new Map<string, number>();
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
+  expandedDeckPanels = new Set<IParticipant>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
   private readonly participantClaimable = new Map<IParticipant, boolean>();
@@ -456,6 +457,46 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         vrMode
       );
       this.appendSharedLog("GM", `Registered ${characterName}`);
+      this.sort();
+      return;
+    }
+    if (command.type === "configure_deck") {
+      const payload = command.payload || {};
+      const playerName = command.player || "";
+      if (!playerName) return;
+      const isMatrix = payload["isMatrix"] === true;
+      let target: IParticipant | undefined;
+      for (const p of this.combatManager.participants.items) {
+        if (this.participantOwners.get(p) === playerName) {
+          target = p;
+          break;
+        }
+      }
+      if (!target) return;
+      if (!isMatrix) {
+        const targetName = target.name || "Player";
+        if (target instanceof MatrixParticipant) {
+          this.demoteToParticipant(target);
+        }
+        this.appendSharedLog("GM", `${targetName} deck removed`);
+        this.sort();
+        return;
+      }
+      if (!(target instanceof MatrixParticipant)) {
+        target = this.promoteToMatrixParticipant(target);
+      }
+      const mp = target as MatrixParticipant;
+      mp.dataProcessing = Math.max(1, Number(payload["dataProcessing"] || 1));
+      mp.attack = Math.max(0, Number(payload["attack"] || 0));
+      mp.sleaze = Math.max(0, Number(payload["sleaze"] || 0));
+      mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
+      mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
+      const vrModeStr = String(payload["vrMode"] || "AR");
+      const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+                 : vrModeStr === "cold-sim" ? VRMode.ColdSim
+                 : VRMode.AR;
+      this.applyVRMode(mp, mode);
+      this.appendSharedLog("GM", `${mp.name} deck configured (DP${mp.dataProcessing} ${mode})`);
       this.sort();
       return;
     }
@@ -855,12 +896,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, "AddParticipant_Click");
     this.addParticipant()
-  }
-
-  btnAddMatrixParticipant_Click() {
-    UndoHandler.StartActions();
-    LogHandler.log(this.currentBTTime, "AddMatrixParticipant_Click");
-    this.addMatrixParticipant();
   }
 
   btnEdge_Click(sender: IParticipant) {
@@ -1728,22 +1763,148 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
-  addMatrixParticipant() {
-    const p = new MatrixParticipant();
-    p.name = "Decker";
-    p.dataProcessing = 6;
-    p.dices = 1; // AR default
-    this.combatManager.addParticipant(p);
-    this.participantClaimable.set(p, false);
-    this.participantEdgeRatings.set(p, 0);
-    this.participantReactions.set(p, 0); // unused for Matrix; kept so Maps stay consistent
-    this.participantIntuitions.set(p, 3);
-    p.baseIni = this.getParticipantBaseInitiative(p); // DP(6) + INT(3) = 9
-    this.participantTieBreakers.set(p, Math.random());
-    const id = this.getParticipantId(p);
-    this.lastKnownDamage.set(id, { physical: 0, stun: 0 });
-    this.selectActor(p);
+  isDeckPanelExpanded(p: IParticipant): boolean {
+    return this.expandedDeckPanels.has(p);
+  }
+
+  toggleDeckPanel(p: IParticipant) {
+    if (this.expandedDeckPanels.has(p)) {
+      this.expandedDeckPanels.delete(p);
+    } else {
+      this.expandedDeckPanels.add(p);
+    }
+  }
+
+  enableDeck(p: IParticipant) {
+    UndoHandler.StartActions();
+    const mp = this.promoteToMatrixParticipant(p);
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.participantIntuitions.get(mp) ?? 0;
+    mp.baseIni = reaction + intuition;
     this.syncSharedState();
+    this.sort();
+  }
+
+  removeDeck(p: IParticipant) {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    this.demoteToParticipant(p as MatrixParticipant);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  onDeckStatChanged(p: IParticipant, field: 'attack' | 'sleaze' | 'firewall' | 'deviceRating', value: number): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    (p as MatrixParticipant)[field] = Math.max(0, Number(value || 0));
+    this.syncSharedState();
+  }
+
+  private promoteToMatrixParticipant(p: IParticipant, defaultDP = 6): MatrixParticipant {
+    const mp = new MatrixParticipant();
+    const src = p as unknown as Record<string, unknown>;
+    const dst = mp as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    mp.dataProcessing = defaultDP;
+    mp.vrMode = VRMode.AR;
+    const existingId = this.participantIds.get(p);
+    if (existingId) this.participantIds.set(mp, existingId);
+    const owner = this.participantOwners.get(p);
+    if (owner) this.participantOwners.set(mp, owner);
+    const claimable = this.participantClaimable.get(p);
+    if (claimable !== undefined) this.participantClaimable.set(mp, claimable);
+    const edge = this.participantEdgeRatings.get(p);
+    if (edge !== undefined) this.participantEdgeRatings.set(mp, edge);
+    const reaction = this.participantReactions.get(p);
+    if (reaction !== undefined) this.participantReactions.set(mp, reaction);
+    const intuition = this.participantIntuitions.get(p);
+    if (intuition !== undefined) this.participantIntuitions.set(mp, intuition);
+    const tb = this.participantTieBreakers.get(p);
+    if (tb !== undefined) this.participantTieBreakers.set(mp, tb);
+    const damage = existingId ? this.lastKnownDamage.get(existingId) : undefined;
+    if (damage && existingId) this.lastKnownDamage.set(existingId, damage);
+    const das = this.declaredActionSelections.get(p);
+    if (das) {
+      this.declaredActionSelections.set(mp, das);
+      this.declaredActionSelections.delete(p);
+    }
+    this.participantIds.delete(p);
+    this.participantOwners.delete(p);
+    this.participantClaimable.delete(p);
+    this.participantEdgeRatings.delete(p);
+    this.participantReactions.delete(p);
+    this.participantIntuitions.delete(p);
+    this.participantTieBreakers.delete(p);
+    if (this.expandedDeckPanels.has(p)) {
+      this.expandedDeckPanels.delete(p);
+      this.expandedDeckPanels.add(mp);
+    }
+    if (this._selectedActor === p) this._selectedActor = mp;
+    if (this.actModalParticipant === p) this.actModalParticipant = mp;
+    this.combatManager.removeParticipant(p);
+    this.combatManager.addParticipant(mp);
+    return mp;
+  }
+
+  private demoteToParticipant(mp: MatrixParticipant): Participant {
+    const p = new Participant();
+    const src = mp as unknown as Record<string, unknown>;
+    const dst = p as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.participantIntuitions.get(mp) ?? 0;
+    p.dices = 1;
+    p.baseIni = reaction + intuition;
+    const existingId = this.participantIds.get(mp);
+    if (existingId) this.participantIds.set(p, existingId);
+    const owner = this.participantOwners.get(mp);
+    if (owner) this.participantOwners.set(p, owner);
+    const claimable = this.participantClaimable.get(mp);
+    if (claimable !== undefined) this.participantClaimable.set(p, claimable);
+    const edge = this.participantEdgeRatings.get(mp);
+    if (edge !== undefined) this.participantEdgeRatings.set(p, edge);
+    const reaction2 = this.participantReactions.get(mp);
+    if (reaction2 !== undefined) this.participantReactions.set(p, reaction2);
+    const intuition2 = this.participantIntuitions.get(mp);
+    if (intuition2 !== undefined) this.participantIntuitions.set(p, intuition2);
+    const tb = this.participantTieBreakers.get(mp);
+    if (tb !== undefined) this.participantTieBreakers.set(p, tb);
+    const das = this.declaredActionSelections.get(mp);
+    if (das) {
+      this.declaredActionSelections.set(p, das);
+      this.declaredActionSelections.delete(mp);
+    }
+    this.participantIds.delete(mp);
+    this.participantOwners.delete(mp);
+    this.participantClaimable.delete(mp);
+    this.participantEdgeRatings.delete(mp);
+    this.participantReactions.delete(mp);
+    this.participantIntuitions.delete(mp);
+    this.participantTieBreakers.delete(mp);
+    this.expandedDeckPanels.delete(mp);
+    if (this._selectedActor === mp) this._selectedActor = p;
+    if (this.actModalParticipant === mp) this.actModalParticipant = p;
+    this.combatManager.removeParticipant(mp);
+    this.combatManager.addParticipant(p);
+    return p;
   }
 
   onMatrixDPChanged(p: IParticipant, value: number): void {
@@ -1757,10 +1918,23 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   onVRModeChange(p: IParticipant, mode: VRMode): void {
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
-    const intuition = this.getParticipantIntuition(p);
-    p.applyJackInMode(mode, intuition);
+    this.applyVRMode(p as MatrixParticipant, mode);
     LogHandler.log(this.currentBTTime, `${p.name} VR mode → ${mode}`);
     this.syncSharedState();
+  }
+
+  private applyVRMode(mp: MatrixParticipant, mode: VRMode): void {
+    const intuition = this.getParticipantIntuition(mp);
+    if (mode === VRMode.AR) {
+      mp.vrMode = VRMode.AR;
+      const reaction = this.participantReactions.get(mp) ?? 0;
+      mp.baseIni = reaction + intuition;
+      mp.dices = 1;
+      mp.jackedIn = false;
+      mp.blocksPhysicalActions = false;
+    } else {
+      mp.applyJackInMode(mode, intuition);
+    }
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {
