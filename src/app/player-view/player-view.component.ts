@@ -56,6 +56,11 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     complex: null
   };
   private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
+  private readonly matrixActionNames: ReadonlySet<string> = new Set(
+    DECLARED_ACTIONS
+      .filter(c => c.id.startsWith("matrix"))
+      .flatMap(c => c.items.map(i => i.name))
+  );
   readonly declaredActions = DECLARED_ACTIONS;
 
   get physicalActionCategories() {
@@ -498,6 +503,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   canUseDeclaredAction(action: DeclaredActionItem): boolean {
+    const isMatrixAct = this.matrixActionNames.has(action.name);
+    if (isMatrixAct && !this.primaryCharacter?.isMatrix) {
+      return false;
+    }
+    if (!isMatrixAct && this.primaryCharacter?.isVRCatatonic) {
+      return false;
+    }
     if (action.economy !== "simple" && this.isDeclaredActionSelected(action)) {
       return true;
     }
@@ -511,6 +523,23 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       return this.declaredActionSelection.complex === null && this.declaredActionSelection.simple.length < 2;
     }
     return this.declaredActionSelection.simple.length === 0 && this.declaredActionSelection.complex === null;
+  }
+
+  getDeclaredActionDisabledReason(action: DeclaredActionItem): string {
+    const isMatrixAct = this.matrixActionNames.has(action.name);
+    if (isMatrixAct && !this.primaryCharacter?.isMatrix) {
+      return "Requires a cyberdeck.";
+    }
+    if (!isMatrixAct && this.primaryCharacter?.isVRCatatonic) {
+      return "Cannot take physical actions while in VR.";
+    }
+    if (this.isDeclaredActionSelected(action)) {
+      return "Selected. Click again to deselect.";
+    }
+    if (this.canUseDeclaredAction(action)) {
+      return "Click to select.";
+    }
+    return "Not allowed by current action limits.";
   }
 
   toggleDeclaredAction(action: DeclaredActionItem) {

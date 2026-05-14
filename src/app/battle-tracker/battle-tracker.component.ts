@@ -120,6 +120,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     "Reckless Spellcasting"
   ]);
   private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
+  private readonly matrixActionNames: ReadonlySet<string> = new Set(
+    DECLARED_ACTIONS
+      .filter(c => c.id.startsWith("matrix"))
+      .flatMap(c => c.items.map(i => i.name))
+  );
   private readonly callShotCompatibleActions = new Set<string>([
     "Fire Bow",
     "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
@@ -219,14 +224,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return p as MatrixParticipant;
   }
 
-  /**
-   * Action-planner gate. Physical action categories should be hidden when
-   * the participant is a Matrix decker who is currently VR-catatonic.
-   */
-  getPhysicalActionCategoriesFor(p: IParticipant | null) {
-    if (p && this.isMatrix(p) && p.blocksPhysicalActions) {
-      return [];
-    }
+  getPhysicalActionCategoriesFor(_p: IParticipant | null) {
     return this.physicalActionCategories;
   }
 
@@ -995,6 +993,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
+    const isMatrixAct = this.matrixActionNames.has(action.name);
+    if (isMatrixAct && !this.isMatrix(sender)) {
+      return false;
+    }
+    if (!isMatrixAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+      return false;
+    }
     const selection = this.getDeclaredActionSelection(sender);
     if (action.economy !== "simple" && this.isDeclaredActionSelected(sender, action)) {
       return true;
@@ -1072,6 +1077,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getActionDisabledReason(sender: IParticipant, action: DeclaredActionItem): string {
+    const isMatrixAct = this.matrixActionNames.has(action.name);
+    if (isMatrixAct && !this.isMatrix(sender)) {
+      return "Requires a cyberdeck.";
+    }
+    if (!isMatrixAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+      return "Cannot take physical actions while in VR.";
+    }
     if (this.isDeclaredActionSelected(sender, action)) {
       const selection = this.getDeclaredActionSelection(sender);
       if (action.economy === "simple"

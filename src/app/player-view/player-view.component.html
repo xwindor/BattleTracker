@@ -320,7 +320,8 @@
               (click)="toggleDeclaredAction(actionName)"
               [class.action-item-selected]="isDeclaredActionSelected(actionName)"
               [class.action-item-disabled]="!canUseDeclaredAction(actionName)"
-              [disabled]="!canUseDeclaredAction(actionName)">
+              [disabled]="!canUseDeclaredAction(actionName)"
+              [title]="getDeclaredActionDisabledReason(actionName)">
               @if (isDeclaredActionSelected(actionName)) {
               <span class="action-check">x</span>
               }
