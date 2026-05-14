@@ -733,19 +733,29 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantClaimable.set(target, true);
     this.participantEdgeRatings.set(target, Math.max(0, Number(edgeRating || 0)));
 
+    const safeReaction = Math.max(0, Number(reaction || 0));
+    const safeIntuition = Math.max(0, Number(intuition || 0));
+
     if (isMatrix && target instanceof MatrixParticipant) {
       const safeDP = Math.max(1, Number(dataProcessing || 1));
-      const safeIntuition = Math.max(0, Number(intuition || 0));
       const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                  : vrModeStr === "cold-sim" ? VRMode.ColdSim
                  : VRMode.AR;
       target.dataProcessing = safeDP;
-      target.applyJackInMode(mode, safeIntuition); // sets dices, baseIni, blocksPhysicalActions
-      this.participantReactions.set(target, 0);
+      if (mode === VRMode.AR) {
+        // AR: physical initiative — REA+INT+initiativeDice, no catatonia.
+        target.vrMode = VRMode.AR;
+        target.dices = Math.max(1, initiativeDice);
+        target.baseIni = safeReaction + safeIntuition;
+        target.jackedIn = false;
+        target.blocksPhysicalActions = false;
+      } else {
+        // Cold/Hot-Sim: Matrix initiative — DP+INT+3d6/4d6, physically catatonic.
+        target.applyJackInMode(mode, safeIntuition);
+      }
+      this.participantReactions.set(target, safeReaction);
       this.participantIntuitions.set(target, safeIntuition);
     } else {
-      const safeReaction = Math.max(0, Number(reaction || 0));
-      const safeIntuition = Math.max(0, Number(intuition || 0));
       target.dices = Math.max(1, initiativeDice);
       target.baseIni = safeReaction + safeIntuition;
       this.participantReactions.set(target, safeReaction);

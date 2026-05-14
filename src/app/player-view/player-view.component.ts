@@ -191,17 +191,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   createCharacter() {
     this.info = "";
-    const effectiveDice = this.isDecker
-      ? (this.vrMode === "hot-sim" ? 4 : this.vrMode === "cold-sim" ? 3 : 1)
-      : this.initiativeDice;
     this.session.sendCommand({
       type: "register_character",
       player: this.playerToken,
       payload: {
         characterName: this.characterName.trim(),
-        initiativeDice: effectiveDice,
+        initiativeDice: this.initiativeDice,
         edgeRating: this.edgeRating,
-        reaction: this.isDecker ? 0 : this.reaction,
+        reaction: this.reaction,
         intuition: this.intuition,
         overflowHealth: this.overflowHealth,
         physicalHealth: this.physicalHealth,

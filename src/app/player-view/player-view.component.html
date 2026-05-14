@@ -56,47 +56,42 @@
           </div>
         </div>
         <div class="row g-0 mb-0 cli-create-row">
-          @if (!isDecker) {
           <div class="col-md-1 cli-create-cell">
             <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
             <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
           </div>
-          }
           <div class="col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-edge">Edge</label>
             <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
           </div>
-          @if (isDecker) {
-          <div class="col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-dp">Data Processing</label>
-            <input type="number" class="form-control" [(ngModel)]="dataProcessing" min="1">
-          </div>
-          } @else {
           <div class="col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
             <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
           </div>
-          }
           <div class="col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
             <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
           </div>
           @if (isDecker) {
+          <div class="col-md-1 cli-create-cell">
+            <label class="form-label cli-field-label cli-label-dp">DP</label>
+            <input type="number" class="form-control" [(ngModel)]="dataProcessing" min="1" title="Data Processing">
+          </div>
           <div class="col-md-3 cli-create-cell">
             <label class="form-label cli-field-label">VR Mode</label>
             <div class="btn-group btn-group-sm w-100">
               <button type="button" class="btn"
                 [class.btn-secondary]="vrMode === 'AR'"
                 [class.btn-outline-secondary]="vrMode !== 'AR'"
-                (click)="vrMode = 'AR'" title="Augmented Reality — 1d6">AR</button>
+                (click)="vrMode = 'AR'" title="Augmented Reality — REA+INT+1d6">AR</button>
               <button type="button" class="btn"
                 [class.btn-info]="vrMode === 'cold-sim'"
                 [class.btn-outline-info]="vrMode !== 'cold-sim'"
-                (click)="vrMode = 'cold-sim'" title="Cold-Sim VR — 3d6">COLD</button>
+                (click)="vrMode = 'cold-sim'" title="Cold-Sim VR — DP+INT+3d6">COLD</button>
               <button type="button" class="btn"
                 [class.btn-danger]="vrMode === 'hot-sim'"
                 [class.btn-outline-danger]="vrMode !== 'hot-sim'"
-                (click)="vrMode = 'hot-sim'" title="Hot-Sim VR — 4d6">HOT</button>
+                (click)="vrMode = 'hot-sim'" title="Hot-Sim VR — DP+INT+4d6">HOT</button>
             </div>
           </div>
           }
@@ -232,30 +227,33 @@
     <div class="card-body">
       @if (primaryCharacter) {
       <div class="fw-semibold">{{ primaryCharacter.name }}</div>
+      <div class="small text-muted mt-1">
+        REA {{ primaryCharacter.reaction ?? "—" }} &nbsp;|&nbsp;
+        INT {{ primaryCharacter.intuition ?? "—" }} &nbsp;|&nbsp;
+        Init Dice: {{ primaryCharacter.initiativeDice ?? 1 }}
+      </div>
       @if (primaryCharacter.isMatrix) {
-      <div class="d-flex align-items-center gap-2 mt-2">
+      <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
         <span class="small text-muted">VR Mode:</span>
         <div class="btn-group btn-group-sm">
           <button type="button" class="btn"
             [class.btn-secondary]="primaryCharacter.vrMode === 'AR'"
             [class.btn-outline-secondary]="primaryCharacter.vrMode !== 'AR'"
-            (click)="switchVRMode('AR')" title="Augmented Reality — 1d6">AR</button>
+            (click)="switchVRMode('AR')" title="AR — REA+INT+1d6">AR</button>
           <button type="button" class="btn"
             [class.btn-info]="primaryCharacter.vrMode === 'cold-sim'"
             [class.btn-outline-info]="primaryCharacter.vrMode !== 'cold-sim'"
-            (click)="switchVRMode('cold-sim')" title="Cold-Sim VR — 3d6">COLD</button>
+            (click)="switchVRMode('cold-sim')" title="Cold-Sim VR — DP+INT+3d6">COLD</button>
           <button type="button" class="btn"
             [class.btn-danger]="primaryCharacter.vrMode === 'hot-sim'"
             [class.btn-outline-danger]="primaryCharacter.vrMode !== 'hot-sim'"
-            (click)="switchVRMode('hot-sim')" title="Hot-Sim VR — 4d6">HOT</button>
+            (click)="switchVRMode('hot-sim')" title="Hot-Sim VR — DP+INT+4d6">HOT</button>
         </div>
         @if (primaryCharacter.isVRCatatonic) {
         <span class="badge text-bg-warning">VR CATATONIC</span>
         }
+        <span class="small text-muted">OS: {{ primaryCharacter.overwatch ?? 0 }}</span>
       </div>
-      <div class="small text-muted mt-1">OS: {{ primaryCharacter.overwatch ?? 0 }}</div>
-      } @else {
-      <div class="small text-muted">Init Dice: {{ primaryCharacter.initiativeDice }}</div>
       }
       }
       @else {
