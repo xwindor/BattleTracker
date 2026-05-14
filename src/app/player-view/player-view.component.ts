@@ -3,7 +3,7 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { NgbModal, NgbModalModule, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
-import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 
 interface DeclaredActionSelection {
@@ -56,11 +56,6 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     complex: null
   };
   private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
-  private readonly matrixActionNames: ReadonlySet<string> = new Set(
-    DECLARED_ACTIONS
-      .filter(c => c.id.startsWith("matrix"))
-      .flatMap(c => c.items.map(i => i.name))
-  );
   readonly declaredActions = DECLARED_ACTIONS;
 
   get physicalActionCategories() {
@@ -503,11 +498,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   canUseDeclaredAction(action: DeclaredActionItem): boolean {
-    const isMatrixAct = this.matrixActionNames.has(action.name);
-    if (isMatrixAct && !this.primaryCharacter?.isMatrix) {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && !this.primaryCharacter?.isMatrix) {
       return false;
     }
-    if (!isMatrixAct && this.primaryCharacter?.isVRCatatonic) {
+    if (isPhysicalAct && this.primaryCharacter?.isVRCatatonic) {
       return false;
     }
     if (action.economy !== "simple" && this.isDeclaredActionSelected(action)) {
@@ -526,11 +522,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   getDeclaredActionDisabledReason(action: DeclaredActionItem): string {
-    const isMatrixAct = this.matrixActionNames.has(action.name);
-    if (isMatrixAct && !this.primaryCharacter?.isMatrix) {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && !this.primaryCharacter?.isMatrix) {
       return "Requires a cyberdeck.";
     }
-    if (!isMatrixAct && this.primaryCharacter?.isVRCatatonic) {
+    if (isPhysicalAct && this.primaryCharacter?.isVRCatatonic) {
       return "Cannot take physical actions while in VR.";
     }
     if (this.isDeclaredActionSelected(action)) {

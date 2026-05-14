@@ -163,6 +163,46 @@ export const DECLARED_ACTIONS: DeclaredActionCategory[] = [
   }
 ];
 
+/**
+ * Matrix actions that require a full cyberdeck — offensive, illegal, or
+ * deck-program operations that a commlink cannot perform.
+ * Everything else in a matrix-* category is commlink-sufficient.
+ */
+export const CYBERDECK_REQUIRED_ACTIONS: ReadonlySet<string> = new Set([
+  // matrix-free — program management needs a deck
+  "Load Program",
+  "Switch Two Matrix Attributes",
+  "Swap Two Programs",
+  "Unload Program",
+  // matrix-simple
+  "Crash Program",
+  // matrix-complex — hacking / illegal intercept
+  "Break File",
+  "Snoop",
+  "Brute Force",
+  "Format Device",
+  "Spoof Command",
+  "Crack File",
+  "Hack on the Fly",
+  // matrix-variable — offensive / illegal
+  "Data Spike",
+  "Control Device",
+  "Disarm Data Bomb",
+  "Erase Mark",
+  "Set Data Bomb",
+]);
+
+/**
+ * All action names that appear in any matrix-* category.
+ * Used to distinguish matrix actions (not blocked by VR catatonia) from
+ * physical actions (blocked when blocksPhysicalActions is true).
+ */
+export const ALL_MATRIX_ACTION_NAMES: ReadonlySet<string> = new Set(
+  DECLARED_ACTIONS
+    .filter(c => c.id.startsWith("matrix"))
+    .flatMap(c => c.items.map(i => i.name))
+);
+
 export const DECLARED_ACTION_DESCRIPTIONS: Record<string, string> = {
   "Call a Shot": "Declare a called shot before attacking a vulnerable area. Must be combined with a Fire Weapon, Throw Weapon, or Melee Attack action.",
   "Change Linked Device Mode": "Free Action via DNI. Activate/deactivate/switch mode on linked devices.",

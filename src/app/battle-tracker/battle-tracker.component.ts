@@ -19,7 +19,7 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
-import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -120,11 +120,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     "Reckless Spellcasting"
   ]);
   private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
-  private readonly matrixActionNames: ReadonlySet<string> = new Set(
-    DECLARED_ACTIONS
-      .filter(c => c.id.startsWith("matrix"))
-      .flatMap(c => c.items.map(i => i.name))
-  );
   private readonly callShotCompatibleActions = new Set<string>([
     "Fire Bow",
     "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
@@ -993,11 +988,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
-    const isMatrixAct = this.matrixActionNames.has(action.name);
-    if (isMatrixAct && !this.isMatrix(sender)) {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && !this.isMatrix(sender)) {
       return false;
     }
-    if (!isMatrixAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+    if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return false;
     }
     const selection = this.getDeclaredActionSelection(sender);
@@ -1077,11 +1073,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getActionDisabledReason(sender: IParticipant, action: DeclaredActionItem): string {
-    const isMatrixAct = this.matrixActionNames.has(action.name);
-    if (isMatrixAct && !this.isMatrix(sender)) {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && !this.isMatrix(sender)) {
       return "Requires a cyberdeck.";
     }
-    if (!isMatrixAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+    if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return "Cannot take physical actions while in VR.";
     }
     if (this.isDeclaredActionSelected(sender, action)) {
