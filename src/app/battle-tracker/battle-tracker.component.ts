@@ -17,7 +17,7 @@ import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
-import { MatrixParticipant } from "Matrix";
+import { MatrixParticipant, VRMode } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
@@ -206,8 +206,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * Type guard so templates and methods can branch on Matrix-aware
    * participants without sprinkling `instanceof` everywhere.
    */
+  /** Exposed for use in @if expressions in the template. */
+  readonly VRMode = VRMode;
+
   isMatrix(p: IParticipant): p is MatrixParticipant {
     return p instanceof MatrixParticipant;
+  }
+
+  /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
+  asMatrix(p: IParticipant): MatrixParticipant {
+    return p as MatrixParticipant;
   }
 
   /**
@@ -801,6 +809,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.addParticipant()
   }
 
+  btnAddMatrixParticipant_Click() {
+    UndoHandler.StartActions();
+    LogHandler.log(this.currentBTTime, "AddMatrixParticipant_Click");
+    this.addMatrixParticipant();
+  }
+
   btnEdge_Click(sender: IParticipant) {
     UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, sender.name + " Edge_Click");
@@ -1251,6 +1265,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(sender);
     this.participantTieBreakers.delete(sender);
     this.combatManager.removeParticipant(sender);
+    if (this._selectedActor === sender) {
+      this.selectedActor = null;
+    }
     this.syncSharedState();
   }
 
@@ -1615,7 +1632,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getParticipantBaseInitiative(p: IParticipant): number {
-    return Math.max(0, this.getParticipantReaction(p) + this.getParticipantIntuition(p));
+    const intuition = this.getParticipantIntuition(p);
+    if (this.isMatrix(p)) {
+      return Math.max(0, p.dataProcessing + intuition);
+    }
+    return Math.max(0, this.getParticipantReaction(p) + intuition);
   }
 
   onParticipantEdgeRatingChanged(p: IParticipant, value: number) {
@@ -1656,6 +1677,41 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (selectNewParticipant) {
       this.selectActor(p);
     }
+    this.syncSharedState();
+  }
+
+  addMatrixParticipant() {
+    const p = new MatrixParticipant();
+    p.name = "Decker";
+    p.dataProcessing = 6;
+    p.dices = 1; // AR default
+    this.combatManager.addParticipant(p);
+    this.participantClaimable.set(p, false);
+    this.participantEdgeRatings.set(p, 0);
+    this.participantReactions.set(p, 0); // unused for Matrix; kept so Maps stay consistent
+    this.participantIntuitions.set(p, 3);
+    p.baseIni = this.getParticipantBaseInitiative(p); // DP(6) + INT(3) = 9
+    this.participantTieBreakers.set(p, Math.random());
+    const id = this.getParticipantId(p);
+    this.lastKnownDamage.set(id, { physical: 0, stun: 0 });
+    this.selectActor(p);
+    this.syncSharedState();
+  }
+
+  onMatrixDPChanged(p: IParticipant, value: number): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    p.dataProcessing = Math.max(1, Number(value || 1));
+    p.baseIni = this.getParticipantBaseInitiative(p);
+    this.syncSharedState();
+  }
+
+  onVRModeChange(p: IParticipant, mode: VRMode): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    const intuition = this.getParticipantIntuition(p);
+    p.applyJackInMode(mode, intuition);
+    LogHandler.log(this.currentBTTime, `${p.name} VR mode → ${mode}`);
     this.syncSharedState();
   }
 

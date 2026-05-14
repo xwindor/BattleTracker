@@ -139,10 +139,17 @@
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantEdgeRatingValue(p)"
                 (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
-              <input class="form-control text-center gm-stat-input" type="number"
-                [ngModel]="getParticipantReactionValue(p)"
-                (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
+              @if (isMatrix(p)) {
+                <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).dataProcessing"
+                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="1" title="Data Processing">
+              } @else {
+                <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="getParticipantReactionValue(p)"
+                  (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
+              }
               <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
@@ -164,6 +171,22 @@
                 </button>
               </div>
             </div>
+            @if (isMatrix(p)) {
+              <div class="btn-group btn-group-sm matrix-vr-mode-toggle mt-1">
+                <button type="button" class="btn btn-sm"
+                  [class.btn-secondary]="asMatrix(p).vrMode === VRMode.AR"
+                  [class.btn-outline-secondary]="asMatrix(p).vrMode !== VRMode.AR"
+                  (click)="onVRModeChange(p, VRMode.AR)" title="Augmented Reality (1d6)">AR</button>
+                <button type="button" class="btn btn-sm"
+                  [class.btn-info]="asMatrix(p).vrMode === VRMode.ColdSim"
+                  [class.btn-outline-info]="asMatrix(p).vrMode !== VRMode.ColdSim"
+                  (click)="onVRModeChange(p, VRMode.ColdSim)" title="Cold-Sim VR (3d6)">COLD</button>
+                <button type="button" class="btn btn-sm"
+                  [class.btn-danger]="asMatrix(p).vrMode === VRMode.HotSim"
+                  [class.btn-outline-danger]="asMatrix(p).vrMode !== VRMode.HotSim"
+                  (click)="onVRModeChange(p, VRMode.HotSim)" title="Hot-Sim VR (4d6)">HOT</button>
+              </div>
+            }
           </div>
           <div class="col-7 col-xl-3 btn-group" role="group">
             @if (!p.edge
@@ -277,8 +300,11 @@
       </div>
       <div>
         <div colspan="8">
-          <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()">
+          <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()" title="Add Participant">
             <i class="fa fa-plus fa-lg"></i>
+          </button>
+          <button type="button" class="btn btn-secondary ms-1" (click)="btnAddMatrixParticipant_Click()" title="Add Decker (Matrix Participant)">
+            <i class="fa fa-laptop fa-lg"></i>
           </button>
         </div>
       </div>
@@ -331,7 +357,7 @@
       </div>
     </div>
 
-    @if (selectedActor !== null && selectActor !== undefined)
+    @if (selectedActor !== null && selectedActor !== undefined)
     {
     <div class="col-3 detailsBar">
       <div class="card">
