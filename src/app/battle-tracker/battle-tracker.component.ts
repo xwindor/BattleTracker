@@ -438,6 +438,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const overflowHealth = Number(payload["overflowHealth"] || 4);
       const physicalHealth = Number(payload["physicalHealth"] || 10);
       const stunHealth = Number(payload["stunHealth"] || 10);
+      const isMatrix = payload["isMatrix"] === true;
+      const dataProcessing = Number(payload["dataProcessing"] || 0);
+      const vrMode = String(payload["vrMode"] || "AR");
       this.upsertPlayerParticipant(
         playerName,
         characterName,
@@ -447,7 +450,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         intuition,
         overflowHealth,
         physicalHealth,
-        stunHealth
+        stunHealth,
+        isMatrix,
+        dataProcessing,
+        vrMode
       );
       this.appendSharedLog("GM", `Registered ${characterName}`);
       this.sort();
@@ -687,33 +693,65 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     intuition: number,
     overflowHealth: number,
     physicalHealth: number,
-    stunHealth: number
+    stunHealth: number,
+    isMatrix = false,
+    dataProcessing = 0,
+    vrModeStr = "AR"
   ) {
     let target: IParticipant | undefined;
-    for (const participant of this.combatManager.participants.items) {
-      if (this.participantOwners.get(participant) === playerName) {
-        target = participant;
+    for (const p of this.combatManager.participants.items) {
+      if (this.participantOwners.get(p) === playerName) {
+        target = p;
         break;
       }
     }
+
+    // If the participant type needs to change (decker ↔ physical), discard and recreate.
+    const typeMismatch = target !== undefined && isMatrix !== (target instanceof MatrixParticipant);
+    if (typeMismatch && target) {
+      this.participantIds.delete(target);
+      this.participantOwners.delete(target);
+      this.participantClaimable.delete(target);
+      this.participantEdgeRatings.delete(target);
+      this.participantReactions.delete(target);
+      this.participantIntuitions.delete(target);
+      this.participantTieBreakers.delete(target);
+      this.combatManager.removeParticipant(target);
+      target = undefined;
+    }
+
     if (!target) {
-      target = new Participant();
+      target = isMatrix ? new MatrixParticipant() : new Participant();
       this.combatManager.addParticipant(target);
     }
 
     target.name = characterName;
-    target.dices = Math.max(1, initiativeDice);
-    const safeReaction = Math.max(0, Number(reaction || 0));
-    const safeIntuition = Math.max(0, Number(intuition || 0));
-    target.baseIni = safeReaction + safeIntuition;
     target.overflowHealth = Math.max(1, overflowHealth);
     target.physicalHealth = Math.max(1, physicalHealth);
     target.stunHealth = Math.max(1, stunHealth);
     this.participantOwners.set(target, playerName);
     this.participantClaimable.set(target, true);
     this.participantEdgeRatings.set(target, Math.max(0, Number(edgeRating || 0)));
-    this.participantReactions.set(target, safeReaction);
-    this.participantIntuitions.set(target, safeIntuition);
+
+    if (isMatrix && target instanceof MatrixParticipant) {
+      const safeDP = Math.max(1, Number(dataProcessing || 1));
+      const safeIntuition = Math.max(0, Number(intuition || 0));
+      const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+                 : vrModeStr === "cold-sim" ? VRMode.ColdSim
+                 : VRMode.AR;
+      target.dataProcessing = safeDP;
+      target.applyJackInMode(mode, safeIntuition); // sets dices, baseIni, blocksPhysicalActions
+      this.participantReactions.set(target, 0);
+      this.participantIntuitions.set(target, safeIntuition);
+    } else {
+      const safeReaction = Math.max(0, Number(reaction || 0));
+      const safeIntuition = Math.max(0, Number(intuition || 0));
+      target.dices = Math.max(1, initiativeDice);
+      target.baseIni = safeReaction + safeIntuition;
+      this.participantReactions.set(target, safeReaction);
+      this.participantIntuitions.set(target, safeIntuition);
+    }
+
     if (!this.participantTieBreakers.has(target)) {
       this.participantTieBreakers.set(target, Math.random());
     }

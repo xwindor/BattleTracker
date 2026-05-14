@@ -27,10 +27,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   initiativeDice = 1;
   edgeRating = 1;
   reaction = 1;
-  intuition = 1;
+  intuition = 3;
   overflowHealth = 4;
   physicalHealth = 10;
   stunHealth = 10;
+  isDecker = false;
+  dataProcessing = 6;
+  vrMode = "AR"; // "AR" | "cold-sim" | "hot-sim"
   manualRoll = "";
   connected = false;
   error = "";
@@ -188,21 +191,33 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   createCharacter() {
     this.info = "";
+    const effectiveDice = this.isDecker
+      ? (this.vrMode === "hot-sim" ? 4 : this.vrMode === "cold-sim" ? 3 : 1)
+      : this.initiativeDice;
     this.session.sendCommand({
       type: "register_character",
       player: this.playerToken,
       payload: {
         characterName: this.characterName.trim(),
-        initiativeDice: this.initiativeDice,
+        initiativeDice: effectiveDice,
         edgeRating: this.edgeRating,
-        reaction: this.reaction,
+        reaction: this.isDecker ? 0 : this.reaction,
         intuition: this.intuition,
         overflowHealth: this.overflowHealth,
         physicalHealth: this.physicalHealth,
-        stunHealth: this.stunHealth
+        stunHealth: this.stunHealth,
+        isMatrix: this.isDecker,
+        dataProcessing: this.isDecker ? this.dataProcessing : 0,
+        vrMode: this.isDecker ? this.vrMode : undefined
       }
     });
     this.info = "Create character request sent.";
+  }
+
+  /** Re-send character registration with a new VR mode (decker only). */
+  switchVRMode(mode: string) {
+    this.vrMode = mode;
+    this.createCharacter();
   }
 
   claimSelectedCharacter() {

@@ -62,8 +62,8 @@
   animation: matrix-badge-pulse 1.4s ease-in-out infinite;
 }
 
-/* Physical-action lock badge -------------------------------------- */
-.phys-locked {
+/* VR catatonic badge ---------------------------------------------- */
+.vr-catatonic {
   background-color: #1f1f1f;
   color: #f1c40f;
   border: 1px dashed #f1c40f;
