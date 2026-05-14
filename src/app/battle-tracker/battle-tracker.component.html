@@ -96,6 +96,12 @@
   <br>
   <div class="row">
     <div class="col-9">
+      @for (msg of icAlertMessages; track $index) {
+      <div class="alert alert-warning alert-dismissible py-2 mb-2" role="alert">
+        <strong>&#9888; IC Alert</strong> — {{ msg }}
+        <button type="button" class="btn-close" (click)="dismissIcAlert($index)" aria-label="Dismiss"></button>
+      </div>
+      }
       <div class="row bg-dark text-light">
         <div class="col-4 col-xl-2">
           <span class="h5">
@@ -126,7 +132,8 @@
               <app-matrix-participant-badge
                 class="participant-matrix-badge"
                 [participant]="$any(p)"
-                (osClick)="onParticipantUpdated()">
+                (osAdjust)="onOsAdjust(p, $event)"
+                (osResetClick)="onOsResetClick(p)">
               </app-matrix-participant-badge>
             }
           </div>
@@ -629,11 +636,36 @@
     </div>
     }
   </div>
+  @if (actModalSuggestedOsDelta > 0) {
+  <div class="os-prompt-bar">
+    <span class="os-prompt-label">&#9888; Illegal action — OS consequence: {{ actModalIllegalActionSummary }}</span>
+    <label class="os-prompt-field">
+      Add OS:
+      <input type="number" class="os-prompt-input"
+        [ngModel]="actModalEffectiveOsDelta"
+        (ngModelChange)="osModalDeltaOverride = $event"
+        min="0">
+    </label>
+  </div>
+  }
   <div class="modal-footer">
     <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
     <button type="button" class="btn btn-primary" (click)="submitActModal()"
       [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
-      Submit Actions
+      @if (actModalSuggestedOsDelta > 0) { Submit + Add OS } @else { Submit Actions }
     </button>
+  </div>
+</ng-template>
+
+<ng-template #convergenceModalTpl>
+  <div class="modal-header bg-danger text-white">
+    <h5 class="modal-title">&#9760; CONVERGENCE</h5>
+  </div>
+  <div class="modal-body">
+    <p class="mb-1"><strong>GOD has traced {{ convergenceAlertDecker }}.</strong></p>
+    <p class="mb-0">Overwatch Score reached {{ convergenceAlertOs }}. A Convergence attack is incoming.</p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-danger" (click)="dismissConvergenceAlert()">Acknowledged</button>
   </div>
 </ng-template>

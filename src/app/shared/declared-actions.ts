@@ -203,6 +203,24 @@ export const ALL_MATRIX_ACTION_NAMES: ReadonlySet<string> = new Set(
     .flatMap(c => c.items.map(i => i.name))
 );
 
+/**
+ * Illegal Matrix actions that add Overwatch Score when taken by a decker.
+ * Values are the suggested OS delta per RAW (SR5 p.228-233).
+ * This is a subset of CYBERDECK_REQUIRED_ACTIONS — legal deck actions (Load
+ * Program, Switch Attributes, etc.) are not in this map.
+ */
+export const ILLEGAL_OS_ACTIONS: Record<string, number> = {
+  "Hack on the Fly":  1,
+  "Brute Force":      2,
+  "Snoop":            1,
+  "Crack File":       1,
+  "Spoof Command":    1,
+  "Format Device":    1,
+  "Data Spike":       1,
+  "Control Device":   1,
+  "Erase Mark":       1,
+};
+
 export const DECLARED_ACTION_DESCRIPTIONS: Record<string, string> = {
   "Call a Shot": "Declare a called shot before attacking a vulnerable area. Must be combined with a Fire Weapon, Throw Weapon, or Melee Attack action.",
   "Change Linked Device Mode": "Free Action via DNI. Activate/deactivate/switch mode on linked devices.",

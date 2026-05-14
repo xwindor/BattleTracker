@@ -22,6 +22,19 @@
   </div>
 
   @if (connected && state) {
+  @if (primaryCharacter?.overwatchAlert === 'convergence') {
+  <div class="alert alert-danger" role="alert">
+    <strong>&#9760; CONVERGENCE!</strong>
+    GOD has traced <strong>{{ primaryCharacter!.name }}</strong> — OS: {{ primaryCharacter!.overwatch }}.
+    Jack out immediately or face the Convergence attack.
+  </div>
+  }
+  @if (primaryCharacter?.overwatchAlert === 'ic-alert') {
+  <div class="alert alert-warning" role="alert">
+    <strong>&#9888; IC Alert</strong> — OS: {{ primaryCharacter!.overwatch }}.
+    The host has likely escalated its IC response.
+  </div>
+  }
   @if (ownParticipants.length === 0) {
   <div class="card mb-3">
     <div class="card-header">Claim Or Create Character</div>
@@ -215,7 +228,14 @@
         @if (primaryCharacter.isVRCatatonic) {
         <span class="badge text-bg-warning ms-1">VR CATATONIC</span>
         }
-        &nbsp;|&nbsp; OS: {{ primaryCharacter.overwatch ?? 0 }}
+        &nbsp;|&nbsp;
+        <span
+          [class.text-warning]="primaryCharacter.overwatchAlert === 'ic-alert'"
+          [class.fw-bold]="primaryCharacter.overwatchAlert === 'ic-alert'"
+          [class.text-danger]="primaryCharacter.overwatchAlert === 'convergence'"
+          [class.fw-bold]="primaryCharacter.overwatchAlert === 'convergence'">
+          OS: {{ primaryCharacter.overwatch ?? 0 }}
+        </span>
         }
       </div>
       @if (deckConfigExpanded) {

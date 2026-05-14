@@ -2,17 +2,6 @@ import { Component, EventEmitter, Input, Output } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { MatrixParticipant, VRMode } from "Matrix";
 
-/**
- * MatrixParticipantBadgeComponent
- *
- * Inline badge rendered inside the BattleTracker participant row when the
- * participant is a MatrixParticipant. Shows:
- *   - VR mode chip (AR / COLD / HOT)
- *   - Overwatch score, color-coded by tier (green / amber / red)
- *   - "PHYS LOCKED" badge when the decker is VR-catatonic
- *
- * Clicking the OS number emits osClick (Phase 2 will hook the OS editor).
- */
 @Component({
   standalone: true,
   selector: "app-matrix-participant-badge",
@@ -23,9 +12,14 @@ import { MatrixParticipant, VRMode } from "Matrix";
 export class MatrixParticipantBadgeComponent {
   @Input({ required: true }) participant!: MatrixParticipant;
 
-  @Output() readonly osClick = new EventEmitter<MatrixParticipant>();
+  /** Emits a raw OS delta (+5/+1/−1/−5) from the inline editor buttons. */
+  @Output() readonly osAdjust = new EventEmitter<number>();
 
-  /** Display label for the VR mode chip. */
+  /** Emits when the Reset button is clicked; parent handles confirmation. */
+  @Output() readonly osResetClick = new EventEmitter<void>();
+
+  osEditorOpen = false;
+
   get vrModeLabel(): string {
     switch (this.participant?.vrMode) {
       case VRMode.HotSim:  return "HOT";
@@ -35,7 +29,6 @@ export class MatrixParticipantBadgeComponent {
     }
   }
 
-  /** CSS modifier class for the VR mode chip. */
   get vrModeClass(): string {
     switch (this.participant?.vrMode) {
       case VRMode.HotSim:  return "vr-mode-hot";
@@ -45,7 +38,6 @@ export class MatrixParticipantBadgeComponent {
     }
   }
 
-  /** OS color tier — drives the os-* CSS class on the OS chip. */
   get osTier(): "ok" | "alert" | "convergence" {
     const os = this.participant?.overwatch ?? 0;
     if (os >= 40) return "convergence";
@@ -57,8 +49,18 @@ export class MatrixParticipantBadgeComponent {
     return !!this.participant?.blocksPhysicalActions;
   }
 
-  onOsClick(event: MouseEvent): void {
+  onOsChipClick(event: MouseEvent): void {
     event.stopPropagation();
-    this.osClick.emit(this.participant);
+    this.osEditorOpen = !this.osEditorOpen;
+  }
+
+  onOsAdjust(delta: number, event: MouseEvent): void {
+    event.stopPropagation();
+    this.osAdjust.emit(delta);
+  }
+
+  onOsResetClick(event: MouseEvent): void {
+    event.stopPropagation();
+    this.osResetClick.emit();
   }
 }

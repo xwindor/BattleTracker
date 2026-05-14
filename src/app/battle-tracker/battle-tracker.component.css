@@ -486,3 +486,38 @@ input:checked + .slider:before {
   color: #6366f1;
   font-weight: 400;
 }
+
+/* OS accumulation prompt bar (act modal) -------------------------- */
+.os-prompt-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  background: #fffbeb;
+  border-top: 1px solid #f59e0b;
+  border-bottom: 1px solid #f59e0b;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+
+.os-prompt-label {
+  flex: 1 1 auto;
+}
+
+.os-prompt-field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+.os-prompt-input {
+  width: 4.5rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #f59e0b;
+  border-radius: 0.3rem;
+  font-size: 0.85rem;
+  text-align: center;
+}

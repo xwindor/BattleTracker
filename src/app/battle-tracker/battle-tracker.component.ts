@@ -1,6 +1,7 @@
 import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, TemplateRef, ViewChild, ElementRef } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
+import { Subscription } from "rxjs";
 import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import { Participant } from "Combat/Participants/Participant";
@@ -19,7 +20,7 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
-import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -176,6 +177,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly participantTieBreakers = new Map<IParticipant, number>();
   private readonly lastKnownDamage = new Map<string, { physical: number; stun: number }>();
 
+  // -- OS threshold alert state --
+  @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
+  icAlertMessages: string[] = [];
+  convergenceAlertDecker: string | null = null;
+  convergenceAlertOs = 0;
+  private convergenceModalRef: NgbModalRef | null = null;
+  private osThresholdSub?: Subscription;
+
+  // -- OS accumulation prompt (act modal) --
+  /** User-overridden OS delta; null means use suggested sum from selection. */
+  osModalDeltaOverride: number | null = null;
+
   get currentBTTime(): BTTime {
     return new BTTime(this.combatManager.combatTurn, this.combatManager.initiativePass, this.combatManager.currentInitiative);
   }
@@ -223,6 +236,58 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return this.physicalActionCategories;
   }
 
+  // -- OS badge inline editor handlers --
+
+  onOsAdjust(p: IParticipant, delta: number): void {
+    if (!this.isMatrix(p)) return;
+    this.osTracking.addOS(this.asMatrix(p), delta, `manual adjustment`);
+    this.syncSharedState();
+  }
+
+  async onOsResetClick(p: IParticipant): Promise<void> {
+    if (!this.isMatrix(p)) return;
+    const confirmed = await this.confirmationDialog.simpleConfirm(`Reset OS to 0 for ${p.name}?`);
+    if (!confirmed) return;
+    this.osTracking.resetOS(this.asMatrix(p));
+    this.syncSharedState();
+  }
+
+  dismissIcAlert(index: number): void {
+    this.icAlertMessages.splice(index, 1);
+  }
+
+  dismissConvergenceAlert(): void {
+    if (this.convergenceModalRef) {
+      this.convergenceModalRef.close();
+      this.convergenceModalRef = null;
+    }
+    this.convergenceAlertDecker = null;
+  }
+
+  // -- Act modal OS accumulation prompt --
+
+  /** Illegal OS-generating actions in the current modal selection, with their deltas. */
+  get actModalIllegalOsActions(): Array<{ name: string; delta: number }> {
+    if (!this.actModalParticipant || !this.isMatrix(this.actModalParticipant)) return [];
+    const sel = this.getDeclaredActionSelection(this.actModalParticipant);
+    const all = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
+    return all
+      .filter(name => name in ILLEGAL_OS_ACTIONS)
+      .map(name => ({ name, delta: ILLEGAL_OS_ACTIONS[name] }));
+  }
+
+  get actModalSuggestedOsDelta(): number {
+    return this.actModalIllegalOsActions.reduce((sum, a) => sum + a.delta, 0);
+  }
+
+  get actModalEffectiveOsDelta(): number {
+    return this.osModalDeltaOverride ?? this.actModalSuggestedOsDelta;
+  }
+
+  get actModalIllegalActionSummary(): string {
+    return this.actModalIllegalOsActions.map(a => `${a.name} (+${a.delta})`).join(", ");
+  }
+
   drop(event: CdkDragDrop<string[]>) {
     if (!this.combatManager.started) {
       moveItemInArray(this.combatManager.participants.items, event.previousIndex, event.currentIndex);
@@ -236,6 +301,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.Initialize();
     UndoHandler.StartActions();
     this.observedLocalLogCount = this.logHandler.logbook.length;
+    this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
+      if (event.alert === "ic-alert") {
+        this.icAlertMessages.push(`${event.decker.name} — OS: ${event.decker.overwatch}`);
+        this.changeDetector.detectChanges();
+      } else if (event.alert === "convergence") {
+        this.convergenceAlertDecker = event.decker.name;
+        this.convergenceAlertOs = event.decker.overwatch;
+        this.convergenceModalRef = this.modalService.open(this.convergenceModalTpl, { backdrop: "static", centered: true });
+        this.changeDetector.detectChanges();
+      }
+    });
   }
 
   ngOnDestroy() {
@@ -246,6 +322,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.clearSharedLogDecodeAnimations();
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
+    this.osThresholdSub?.unsubscribe();
   }
 
   ngAfterViewChecked() {
@@ -915,6 +992,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.actModalParticipant = sender;
     this.expandedDeclaredActionCategory = "free";
     this.expandedDeclaredActionDetailKey = null;
+    this.osModalDeltaOverride = null;
     if (!this.declaredActionSelections.has(sender)) {
       this.clearDeclaredActionSelection(sender);
     }
@@ -922,6 +1000,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.actModalRef.result.finally(() => {
       this.actModalRef = null;
       this.actModalParticipant = null;
+      this.osModalDeltaOverride = null;
     });
   }
 
@@ -936,8 +1015,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const actor = this.actModalParticipant;
+    const osDelta = this.actModalEffectiveOsDelta;
     this.performAct(actor, this.buildDeclaredActionLog(actor));
+    if (this.isMatrix(actor) && osDelta > 0) {
+      this.osTracking.addOS(this.asMatrix(actor), osDelta, this.actModalIllegalActionSummary);
+      this.syncSharedState();
+    }
     this.clearDeclaredActionSelection(actor);
+    this.osModalDeltaOverride = null;
     if (this.actModalRef) {
       this.actModalRef.close();
     }
