@@ -128,14 +128,6 @@
           <div class="col-4 col-xl-2">
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
-            @if (isMatrix(p)) {
-              <app-matrix-participant-badge
-                class="participant-matrix-badge"
-                [participant]="$any(p)"
-                (osAdjust)="onOsAdjust(p, $event)"
-                (osResetClick)="onOsResetClick(p)">
-              </app-matrix-participant-badge>
-            }
           </div>
           <div class="col-2 col-xl text-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
@@ -381,6 +373,13 @@
                 (click)="gmJackIn(p)"
                 [disabled]="getPendingVrMode(p) === asMatrix(p).vrMode">Switch Mode</button>
               <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(p)">Jack Out</button>
+            </div>
+            <div class="mt-1">
+              <app-matrix-participant-badge
+                [participant]="$any(p)"
+                (osAdjust)="onOsAdjust(p, $event)"
+                (osResetClick)="onOsResetClick(p)">
+              </app-matrix-participant-badge>
             </div>
             }
           </div>
