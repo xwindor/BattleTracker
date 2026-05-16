@@ -1,6 +1,6 @@
 import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, TemplateRef, ViewChild, ElementRef } from "@angular/core";
 import { CommonModule } from "@angular/common";
-import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
+import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { Subscription } from "rxjs";
 import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
@@ -43,6 +43,7 @@ interface LocalLogEntry {
     NgxSliderModule,
     NgbNavModule,
     NgbDropdownModule,
+    NgbTooltip,
     FormsModule,
     DragDropModule,
     ConditionMonitorComponent,
@@ -168,6 +169,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
   expandedDeckPanels = new Set<IParticipant>();
+  private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
   private readonly participantClaimable = new Map<IParticipant, boolean>();
@@ -248,8 +250,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isMatrix(p)) return;
     const confirmed = await this.confirmationDialog.simpleConfirm(`Reset OS to 0 for ${p.name}?`);
     if (!confirmed) return;
+    UndoHandler.StartActions();
     this.osTracking.resetOS(this.asMatrix(p));
     this.syncSharedState();
+    this.changeDetector.detectChanges();
   }
 
   dismissIcAlert(index: number): void {
@@ -566,7 +570,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
                  : vrModeStr === "cold-sim" ? VRMode.ColdSim
                  : VRMode.AR;
       this.applyVRMode(mp, mode);
-      this.appendSharedLog("GM", `${mp.name} deck configured (DP${mp.dataProcessing} ${mode})`);
       this.sort();
       return;
     }
@@ -618,7 +621,27 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
-      this.appendSharedLog(target.name || "Player", `initiative roll: ${target.diceIni}`);
+      const total = target.getCurrentInitiative();
+      const intuition = this.getParticipantIntuition(target);
+      let baseLabel: string;
+      if (this.isMatrix(target) && this.asMatrix(target).vrMode !== VRMode.AR) {
+        baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
+      } else {
+        baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
+      }
+      const rawValues = command.payload?.["diceValues"];
+      const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+      if (diceValues.length > 0) {
+        this.appendSharedLog(
+          target.name || "Player",
+          `initiative roll: ${baseLabel} + [${diceValues.join(", ")}] = ${total}`
+        );
+      } else {
+        this.appendSharedLog(
+          target.name || "Player",
+          `initiative roll: ${baseLabel} + manual(${target.diceIni}) = ${total}`
+        );
+      }
       if (this.initiativePrepActive) {
         this.updateInitiativePrepInfo();
       }
@@ -723,6 +746,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           base.overwatchAlert = p.overwatchAlert;
           base.jackedIn = p.jackedIn;
           base.isVRCatatonic = p.blocksPhysicalActions;
+          base.dataProcessing = p.dataProcessing;
+          base.attack = p.attack;
+          base.sleaze = p.sleaze;
+          base.firewall = p.firewall;
+          base.deviceRating = p.deviceRating;
         }
 
         return base;
@@ -1075,7 +1103,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
     const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
     const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
-    if (isCyberdeckAct && !this.isMatrix(sender)) {
+    if (isCyberdeckAct && (!this.isMatrix(sender) || !this.asMatrix(sender).jackedIn)) {
       return false;
     }
     if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
@@ -1163,6 +1191,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (isCyberdeckAct && !this.isMatrix(sender)) {
       return "Requires a cyberdeck.";
     }
+    if (isCyberdeckAct && this.isMatrix(sender) && !this.asMatrix(sender).jackedIn) {
+      return "Must be jacked in to use this action.";
+    }
     if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return "Cannot take physical actions while in VR.";
     }
@@ -1177,7 +1208,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return "Selected. Click again to deselect.";
     }
     if (this.canUseDeclaredAction(sender, action)) {
-      return "Click to select.";
+      return "";
     }
     const selection = this.getDeclaredActionSelection(sender);
     if (action.economy === "simple" && selection.complex) {
@@ -1875,6 +1906,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.participantIntuitions.get(mp) ?? 0;
     mp.baseIni = reaction + intuition;
+    this.pendingVrModes.set(mp, VRMode.AR);
     this.syncSharedState();
     this.sort();
   }
@@ -1882,7 +1914,43 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   removeDeck(p: IParticipant) {
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
+    this.pendingVrModes.delete(p);
     this.demoteToParticipant(p as MatrixParticipant);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  getPendingVrMode(p: IParticipant): VRMode {
+    return this.pendingVrModes.get(p) ?? VRMode.AR;
+  }
+
+  setPendingVrMode(p: IParticipant, mode: VRMode): void {
+    this.pendingVrModes.set(p, mode);
+  }
+
+  gmJackIn(p: IParticipant): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    const mp = p as MatrixParticipant;
+    const mode = this.getPendingVrMode(p);
+    this.applyVRMode(mp, mode);
+    mp.jackedIn = true; // force true even for AR so Phase 2 shows
+    this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
+    mp.rollInitiative();
+    const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
+    LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  gmJackOut(p: IParticipant): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    const mp = p as MatrixParticipant;
+    this.applyVRMode(mp, VRMode.AR); // resets to AR, sets jackedIn=false
+    this.pendingVrModes.set(p, VRMode.AR);
+    mp.rollInitiative();
+    LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();
   }

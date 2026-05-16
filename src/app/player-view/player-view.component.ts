@@ -2,7 +2,7 @@ import { AfterViewChecked, Component, ElementRef, OnDestroy, OnInit, TemplateRef
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
-import { NgbModal, NgbModalModule, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
+import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 
@@ -15,7 +15,7 @@ interface DeclaredActionSelection {
 @Component({
   standalone: true,
   selector: "app-player-view",
-  imports: [ CommonModule, FormsModule, NgbModalModule, DiceRollerComponent ],
+  imports: [ CommonModule, FormsModule, NgbModalModule, NgbTooltip, DiceRollerComponent ],
   templateUrl: "./player-view.component.html",
   styleUrls: [ "./player-view.component.css" ]
 })
@@ -32,6 +32,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   physicalHealth = 10;
   stunHealth = 10;
   deckConfigExpanded = false;
+  deckJackedIn = false;
   dataProcessing = 6;
   attack = 0;
   sleaze = 0;
@@ -73,6 +74,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   incomingDiceRoll: { roller: string; values: number[] } | null = null;
+  ownDiceRoll: { values: number[] } | null = null;
 
   onPlayerDiceRolled(values: number[]): void {
     if (!this.connected) return;
@@ -213,9 +215,31 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.info = "Create character request sent.";
   }
 
-  applyDeckConfig() {
+  openDeckPanel() {
     if (!this.primaryCharacter) return;
-    this.info = "";
+    this.deckConfigExpanded = true;
+  }
+
+  activateDeck() {
+    if (!this.primaryCharacter) return;
+    // Enable deck on server (no initiative roll — player picks mode and jacks in separately).
+    this.session.sendCommand({
+      type: "configure_deck",
+      player: this.playerToken,
+      payload: {
+        isMatrix: true,
+        dataProcessing: this.dataProcessing,
+        attack: this.attack,
+        sleaze: this.sleaze,
+        firewall: this.firewall,
+        deviceRating: this.deviceRating,
+        vrMode: "AR"
+      }
+    });
+  }
+
+  jackIn() {
+    if (!this.primaryCharacter) return;
     this.session.sendCommand({
       type: "configure_deck",
       player: this.playerToken,
@@ -229,23 +253,107 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         vrMode: this.vrMode
       }
     });
-    this.info = "Deck configuration sent.";
+    this.deckJackedIn = true;
+    this.autoRollForMode(this.vrMode);
+    this.info = "";
   }
 
-  removeDeckConfig() {
-    this.info = "";
+  confirmMode() {
+    if (!this.primaryCharacter?.isMatrix) return;
     this.session.sendCommand({
       type: "configure_deck",
       player: this.playerToken,
-      payload: { isMatrix: false }
+      payload: {
+        isMatrix: true,
+        dataProcessing: this.dataProcessing,
+        attack: this.attack,
+        sleaze: this.sleaze,
+        firewall: this.firewall,
+        deviceRating: this.deviceRating,
+        vrMode: this.vrMode
+      }
     });
-    this.deckConfigExpanded = false;
-    this.info = "Deck removed.";
+    this.deckJackedIn = true;
+    this.autoRollForMode(this.vrMode);
+    this.info = "";
   }
 
-  switchVRMode(mode: string) {
-    this.vrMode = mode;
-    this.applyDeckConfig();
+  jackOut() {
+    if (!this.primaryCharacter) return;
+    // Keep deck active on the server (isMatrix stays true) — just reset to AR initiative.
+    this.session.sendCommand({
+      type: "configure_deck",
+      player: this.playerToken,
+      payload: {
+        isMatrix: true,
+        dataProcessing: this.dataProcessing,
+        attack: this.attack,
+        sleaze: this.sleaze,
+        firewall: this.firewall,
+        deviceRating: this.deviceRating,
+        vrMode: "AR"
+      }
+    });
+    this.vrMode = "AR";
+    this.deckJackedIn = false;
+    this.autoRollForMode("AR");
+    this.info = "";
+  }
+
+  removeDeckConfig() {
+    if (this.primaryCharacter?.isMatrix) {
+      // Only demote on the server if the deck was actually activated.
+      this.session.sendCommand({
+        type: "configure_deck",
+        player: this.playerToken,
+        payload: { isMatrix: false }
+      });
+    }
+    this.deckConfigExpanded = false;
+    this.deckJackedIn = false;
+    this.info = "";
+  }
+
+  onDeckStatChange() {
+    // Sync stat changes once the deck is active on the server.
+    if (!this.primaryCharacter?.isMatrix) return;
+    this.session.sendCommand({
+      type: "configure_deck",
+      player: this.playerToken,
+      payload: {
+        isMatrix: true,
+        dataProcessing: this.dataProcessing,
+        attack: this.attack,
+        sleaze: this.sleaze,
+        firewall: this.firewall,
+        deviceRating: this.deviceRating,
+        vrMode: this.primaryCharacter?.vrMode ?? this.vrMode
+      }
+    });
+  }
+
+  private autoRollForMode(mode: string, overrideId?: string) {
+    const actor = this.primaryCharacter;
+    const participantId = overrideId ?? actor?.id;
+    if (!participantId) return;
+    const diceCount = mode === "hot-sim" ? 4 : mode === "cold-sim" ? 3 : 1;
+    const values: number[] = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1);
+    const diceSum = values.reduce((s, v) => s + v, 0);
+    const rollerName = this.characterName || this.playerToken;
+
+    this.ownDiceRoll = { values };
+
+    this.session.sendCommand({
+      type: "dice_roll",
+      player: this.playerToken,
+      payload: { roller: rollerName, diceCount: values.length, values }
+    });
+
+    this.session.sendCommand({
+      type: "roll_submission",
+      player: this.playerToken,
+      payload: { participantId, roll: diceSum, diceValues: values, diceSum }
+    });
   }
 
   claimSelectedCharacter() {
@@ -289,16 +397,30 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       return;
     }
     const diceCount = Math.max(1, Number(actor.initiativeDice || 1));
-    let roll = 0;
-    for (let i = 0; i < diceCount; i++) {
-      roll += Math.floor(Math.random() * 6) + 1;
-    }
+    const values: number[] = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1);
+    const diceSum = values.reduce((s, v) => s + v, 0);
+    const roll = this.clampInitiativeRoll(diceSum, actor.initiativeDice);
+    const rollerName = this.characterName || this.playerToken;
+
+    // Show dice animation in the player's own "Your Roll" section.
+    this.ownDiceRoll = { values };
+
+    // Broadcast so other players' dice rollers animate.
+    this.session.sendCommand({
+      type: "dice_roll",
+      player: this.playerToken,
+      payload: { roller: rollerName, diceCount: values.length, values }
+    });
+
+    // Submit initiative roll; include dice breakdown for GM log formula.
     this.session.sendCommand({
       type: "roll_submission",
       player: this.playerToken,
       payload: {
         participantId: actor.id,
-        roll
+        roll,
+        diceValues: values,
+        diceSum
       }
     });
     this.promptRoll = false;
@@ -500,7 +622,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   canUseDeclaredAction(action: DeclaredActionItem): boolean {
     const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
     const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
-    if (isCyberdeckAct && !this.primaryCharacter?.isMatrix) {
+    if (isCyberdeckAct && (!this.primaryCharacter?.isMatrix || !this.primaryCharacter?.jackedIn)) {
       return false;
     }
     if (isPhysicalAct && this.primaryCharacter?.isVRCatatonic) {
@@ -527,16 +649,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (isCyberdeckAct && !this.primaryCharacter?.isMatrix) {
       return "Requires a cyberdeck.";
     }
+    if (isCyberdeckAct && this.primaryCharacter?.isMatrix && !this.primaryCharacter?.jackedIn) {
+      return "Must be jacked in to use this action.";
+    }
     if (isPhysicalAct && this.primaryCharacter?.isVRCatatonic) {
       return "Cannot take physical actions while in VR.";
     }
-    if (this.isDeclaredActionSelected(action)) {
-      return "Selected. Click again to deselect.";
+    if (!this.canUseDeclaredAction(action) && !this.isDeclaredActionSelected(action)) {
+      return "Not available with current action economy.";
     }
-    if (this.canUseDeclaredAction(action)) {
-      return "Click to select.";
-    }
-    return "Not allowed by current action limits.";
+    return "";
   }
 
   toggleDeclaredAction(action: DeclaredActionItem) {
@@ -751,7 +873,25 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         this.info = "";
       }
     }
+    const isFirstState = this.state === null;
     this.state = next;
     this.lastKnownCombatStarted = started;
+    // Restore deck fields from server state (survives reconnect/claim).
+    const pc = this.primaryCharacter;
+    if (pc?.isMatrix) {
+      if (pc.dataProcessing != null) this.dataProcessing = pc.dataProcessing;
+      if (pc.attack != null) this.attack = pc.attack;
+      if (pc.sleaze != null) this.sleaze = pc.sleaze;
+      if (pc.firewall != null) this.firewall = pc.firewall;
+      if (pc.deviceRating != null) this.deviceRating = pc.deviceRating;
+      if (pc.vrMode) this.vrMode = pc.vrMode;
+      // On first state load (reconnect/claim), restore panel + jack-in state.
+      if (isFirstState) {
+        this.deckConfigExpanded = true;
+        // jackedIn is only true server-side for Cold/Hot Sim; AR leaves it false.
+        // Show Phase 2 if truly jacked in (VR modes), Phase 1 (Jack In prompt) otherwise.
+        this.deckJackedIn = pc.jackedIn === true;
+      }
+    }
   }
 }

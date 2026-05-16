@@ -22,19 +22,6 @@
   </div>
 
   @if (connected && state) {
-  @if (primaryCharacter?.overwatchAlert === 'convergence') {
-  <div class="alert alert-danger" role="alert">
-    <strong>&#9760; CONVERGENCE!</strong>
-    GOD has traced <strong>{{ primaryCharacter!.name }}</strong> — OS: {{ primaryCharacter!.overwatch }}.
-    Jack out immediately or face the Convergence attack.
-  </div>
-  }
-  @if (primaryCharacter?.overwatchAlert === 'ic-alert') {
-  <div class="alert alert-warning" role="alert">
-    <strong>&#9888; IC Alert</strong> — OS: {{ primaryCharacter!.overwatch }}.
-    The host has likely escalated its IC response.
-  </div>
-  }
   @if (ownParticipants.length === 0) {
   <div class="card mb-3">
     <div class="card-header">Claim Or Create Character</div>
@@ -185,6 +172,7 @@
     <div class="card-header">Dice Roller</div>
     <app-dice-roller
       [incomingRoll]="incomingDiceRoll"
+      [ownRoll]="ownDiceRoll"
       (rolledEvent)="onPlayerDiceRolled($event)">
     </app-dice-roller>
   </div>
@@ -207,12 +195,18 @@
   <div class="card mt-3">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>Your Character</span>
-      @if (primaryCharacter) {
+      @if (primaryCharacter && !deckConfigExpanded) {
       <button type="button" class="btn btn-sm btn-outline-secondary"
-        [class.active]="deckConfigExpanded"
-        (click)="deckConfigExpanded = !deckConfigExpanded"
-        title="Configure Cyberdeck">
-        &#x1F4BB; {{ deckConfigExpanded ? 'Hide Deck' : 'Cyberdeck' }}
+        (click)="openDeckPanel()"
+        title="Enable Cyberdeck">
+        Cyberdeck
+      </button>
+      }
+      @if (primaryCharacter && deckConfigExpanded) {
+      <button type="button" class="btn btn-sm btn-outline-danger"
+        (click)="removeDeckConfig()"
+        [title]="primaryCharacter.isMatrix ? 'Remove cyberdeck' : 'Cancel'">
+        {{ primaryCharacter.isMatrix ? 'Remove Deck' : 'Cancel' }}
       </button>
       }
     </div>
@@ -228,64 +222,102 @@
         @if (primaryCharacter.isVRCatatonic) {
         <span class="badge text-bg-warning ms-1">VR CATATONIC</span>
         }
-        &nbsp;|&nbsp;
-        <span
-          [class.text-warning]="primaryCharacter.overwatchAlert === 'ic-alert'"
-          [class.fw-bold]="primaryCharacter.overwatchAlert === 'ic-alert'"
-          [class.text-danger]="primaryCharacter.overwatchAlert === 'convergence'"
-          [class.fw-bold]="primaryCharacter.overwatchAlert === 'convergence'">
-          OS: {{ primaryCharacter.overwatch ?? 0 }}
-        </span>
         }
       </div>
       @if (deckConfigExpanded) {
       <div class="mt-3 deck-config-panel">
-        <div class="row g-2 mb-2">
+
+        <!-- Deck stats — always editable, auto-sync while jacked in -->
+        <div class="row g-2 mb-3">
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">DP</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="dataProcessing" min="1">
+            <label class="form-label form-label-sm mb-0">Data Processing</label>
+            <input type="number" class="form-control form-control-sm" [(ngModel)]="dataProcessing"
+              (ngModelChange)="onDeckStatChange()" min="1">
           </div>
           <div class="col-6 col-md-2">
             <label class="form-label form-label-sm mb-0">Attack</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="attack" min="0">
+            <input type="number" class="form-control form-control-sm" [(ngModel)]="attack"
+              (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
             <label class="form-label form-label-sm mb-0">Sleaze</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="sleaze" min="0">
+            <input type="number" class="form-control form-control-sm" [(ngModel)]="sleaze"
+              (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
             <label class="form-label form-label-sm mb-0">Firewall</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="firewall" min="0">
+            <input type="number" class="form-control form-control-sm" [(ngModel)]="firewall"
+              (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">DR</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="deviceRating" min="0">
+            <label class="form-label form-label-sm mb-0">Device Rating</label>
+            <input type="number" class="form-control form-control-sm" [(ngModel)]="deviceRating"
+              (ngModelChange)="onDeckStatChange()" min="0">
           </div>
         </div>
-        <div class="btn-group btn-group-sm mb-2">
-          <button type="button" class="btn"
-            [class.btn-secondary]="vrMode === 'AR'"
-            [class.btn-outline-secondary]="vrMode !== 'AR'"
-            (click)="vrMode = 'AR'" title="AR — REA+INT+1d6">AR</button>
-          <button type="button" class="btn"
-            [class.btn-info]="vrMode === 'cold-sim'"
-            [class.btn-outline-info]="vrMode !== 'cold-sim'"
-            (click)="vrMode = 'cold-sim'" title="Cold-Sim VR — DP+INT+3d6">COLD</button>
-          <button type="button" class="btn"
-            [class.btn-danger]="vrMode === 'hot-sim'"
-            [class.btn-outline-danger]="vrMode !== 'hot-sim'"
-            (click)="vrMode = 'hot-sim'" title="Hot-Sim VR — DP+INT+4d6">HOT</button>
+
+        @if (!primaryCharacter.isMatrix) {
+        <!-- Phase 0: Deck not yet activated — fill stats and confirm -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="small text-muted">Enter deck stats above, then activate.</span>
+          <button type="button" class="btn btn-sm btn-primary" (click)="activateDeck()">Create</button>
         </div>
-        <div class="d-flex gap-2">
-          <button type="button" class="btn btn-sm btn-primary" (click)="applyDeckConfig()">
-            Apply
-          </button>
-          @if (primaryCharacter.isMatrix) {
-          <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeDeckConfig()">
-            Remove Deck
-          </button>
-          }
+
+        } @else if (!deckJackedIn) {
+        <!-- Phase 1: Deck active, not yet jacked in — choose mode and roll initiative -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="small text-muted">Jack in as:</span>
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn"
+              [class.btn-secondary]="vrMode === 'AR'"
+              [class.btn-outline-secondary]="vrMode !== 'AR'"
+              (click)="vrMode = 'AR'" title="AR — REA+INT+1d6">AR</button>
+            <button type="button" class="btn"
+              [class.btn-info]="vrMode === 'cold-sim'"
+              [class.btn-outline-info]="vrMode !== 'cold-sim'"
+              (click)="vrMode = 'cold-sim'" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+            <button type="button" class="btn"
+              [class.btn-danger]="vrMode === 'hot-sim'"
+              [class.btn-outline-danger]="vrMode !== 'hot-sim'"
+              (click)="vrMode = 'hot-sim'" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" (click)="jackIn()">Jack In</button>
         </div>
+
+        } @else {
+        <!-- Phase 2: Jacked in — switch mode or jack out -->
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="small text-muted">
+            Mode:
+            <span class="fw-semibold"
+              [class.text-secondary]="primaryCharacter.vrMode === 'AR'"
+              [class.text-info]="primaryCharacter.vrMode === 'cold-sim'"
+              [class.text-danger]="primaryCharacter.vrMode === 'hot-sim'">
+              {{ primaryCharacter.vrMode === 'cold-sim' ? 'Cold Sim' : primaryCharacter.vrMode === 'hot-sim' ? 'Hot Sim' : 'AR' }}
+            </span>
+            &nbsp;Switch to:
+          </span>
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn"
+              [class.btn-secondary]="vrMode === 'AR'"
+              [class.btn-outline-secondary]="vrMode !== 'AR'"
+              (click)="vrMode = 'AR'" title="AR — REA+INT+1d6">AR</button>
+            <button type="button" class="btn"
+              [class.btn-info]="vrMode === 'cold-sim'"
+              [class.btn-outline-info]="vrMode !== 'cold-sim'"
+              (click)="vrMode = 'cold-sim'" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+            <button type="button" class="btn"
+              [class.btn-danger]="vrMode === 'hot-sim'"
+              [class.btn-outline-danger]="vrMode !== 'hot-sim'"
+              (click)="vrMode = 'hot-sim'" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary"
+            (click)="confirmMode()"
+            [disabled]="vrMode === primaryCharacter.vrMode">Switch Mode</button>
+          <button type="button" class="btn btn-sm btn-warning" (click)="jackOut()">Jack Out</button>
+        </div>
+        }
+
       </div>
       }
       }
@@ -340,8 +372,9 @@
               (click)="toggleDeclaredAction(actionName)"
               [class.action-item-selected]="isDeclaredActionSelected(actionName)"
               [class.action-item-disabled]="!canUseDeclaredAction(actionName)"
-              [disabled]="!canUseDeclaredAction(actionName)"
-              [title]="getDeclaredActionDisabledReason(actionName)">
+              [ngbTooltip]="getDeclaredActionDisabledReason(actionName)"
+              container="body"
+              placement="top">
               @if (isDeclaredActionSelected(actionName)) {
               <span class="action-check">x</span>
               }
@@ -389,7 +422,10 @@
                 (click)="toggleDeclaredAction(actionName)"
                 [class.action-item-selected]="isDeclaredActionSelected(actionName)"
                 [class.action-item-disabled]="!canUseDeclaredAction(actionName)"
-                [disabled]="!canUseDeclaredAction(actionName)">
+                [ngbTooltip]="getDeclaredActionDisabledReason(actionName)"
+                container="body"
+                placement="top"
+                triggers="hover">
                 @if (isDeclaredActionSelected(actionName)) {
                 <span class="action-check">x</span>
                 }

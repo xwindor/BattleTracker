@@ -178,22 +178,6 @@
                 </button>
               </div>
             </div>
-            @if (isMatrix(p)) {
-              <div class="btn-group btn-group-sm matrix-vr-mode-toggle mt-1">
-                <button type="button" class="btn btn-sm"
-                  [class.btn-secondary]="asMatrix(p).vrMode === VRMode.AR"
-                  [class.btn-outline-secondary]="asMatrix(p).vrMode !== VRMode.AR"
-                  (click)="onVRModeChange(p, VRMode.AR)" title="Augmented Reality (1d6)">AR</button>
-                <button type="button" class="btn btn-sm"
-                  [class.btn-info]="asMatrix(p).vrMode === VRMode.ColdSim"
-                  [class.btn-outline-info]="asMatrix(p).vrMode !== VRMode.ColdSim"
-                  (click)="onVRModeChange(p, VRMode.ColdSim)" title="Cold-Sim VR (3d6)">COLD</button>
-                <button type="button" class="btn btn-sm"
-                  [class.btn-danger]="asMatrix(p).vrMode === VRMode.HotSim"
-                  [class.btn-outline-danger]="asMatrix(p).vrMode !== VRMode.HotSim"
-                  (click)="onVRModeChange(p, VRMode.HotSim)" title="Hot-Sim VR (4d6)">HOT</button>
-              </div>
-            }
           </div>
           <div class="col-7 col-xl-3 btn-group" role="group">
             @if (!p.edge
@@ -277,7 +261,7 @@
                 [class.active]="isDeckPanelExpanded(p)"
                 (click)="toggleDeckPanel(p)"
                 title="Cyberdeck configuration">
-                &#x1F4BB;
+                Deck
               </button>
               <button type="button"
                 class="btn"
@@ -312,6 +296,7 @@
         @if (isDeckPanelExpanded(p)) {
         <div class="row deck-panel py-2 px-3 mb-1">
           @if (!isMatrix(p)) {
+          <!-- Phase 0: No deck -->
           <div class="col d-flex align-items-center gap-2">
             <span class="small text-muted">No deck configured.</span>
             <button type="button" class="btn btn-sm btn-outline-primary" (click)="enableDeck(p)">
@@ -321,7 +306,8 @@
           }
           @else {
           <div class="col">
-            <div class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Deck stats + Remove Deck — always visible when deck is active -->
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
               <div class="input-group input-group-sm" style="width: auto">
                 <span class="input-group-text gm-stat-chip" title="Attack">A</span>
                 <input class="form-control text-center gm-stat-input" type="number"
@@ -344,6 +330,59 @@
                 Remove Deck
               </button>
             </div>
+            @if (!asMatrix(p).jackedIn) {
+            <!-- Phase 1.5: Deck active, not jacked in -->
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="small text-muted">Jack in as:</span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn"
+                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
+                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
+                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
+                <button type="button" class="btn"
+                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
+                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
+                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+                <button type="button" class="btn"
+                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
+                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
+                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-primary" (click)="gmJackIn(p)">Jack In</button>
+            </div>
+            } @else {
+            <!-- Phase 2: Jacked in -->
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="small text-muted">
+                Mode:
+                <span class="fw-semibold"
+                  [class.text-secondary]="asMatrix(p).vrMode === VRMode.AR"
+                  [class.text-info]="asMatrix(p).vrMode === VRMode.ColdSim"
+                  [class.text-danger]="asMatrix(p).vrMode === VRMode.HotSim">
+                  {{ asMatrix(p).vrMode === VRMode.ColdSim ? 'Cold Sim' : asMatrix(p).vrMode === VRMode.HotSim ? 'Hot Sim' : 'AR' }}
+                </span>
+                &nbsp;Switch to:
+              </span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn"
+                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
+                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
+                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
+                <button type="button" class="btn"
+                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
+                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
+                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+                <button type="button" class="btn"
+                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
+                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
+                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-primary"
+                (click)="gmJackIn(p)"
+                [disabled]="getPendingVrMode(p) === asMatrix(p).vrMode">Switch Mode</button>
+              <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(p)">Jack Out</button>
+            </div>
+            }
           </div>
           }
         </div>
@@ -558,8 +597,10 @@
               (click)="btnDeclaredAct_Click(actModalParticipant, actionName)"
               [class.action-item-selected]="isDeclaredActionSelected(actModalParticipant, actionName)"
               [class.action-item-disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-              [disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-              [attr.title]="getActionDisabledReason(actModalParticipant, actionName)">
+              [ngbTooltip]="getActionDisabledReason(actModalParticipant, actionName)"
+              container="body"
+              placement="top"
+              triggers="hover">
               @if (isDeclaredActionSelected(actModalParticipant, actionName)) {
               <span class="action-check">x</span>
               }
@@ -607,8 +648,10 @@
                 (click)="btnDeclaredAct_Click(actModalParticipant, actionName)"
                 [class.action-item-selected]="isDeclaredActionSelected(actModalParticipant, actionName)"
                 [class.action-item-disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-                [disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-                [attr.title]="getActionDisabledReason(actModalParticipant, actionName)">
+                [ngbTooltip]="getActionDisabledReason(actModalParticipant, actionName)"
+                container="body"
+                placement="top"
+                triggers="hover">
                 @if (isDeclaredActionSelected(actModalParticipant, actionName)) {
                 <span class="action-check">x</span>
                 }
@@ -636,24 +679,26 @@
     </div>
     }
   </div>
-  @if (actModalSuggestedOsDelta > 0) {
-  <div class="os-prompt-bar">
-    <span class="os-prompt-label">&#9888; Illegal action — OS consequence: {{ actModalIllegalActionSummary }}</span>
-    <label class="os-prompt-field">
-      Add OS:
-      <input type="number" class="os-prompt-input"
-        [ngModel]="actModalEffectiveOsDelta"
-        (ngModelChange)="osModalDeltaOverride = $event"
-        min="0">
-    </label>
-  </div>
-  }
-  <div class="modal-footer">
-    <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
-    <button type="button" class="btn btn-primary" (click)="submitActModal()"
-      [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
-      @if (actModalSuggestedOsDelta > 0) { Submit + Add OS } @else { Submit Actions }
-    </button>
+  <div class="modal-footer flex-column align-items-stretch gap-2">
+    @if (actModalSuggestedOsDelta > 0) {
+    <div class="os-prompt-bar w-100">
+      <span class="os-prompt-label">&#9888; Illegal action — OS consequence: {{ actModalIllegalActionSummary }}</span>
+      <label class="os-prompt-field">
+        Add OS:
+        <input type="number" class="os-prompt-input"
+          [ngModel]="actModalEffectiveOsDelta"
+          (ngModelChange)="osModalDeltaOverride = $event"
+          min="0">
+      </label>
+    </div>
+    }
+    <div class="d-flex gap-2 justify-content-end w-100">
+      <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" (click)="submitActModal()"
+        [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
+        @if (actModalSuggestedOsDelta > 0) { Submit + Add OS } @else { Submit Actions }
+      </button>
+    </div>
   </div>
 </ng-template>
 
