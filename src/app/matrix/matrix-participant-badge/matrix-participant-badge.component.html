@@ -1,21 +1,23 @@
 <div class="matrix-badge" *ngIf="participant">
   <span class="vr-chip" [ngClass]="vrModeClass" [title]="'VR mode: ' + vrModeLabel">{{ vrModeLabel }}</span>
 
-  <button
-    type="button"
-    class="os-chip"
-    [ngClass]="'os-' + osTier"
-    (click)="onOsChipClick($event)"
-    [title]="'OS ' + participant.overwatch + ' — click to edit'">
-    OS {{ participant.overwatch }}
-  </button>
+  <span class="os-chip-wrap">
+    <button
+      type="button"
+      class="os-chip"
+      [ngClass]="'os-' + osTier"
+      (click)="onOsChipClick($event)"
+      [title]="'OS ' + participant.overwatch + ' — click to adjust'">
+      OS&nbsp;{{ participant.overwatch }}
+    </button>
 
-  <span *ngIf="osEditorOpen" class="os-editor" (click)="$event.stopPropagation()">
-    <button type="button" class="os-adj-btn" (click)="onOsAdjust(-5, $event)" title="-5 OS">&minus;5</button>
-    <button type="button" class="os-adj-btn" (click)="onOsAdjust(-1, $event)" title="-1 OS">&minus;1</button>
-    <button type="button" class="os-adj-btn os-adj-pos" (click)="onOsAdjust(1, $event)" title="+1 OS">+1</button>
-    <button type="button" class="os-adj-btn os-adj-pos" (click)="onOsAdjust(5, $event)" title="+5 OS">+5</button>
-    <button type="button" class="os-adj-btn os-adj-reset" (click)="onOsResetClick($event)" title="Reset OS to 0">Reset</button>
+    <span *ngIf="osEditorOpen" class="os-editor" (click)="$event.stopPropagation()">
+      <button type="button" class="os-adj-btn" (click)="onOsAdjust(-5, $event)" title="-5 OS">&minus;5</button>
+      <button type="button" class="os-adj-btn" (click)="onOsAdjust(-1, $event)" title="-1 OS">&minus;1</button>
+      <button type="button" class="os-adj-btn os-adj-pos" (click)="onOsAdjust(1, $event)" title="+1 OS">+1</button>
+      <button type="button" class="os-adj-btn os-adj-pos" (click)="onOsAdjust(5, $event)" title="+5 OS">+5</button>
+      <button type="button" class="os-adj-btn os-adj-reset" (click)="onOsResetClick($event)" title="Reset OS to 0">Reset</button>
+    </span>
   </span>
 
   <span *ngIf="blocksPhysical" class="vr-catatonic" title="Decker is in VR — physically catatonic, Matrix actions only">

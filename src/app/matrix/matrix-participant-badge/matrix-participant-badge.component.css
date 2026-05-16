@@ -1,36 +1,40 @@
 .matrix-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-family: "Consolas", "Menlo", monospace;
   font-size: 0.78rem;
   vertical-align: middle;
+  /* Do not add position:relative here — the absolute editor must escape
+     this element so it isn't clipped by any overflow on the row. */
 }
 
 /* VR mode chip --------------------------------------------------- */
 .vr-chip {
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 3px;
   font-weight: 700;
   letter-spacing: 0.5px;
   color: #fff;
+  line-height: 1.5;
   text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
 }
 
-.vr-mode-ar {
-  background-color: #6c757d;     /* gray */
-}
-
-.vr-mode-cold {
-  background-color: #2b6cb0;     /* blue */
-}
-
-.vr-mode-hot {
-  background-color: #c0392b;     /* red */
+.vr-mode-ar   { background-color: #6c757d; }
+.vr-mode-cold { background-color: #2b6cb0; }
+.vr-mode-hot  {
+  background-color: #c0392b;
   box-shadow: 0 0 4px rgba(192, 57, 43, 0.7);
 }
 
-/* OS chip --------------------------------------------------------- */
+/* OS chip + absolute editor wrapper ------------------------------ */
+.os-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .os-chip {
   border: 1px solid currentColor;
   background: transparent;
@@ -38,28 +42,82 @@
   padding: 1px 6px;
   font-weight: 700;
   cursor: pointer;
-  line-height: 1.2;
+  line-height: 1.5;
+  font-family: inherit;
+  font-size: inherit;
+  white-space: nowrap;
 }
 
-.os-chip:focus {
-  outline: 2px solid rgba(255, 255, 255, 0.4);
+.os-chip:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
   outline-offset: 1px;
 }
 
-.os-ok {
-  color: #2ecc71;                /* green: OS 0–19 */
-}
-
-.os-alert {
-  color: #f39c12;                /* amber: OS 20–39 */
-  background-color: rgba(243, 156, 18, 0.08);
-}
-
+.os-ok         { color: #2ecc71; }
+.os-alert      { color: #f39c12; background-color: rgba(243, 156, 18, 0.08); }
 .os-convergence {
   color: #fff;
-  background-color: #c0392b;     /* red: OS 40+ */
+  background-color: #c0392b;
   border-color: #c0392b;
   animation: matrix-badge-pulse 1.4s ease-in-out infinite;
+}
+
+/* OS inline editor — floats below the chip, doesn't push row content */
+.os-editor {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  padding: 3px 5px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+.os-adj-btn {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;        /* pill shape */
+  background: #2c2c2c;
+  color: #bbb;
+  cursor: pointer;
+  line-height: 1.5;
+  font-family: inherit;
+  font-weight: 600;
+  min-width: 1.7rem;
+  text-align: center;
+  transition: background 0.1s, color 0.1s;
+}
+
+.os-adj-btn:hover {
+  background: #3c3c3c;
+  color: #fff;
+}
+
+.os-adj-pos {
+  border-color: #27ae60;
+  color: #2ecc71;
+}
+
+.os-adj-pos:hover {
+  background: rgba(46, 204, 113, 0.18);
+  color: #5de68a;
+}
+
+.os-adj-reset {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+
+.os-adj-reset:hover {
+  background: rgba(231, 76, 60, 0.18);
+  color: #ff6b5b;
 }
 
 /* VR catatonic badge ---------------------------------------------- */
@@ -68,54 +126,14 @@
   color: #f1c40f;
   border: 1px dashed #f1c40f;
   border-radius: 3px;
-  padding: 1px 6px;
+  padding: 1px 5px;
   font-weight: 700;
   letter-spacing: 0.5px;
+  white-space: nowrap;
+  line-height: 1.5;
 }
 
 @keyframes matrix-badge-pulse {
   0%, 100% { box-shadow: 0 0 4px rgba(192, 57, 43, 0.6); }
   50%      { box-shadow: 0 0 10px rgba(192, 57, 43, 1); }
-}
-
-/* OS inline editor ------------------------------------------------ */
-.os-editor {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.os-adj-btn {
-  font-size: 0.7rem;
-  padding: 1px 5px;
-  border: 1px solid #555;
-  border-radius: 3px;
-  background: #2a2a2a;
-  color: #ccc;
-  cursor: pointer;
-  line-height: 1.3;
-  font-family: inherit;
-}
-
-.os-adj-btn:hover {
-  background: #3a3a3a;
-  color: #fff;
-}
-
-.os-adj-pos {
-  border-color: #2ecc71;
-  color: #2ecc71;
-}
-
-.os-adj-pos:hover {
-  background: rgba(46, 204, 113, 0.15);
-}
-
-.os-adj-reset {
-  border-color: #e67e22;
-  color: #e67e22;
-}
-
-.os-adj-reset:hover {
-  background: rgba(230, 126, 34, 0.15);
 }

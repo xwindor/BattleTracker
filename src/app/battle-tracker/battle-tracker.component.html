@@ -97,9 +97,9 @@
   <div class="row">
     <div class="col-9">
       @for (msg of icAlertMessages; track $index) {
-      <div class="alert alert-warning alert-dismissible py-2 mb-2" role="alert">
-        <strong>&#9888; IC Alert</strong> — {{ msg }}
-        <button type="button" class="btn-close" (click)="dismissIcAlert($index)" aria-label="Dismiss"></button>
+      <div class="ic-alert-strip" role="alert">
+        <span class="ic-alert-text"><strong>&#9888; IC Alert</strong> — {{ msg }}</span>
+        <button type="button" class="ic-alert-dismiss" (click)="dismissIcAlert($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
       <div class="row bg-dark text-light">
