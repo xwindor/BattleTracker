@@ -680,22 +680,15 @@
   </div>
   <div class="modal-footer flex-column align-items-stretch gap-2">
     @if (actModalSuggestedOsDelta > 0) {
-    <div class="os-prompt-bar w-100">
-      <span class="os-prompt-label">&#9888; Illegal action — OS consequence: {{ actModalIllegalActionSummary }}</span>
-      <label class="os-prompt-field">
-        Add OS:
-        <input type="number" class="os-prompt-input"
-          [ngModel]="actModalEffectiveOsDelta"
-          (ngModelChange)="osModalDeltaOverride = $event"
-          min="0">
-      </label>
+    <div class="os-reminder w-100">
+      &#9888; Illegal action — add OS after resolving defense
     </div>
     }
     <div class="d-flex gap-2 justify-content-end w-100">
       <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
       <button type="button" class="btn btn-primary" (click)="submitActModal()"
         [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
-        @if (actModalSuggestedOsDelta > 0) { Submit + Add OS } @else { Submit Actions }
+        Submit Actions
       </button>
     </div>
   </div>

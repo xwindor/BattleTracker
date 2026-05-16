@@ -187,9 +187,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private convergenceModalRef: NgbModalRef | null = null;
   private osThresholdSub?: Subscription;
 
-  // -- OS accumulation prompt (act modal) --
-  /** User-overridden OS delta; null means use suggested sum from selection. */
-  osModalDeltaOverride: number | null = null;
+
 
   get currentBTTime(): BTTime {
     return new BTTime(this.combatManager.combatTurn, this.combatManager.initiativePass, this.combatManager.currentInitiative);
@@ -282,14 +280,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   get actModalSuggestedOsDelta(): number {
     return this.actModalIllegalOsActions.reduce((sum, a) => sum + a.delta, 0);
-  }
-
-  get actModalEffectiveOsDelta(): number {
-    return this.osModalDeltaOverride ?? this.actModalSuggestedOsDelta;
-  }
-
-  get actModalIllegalActionSummary(): string {
-    return this.actModalIllegalOsActions.map(a => `${a.name} (+${a.delta})`).join(", ");
   }
 
   drop(event: CdkDragDrop<string[]>) {
@@ -1020,7 +1010,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.actModalParticipant = sender;
     this.expandedDeclaredActionCategory = "free";
     this.expandedDeclaredActionDetailKey = null;
-    this.osModalDeltaOverride = null;
     if (!this.declaredActionSelections.has(sender)) {
       this.clearDeclaredActionSelection(sender);
     }
@@ -1028,7 +1017,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.actModalRef.result.finally(() => {
       this.actModalRef = null;
       this.actModalParticipant = null;
-      this.osModalDeltaOverride = null;
     });
   }
 
@@ -1043,14 +1031,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const actor = this.actModalParticipant;
-    const osDelta = this.actModalEffectiveOsDelta;
+    const illegalActions = this.actModalIllegalOsActions;
     this.performAct(actor, this.buildDeclaredActionLog(actor));
-    if (this.isMatrix(actor) && osDelta > 0) {
-      this.osTracking.addOS(this.asMatrix(actor), osDelta, this.actModalIllegalActionSummary);
-      this.syncSharedState();
+    if (illegalActions.length > 0) {
+      const names = illegalActions.map(a => a.name).join(", ");
+      this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
     }
     this.clearDeclaredActionSelection(actor);
-    this.osModalDeltaOverride = null;
     if (this.actModalRef) {
       this.actModalRef.close();
     }
