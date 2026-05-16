@@ -3,7 +3,7 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
-import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 
 interface DeclaredActionSelection {
@@ -469,12 +469,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (!this.actModalParticipant || !this.isDeclaredActionSelectionValid()) {
       return;
     }
+    const sel = this.declaredActionSelection;
+    const allSelected = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
+    const illegalActions = allSelected.filter(name => name in ILLEGAL_OS_ACTIONS);
     this.session.sendCommand({
       type: "act",
       player: this.playerToken,
       payload: {
         participantId: this.actModalParticipant.id,
-        declaredAction: this.buildDeclaredActionLog()
+        declaredAction: this.buildDeclaredActionLog(),
+        illegalActions
       }
     });
     this.closeActPlanner();

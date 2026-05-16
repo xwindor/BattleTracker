@@ -642,11 +642,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const playerName = command.player;
       const participantId = String(command.payload?.["participantId"] || "");
       const declaredAction = String(command.payload?.["declaredAction"] || "Act");
+      const illegalActions = Array.isArray(command.payload?.["illegalActions"])
+        ? (command.payload!["illegalActions"] as string[])
+        : [];
       const target = this.findPlayerParticipant(playerName, participantId);
       if (!target || target.status !== StatusEnum.Active) {
         return;
       }
       this.performAct(target, declaredAction, target.name || "Player");
+      if (illegalActions.length > 0) {
+        this.icAlertMessages.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
+      }
       return;
     }
     if (command.type === "delay") {
@@ -873,10 +879,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       target.dataProcessing = safeDP;
       if (mode === VRMode.AR) {
         // AR: physical initiative — REA+INT+initiativeDice, no catatonia.
+        // jackedIn is NOT reset here — it's controlled by the GM via gmJackIn/gmJackOut.
         target.vrMode = VRMode.AR;
         target.dices = Math.max(1, initiativeDice);
         target.baseIni = safeReaction + safeIntuition;
-        target.jackedIn = false;
         target.blocksPhysicalActions = false;
       } else {
         // Cold/Hot-Sim: Matrix initiative — DP+INT+3d6/4d6, physically catatonic.
