@@ -343,6 +343,39 @@ GM UI exposes undo/redo controls in toolbar.
 
 ## 8. Deployment Notes
 
+### Infrastructure
+
+| Item | Value |
+|---|---|
+| Host | `xsvibes.com` (`146.190.245.110`) |
+| SSH | `root@146.190.245.110` |
+| Project path | `/var/www/sr5e` |
+| Process manager | pm2 — app name `sr5e` |
+| Reverse proxy | nginx → `http://127.0.0.1:3001` |
+| TLS | Certbot / Let's Encrypt on `xsvibes.com` |
+| Node | v22.22.0 |
+| npm | 10.9.4 |
+
+### Deploying updates
+
+From your local machine, push to GitHub:
+
+```bash
+git push origin main
+```
+
+Then SSH in and pull:
+
+```bash
+ssh root@146.190.245.110
+cd /var/www/sr5e
+git pull origin main
+npx ng build
+pm2 restart sr5e
+```
+
+`npm install` is only needed if `package.json` changed.
+
 ### Static serving and socket same-origin
 
 `server.js` serves Angular build and Socket.IO from same origin to avoid mixed-origin issues.
@@ -360,9 +393,9 @@ The app uses a strict CSP meta tag in `src/index.html`.
 Production build setting in `angular.json` disables critical CSS inlining:
 
 ```json
-"optimization": {
-  "styles": {
-    "inlineCritical": false
+“optimization”: {
+  “styles”: {
+    “inlineCritical”: false
   }
 }
 ```
@@ -371,7 +404,7 @@ This avoids CSP conflicts with stylesheet `onload` patterns and prevents “unst
 
 ### Health checks
 
-- `GET /health` returns `{ "ok": true }`
+- `GET /health` returns `{ “ok”: true }`
 
 ## 9. Security and Limitations
 

@@ -96,6 +96,12 @@
   <br>
   <div class="row">
     <div class="col-9">
+      @for (msg of icAlertMessages; track $index) {
+      <div class="ic-alert-strip" role="alert">
+        <span class="ic-alert-text"><strong>&#9888; IC Alert</strong> — {{ msg }}</span>
+        <button type="button" class="ic-alert-dismiss" (click)="dismissIcAlert($index)" aria-label="Dismiss">&#215;</button>
+      </div>
+      }
       <div class="row bg-dark text-light">
         <div class="col-4 col-xl-2">
           <span class="h5">
@@ -132,10 +138,17 @@
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantEdgeRatingValue(p)"
                 (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
-              <input class="form-control text-center gm-stat-input" type="number"
-                [ngModel]="getParticipantReactionValue(p)"
-                (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
+              @if (isMatrix(p)) {
+                <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).dataProcessing"
+                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="1" title="Data Processing">
+              } @else {
+                <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="getParticipantReactionValue(p)"
+                  (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
+              }
               <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
@@ -236,6 +249,12 @@
           </div>
           <div class="col-5 col-xl-3 text-right">
             <div class="btn-group" role="group">
+              <button type="button" class="btn btn-outline-secondary"
+                [class.active]="isDeckPanelExpanded(p)"
+                (click)="toggleDeckPanel(p)"
+                title="Cyberdeck configuration">
+                Deck
+              </button>
               <button type="button"
                 class="btn"
                 [class.btn-outline-info]="!isParticipantClaimable(p)"
@@ -266,11 +285,112 @@
           <span>{{ ngReady() }}</span>
           }
         </div>
+        @if (isDeckPanelExpanded(p)) {
+        <div class="row deck-panel py-2 px-3 mb-1">
+          @if (!isMatrix(p)) {
+          <!-- Phase 0: No deck -->
+          <div class="col d-flex align-items-center gap-2">
+            <span class="small text-muted">No deck configured.</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" (click)="enableDeck(p)">
+              Enable Deck
+            </button>
+          </div>
+          }
+          @else {
+          <div class="col">
+            <!-- Deck stats + Remove Deck — always visible when deck is active -->
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+              <div class="input-group input-group-sm" style="width: auto">
+                <span class="input-group-text gm-stat-chip" title="Attack">A</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).attack"
+                  (ngModelChange)="onDeckStatChanged(p, 'attack', $event)" [min]="0">
+                <span class="input-group-text gm-stat-chip" title="Sleaze">S</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).sleaze"
+                  (ngModelChange)="onDeckStatChanged(p, 'sleaze', $event)" [min]="0">
+                <span class="input-group-text gm-stat-chip" title="Firewall">F</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).firewall"
+                  (ngModelChange)="onDeckStatChanged(p, 'firewall', $event)" [min]="0">
+                <span class="input-group-text gm-stat-chip" title="Device Rating">DR</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).deviceRating"
+                  (ngModelChange)="onDeckStatChanged(p, 'deviceRating', $event)" [min]="0">
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeDeck(p)">
+                Remove Deck
+              </button>
+            </div>
+            @if (!asMatrix(p).jackedIn) {
+            <!-- Phase 1.5: Deck active, not jacked in -->
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="small text-muted">Jack in as:</span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn"
+                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
+                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
+                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
+                <button type="button" class="btn"
+                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
+                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
+                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+                <button type="button" class="btn"
+                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
+                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
+                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-primary" (click)="gmJackIn(p)">Jack In</button>
+            </div>
+            } @else {
+            <!-- Phase 2: Jacked in -->
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <span class="small text-muted">
+                Mode:
+                <span class="fw-semibold"
+                  [class.text-secondary]="asMatrix(p).vrMode === VRMode.AR"
+                  [class.text-info]="asMatrix(p).vrMode === VRMode.ColdSim"
+                  [class.text-danger]="asMatrix(p).vrMode === VRMode.HotSim">
+                  {{ asMatrix(p).vrMode === VRMode.ColdSim ? 'Cold Sim' : asMatrix(p).vrMode === VRMode.HotSim ? 'Hot Sim' : 'AR' }}
+                </span>
+                &nbsp;Switch to:
+              </span>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn"
+                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
+                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
+                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
+                <button type="button" class="btn"
+                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
+                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
+                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+                <button type="button" class="btn"
+                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
+                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
+                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-primary"
+                (click)="gmJackIn(p)"
+                [disabled]="getPendingVrMode(p) === asMatrix(p).vrMode">Switch Mode</button>
+              <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(p)">Jack Out</button>
+            </div>
+            <div class="mt-1">
+              <app-matrix-participant-badge
+                [participant]="$any(p)"
+                (osAdjust)="onOsAdjust(p, $event)"
+                (osResetClick)="onOsResetClick(p)">
+              </app-matrix-participant-badge>
+            </div>
+            }
+          </div>
+          }
+        </div>
+        }
         }
       </div>
       <div>
         <div colspan="8">
-          <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()">
+          <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()" title="Add Participant">
             <i class="fa fa-plus fa-lg"></i>
           </button>
         </div>
@@ -324,7 +444,7 @@
       </div>
     </div>
 
-    @if (selectedActor !== null && selectActor !== undefined)
+    @if (selectedActor !== null && selectedActor !== undefined)
     {
     <div class="col-3 detailsBar">
       <div class="card">
@@ -460,7 +580,7 @@
       {{ getDeclaredActionValidationMessage(actModalParticipant) }}
     </div>
     <div class="list-group mt-3">
-      @for(actionCategory of physicalActionCategories; track actionCategory.id) {
+      @for(actionCategory of getPhysicalActionCategoriesFor(actModalParticipant); track actionCategory.id) {
       <button type="button" class="list-group-item list-group-item-action action-category-toggle"
         (click)="toggleDeclaredActionCategory(actionCategory.id)"
         [attr.aria-expanded]="isDeclaredActionCategoryOpen(actionCategory.id)">
@@ -476,8 +596,10 @@
               (click)="btnDeclaredAct_Click(actModalParticipant, actionName)"
               [class.action-item-selected]="isDeclaredActionSelected(actModalParticipant, actionName)"
               [class.action-item-disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-              [disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-              [attr.title]="getActionDisabledReason(actModalParticipant, actionName)">
+              [ngbTooltip]="getActionDisabledReason(actModalParticipant, actionName)"
+              container="body"
+              placement="top"
+              triggers="hover">
               @if (isDeclaredActionSelected(actModalParticipant, actionName)) {
               <span class="action-check">x</span>
               }
@@ -525,8 +647,10 @@
                 (click)="btnDeclaredAct_Click(actModalParticipant, actionName)"
                 [class.action-item-selected]="isDeclaredActionSelected(actModalParticipant, actionName)"
                 [class.action-item-disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-                [disabled]="!canUseDeclaredAction(actModalParticipant, actionName)"
-                [attr.title]="getActionDisabledReason(actModalParticipant, actionName)">
+                [ngbTooltip]="getActionDisabledReason(actModalParticipant, actionName)"
+                container="body"
+                placement="top"
+                triggers="hover">
                 @if (isDeclaredActionSelected(actModalParticipant, actionName)) {
                 <span class="action-check">x</span>
                 }
@@ -554,13 +678,31 @@
     </div>
     }
   </div>
-  <div class="modal-footer">
-    <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
-    <button type="button" class="btn btn-primary" (click)="submitActModal()"
-      [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
-      Submit Actions
-    </button>
+  <div class="modal-footer flex-column align-items-stretch gap-2">
+    @if (actModalSuggestedOsDelta > 0) {
+    <div class="os-reminder w-100">
+      &#9888; Illegal action — add OS after resolving defense
+    </div>
+    }
+    <div class="d-flex gap-2 justify-content-end w-100">
+      <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
+      <button type="button" class="btn btn-primary" (click)="submitActModal()"
+        [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
+        Submit Actions
+      </button>
+    </div>
   </div>
 </ng-template>
 
-
+<ng-template #convergenceModalTpl>
+  <div class="modal-header bg-danger text-white">
+    <h5 class="modal-title">&#9760; CONVERGENCE</h5>
+  </div>
+  <div class="modal-body">
+    <p class="mb-1"><strong>GOD has traced {{ convergenceAlertDecker }}.</strong></p>
+    <p class="mb-0">Overwatch Score reached {{ convergenceAlertOs }}. A Convergence attack is incoming.</p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-danger" (click)="dismissConvergenceAlert()">Acknowledged</button>
+  </div>
+</ng-template>

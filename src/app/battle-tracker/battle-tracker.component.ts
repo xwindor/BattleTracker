@@ -1,6 +1,7 @@
 import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, TemplateRef, ViewChild, ElementRef } from "@angular/core";
 import { CommonModule } from "@angular/common";
-import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef } from "@ng-bootstrap/ng-bootstrap";
+import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
+import { Subscription } from "rxjs";
 import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import { Participant } from "Combat/Participants/Participant";
@@ -15,7 +16,11 @@ import { ConditionMonitorComponent } from "app/condition-monitor/condition-monit
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
-import { DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { MatrixStateService } from "app/services/matrix-state.service";
+import { OsTrackingService } from "app/services/os-tracking.service";
+import { MatrixParticipant, VRMode } from "Matrix";
+import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
 
 interface DeclaredActionSelection {
   free: string | null;
@@ -38,10 +43,12 @@ interface LocalLogEntry {
     NgxSliderModule,
     NgbNavModule,
     NgbDropdownModule,
+    NgbTooltip,
     FormsModule,
     DragDropModule,
     ConditionMonitorComponent,
-    DiceRollerComponent
+    DiceRollerComponent,
+    MatrixParticipantBadgeComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -161,6 +168,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly localLogDecodeTimers = new Map<string, number>();
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
+  expandedDeckPanels = new Set<IParticipant>();
+  private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
   private readonly participantClaimable = new Map<IParticipant, boolean>();
@@ -169,6 +178,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly participantIntuitions = new Map<IParticipant, number>();
   private readonly participantTieBreakers = new Map<IParticipant, number>();
   private readonly lastKnownDamage = new Map<string, { physical: number; stun: number }>();
+
+  // -- OS threshold alert state --
+  @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
+  icAlertMessages: string[] = [];
+  convergenceAlertDecker: string | null = null;
+  convergenceAlertOs = 0;
+  private convergenceModalRef: NgbModalRef | null = null;
+  private osThresholdSub?: Subscription;
+
+
 
   get currentBTTime(): BTTime {
     return new BTTime(this.combatManager.combatTurn, this.combatManager.initiativePass, this.combatManager.currentInitiative);
@@ -188,11 +207,79 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     private ref: ChangeDetectorRef,
     private confirmationDialog: ConfirmationDialogService,
     private modalService: NgbModal,
-    private sessionSync: SessionSyncService
+    private sessionSync: SessionSyncService,
+    public matrixState: MatrixStateService,
+    public osTracking: OsTrackingService
   ) {
     super();
     this.addParticipant();
     this.changeDetector = ref;
+  }
+
+  /**
+   * Type guard so templates and methods can branch on Matrix-aware
+   * participants without sprinkling `instanceof` everywhere.
+   */
+  /** Exposed for use in @if expressions in the template. */
+  readonly VRMode = VRMode;
+
+  isMatrix(p: IParticipant): p is MatrixParticipant {
+    return p instanceof MatrixParticipant;
+  }
+
+  /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
+  asMatrix(p: IParticipant): MatrixParticipant {
+    return p as MatrixParticipant;
+  }
+
+  getPhysicalActionCategoriesFor(_p: IParticipant | null) {
+    return this.physicalActionCategories;
+  }
+
+  // -- OS badge inline editor handlers --
+
+  onOsAdjust(p: IParticipant, delta: number): void {
+    if (!this.isMatrix(p)) return;
+    this.osTracking.addOS(this.asMatrix(p), delta, `manual adjustment`);
+    this.syncSharedState();
+  }
+
+  async onOsResetClick(p: IParticipant): Promise<void> {
+    if (!this.isMatrix(p)) return;
+    const confirmed = await this.confirmationDialog.simpleConfirm(`Reset OS to 0 for ${p.name}?`);
+    if (!confirmed) return;
+    UndoHandler.StartActions();
+    this.osTracking.resetOS(this.asMatrix(p));
+    this.syncSharedState();
+    this.changeDetector.detectChanges();
+  }
+
+  dismissIcAlert(index: number): void {
+    this.icAlertMessages.splice(index, 1);
+  }
+
+  dismissConvergenceAlert(): void {
+    if (this.convergenceModalRef) {
+      this.convergenceModalRef.close();
+      this.convergenceModalRef = null;
+    }
+    this.convergenceAlertDecker = null;
+  }
+
+  // -- Act modal OS accumulation prompt --
+
+  /** Illegal OS-generating actions in the current modal selection, with their deltas. */
+  get actModalIllegalOsActions(): Array<{ name: string; delta: number }> {
+    if (!this.actModalParticipant || !this.isMatrix(this.actModalParticipant)) return [];
+    const sel = this.getDeclaredActionSelection(this.actModalParticipant);
+    const all = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
+    return all
+      .filter(name => name in ILLEGAL_OS_ACTIONS)
+      .map(name => ({ name, delta: ILLEGAL_OS_ACTIONS[name] }));
+  }
+
+  get actModalSuggestedOsDelta(): number {
+    return this.actModalIllegalOsActions.reduce((sum, a) => sum + a.delta, 0);
   }
 
   drop(event: CdkDragDrop<string[]>) {
@@ -208,6 +295,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.Initialize();
     UndoHandler.StartActions();
     this.observedLocalLogCount = this.logHandler.logbook.length;
+    this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
+      if (event.alert === "ic-alert") {
+        this.icAlertMessages.push(`${event.decker.name} — OS: ${event.decker.overwatch}`);
+        this.changeDetector.detectChanges();
+      } else if (event.alert === "convergence") {
+        this.convergenceAlertDecker = event.decker.name;
+        this.convergenceAlertOs = event.decker.overwatch;
+        this.convergenceModalRef = this.modalService.open(this.convergenceModalTpl, { backdrop: "static", centered: true });
+        this.changeDetector.detectChanges();
+      }
+    });
   }
 
   ngOnDestroy() {
@@ -218,6 +316,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.clearSharedLogDecodeAnimations();
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
+    this.osThresholdSub?.unsubscribe();
   }
 
   ngAfterViewChecked() {
@@ -404,6 +503,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const overflowHealth = Number(payload["overflowHealth"] || 4);
       const physicalHealth = Number(payload["physicalHealth"] || 10);
       const stunHealth = Number(payload["stunHealth"] || 10);
+      const isMatrix = payload["isMatrix"] === true;
+      const dataProcessing = Number(payload["dataProcessing"] || 0);
+      const vrMode = String(payload["vrMode"] || "AR");
       this.upsertPlayerParticipant(
         playerName,
         characterName,
@@ -413,9 +515,65 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         intuition,
         overflowHealth,
         physicalHealth,
-        stunHealth
+        stunHealth,
+        isMatrix,
+        dataProcessing,
+        vrMode
       );
       this.appendSharedLog("GM", `Registered ${characterName}`);
+      this.sort();
+      return;
+    }
+    if (command.type === "configure_deck") {
+      const payload = command.payload || {};
+      const playerName = command.player || "";
+      if (!playerName) return;
+      const isMatrix = payload["isMatrix"] === true;
+      let target: IParticipant | undefined;
+      for (const p of this.combatManager.participants.items) {
+        if (this.participantOwners.get(p) === playerName) {
+          target = p;
+          break;
+        }
+      }
+      if (!target) return;
+      if (!isMatrix) {
+        const targetName = target.name || "Player";
+        if (target instanceof MatrixParticipant) {
+          this.demoteToParticipant(target);
+        }
+        this.appendSharedLog("GM", `${targetName} deck removed`);
+        this.sort();
+        return;
+      }
+      if (!(target instanceof MatrixParticipant)) {
+        target = this.promoteToMatrixParticipant(target);
+      }
+      const mp = target as MatrixParticipant;
+      mp.dataProcessing = Math.max(1, Number(payload["dataProcessing"] || 1));
+      mp.attack = Math.max(0, Number(payload["attack"] || 0));
+      mp.sleaze = Math.max(0, Number(payload["sleaze"] || 0));
+      mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
+      mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
+      if (payload["jackIn"] === true) {
+        // Jack In / Switch Mode: apply the chosen VR mode and mark as jacked in.
+        const vrModeStr = String(payload["vrMode"] || "AR");
+        const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+                   : vrModeStr === "cold-sim" ? VRMode.ColdSim
+                   : VRMode.AR;
+        this.applyVRMode(mp, mode);
+        mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
+      } else if (payload["jackOut"] === true || payload["create"] === true) {
+        // Jack Out or initial deck creation: no VR mode, restore physical initiative.
+        mp.vrMode = VRMode.None;
+        mp.jackedIn = false;
+        mp.blocksPhysicalActions = false;
+        const reaction = this.participantReactions.get(mp) ?? 0;
+        const intuition = this.getParticipantIntuition(mp);
+        mp.baseIni = reaction + intuition;
+        mp.dices = 1;
+      }
+      // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
       return;
     }
@@ -467,7 +625,27 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
-      this.appendSharedLog(target.name || "Player", `initiative roll: ${target.diceIni}`);
+      const total = target.getCurrentInitiative();
+      const intuition = this.getParticipantIntuition(target);
+      let baseLabel: string;
+      if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+        baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
+      } else {
+        baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
+      }
+      const rawValues = command.payload?.["diceValues"];
+      const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+      if (diceValues.length > 0) {
+        this.appendSharedLog(
+          target.name || "Player",
+          `initiative roll: ${baseLabel} + [${diceValues.join(", ")}] = ${total}`
+        );
+      } else {
+        this.appendSharedLog(
+          target.name || "Player",
+          `initiative roll: ${baseLabel} + manual(${target.diceIni}) = ${total}`
+        );
+      }
       if (this.initiativePrepActive) {
         this.updateInitiativePrepInfo();
       }
@@ -478,11 +656,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const playerName = command.player;
       const participantId = String(command.payload?.["participantId"] || "");
       const declaredAction = String(command.payload?.["declaredAction"] || "Act");
+      const illegalActions = Array.isArray(command.payload?.["illegalActions"])
+        ? (command.payload!["illegalActions"] as string[])
+        : [];
       const target = this.findPlayerParticipant(playerName, participantId);
       if (!target || target.status !== StatusEnum.Active) {
         return;
       }
       this.performAct(target, declaredAction, target.name || "Player");
+      if (illegalActions.length > 0) {
+        this.icAlertMessages.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
+      }
       return;
     }
     if (command.type === "delay") {
@@ -545,24 +729,42 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private getSharedParticipants(): SharedParticipantState[] {
     return this.combatManager.participants.items
       .filter(p => !p.ooc)
-      .map((p, index) => ({
-        id: this.getParticipantId(p),
-        name: p.name || `Participant ${index + 1}`,
-        order: index + 1,
-        active: this.combatManager.currentActors.contains(p),
-        initiativeScore: p.getCurrentInitiative(),
-        playerControlled: this.participantOwners.has(p),
-        claimable: this.participantClaimable.get(p) === true,
-        ownerName: this.participantOwners.get(p),
-        canAct: p.status === StatusEnum.Active,
-        canDelay: p.status === StatusEnum.Active,
-        canInterrupt: p.getCurrentInitiative() >= 1,
-        initiativeDice: p.dices,
-        pendingRoll: p.diceIni <= 0,
-        edgeRating: this.getParticipantEdgeRating(p),
-        reaction: this.getParticipantReaction(p),
-        intuition: this.getParticipantIntuition(p)
-      }));
+      .map((p, index) => {
+        const base: SharedParticipantState = {
+          id: this.getParticipantId(p),
+          name: p.name || `Participant ${index + 1}`,
+          order: index + 1,
+          active: this.combatManager.currentActors.contains(p),
+          initiativeScore: p.getCurrentInitiative(),
+          playerControlled: this.participantOwners.has(p),
+          claimable: this.participantClaimable.get(p) === true,
+          ownerName: this.participantOwners.get(p),
+          canAct: p.status === StatusEnum.Active,
+          canDelay: p.status === StatusEnum.Active,
+          canInterrupt: p.getCurrentInitiative() >= 1,
+          initiativeDice: p.dices,
+          pendingRoll: p.diceIni <= 0,
+          edgeRating: this.getParticipantEdgeRating(p),
+          reaction: this.getParticipantReaction(p),
+          intuition: this.getParticipantIntuition(p)
+        };
+
+        if (this.isMatrix(p)) {
+          base.isMatrix = true;
+          base.vrMode = p.vrMode;
+          base.overwatch = p.overwatch;
+          base.overwatchAlert = p.overwatchAlert;
+          base.jackedIn = p.jackedIn;
+          base.isVRCatatonic = p.blocksPhysicalActions;
+          base.dataProcessing = p.dataProcessing;
+          base.attack = p.attack;
+          base.sleaze = p.sleaze;
+          base.firewall = p.firewall;
+          base.deviceRating = p.deviceRating;
+        }
+
+        return base;
+      });
   }
 
   private appendSharedLog(actor: string, text: string) {
@@ -640,33 +842,75 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     intuition: number,
     overflowHealth: number,
     physicalHealth: number,
-    stunHealth: number
+    stunHealth: number,
+    isMatrix = false,
+    dataProcessing = 0,
+    vrModeStr = "AR"
   ) {
     let target: IParticipant | undefined;
-    for (const participant of this.combatManager.participants.items) {
-      if (this.participantOwners.get(participant) === playerName) {
-        target = participant;
+    for (const p of this.combatManager.participants.items) {
+      if (this.participantOwners.get(p) === playerName) {
+        target = p;
         break;
       }
     }
+
+    // If the participant type needs to change (decker ↔ physical), discard and recreate.
+    const typeMismatch = target !== undefined && isMatrix !== (target instanceof MatrixParticipant);
+    if (typeMismatch && target) {
+      this.participantIds.delete(target);
+      this.participantOwners.delete(target);
+      this.participantClaimable.delete(target);
+      this.participantEdgeRatings.delete(target);
+      this.participantReactions.delete(target);
+      this.participantIntuitions.delete(target);
+      this.participantTieBreakers.delete(target);
+      this.combatManager.removeParticipant(target);
+      target = undefined;
+    }
+
     if (!target) {
-      target = new Participant();
+      target = isMatrix ? new MatrixParticipant() : new Participant();
       this.combatManager.addParticipant(target);
     }
 
     target.name = characterName;
-    target.dices = Math.max(1, initiativeDice);
-    const safeReaction = Math.max(0, Number(reaction || 0));
-    const safeIntuition = Math.max(0, Number(intuition || 0));
-    target.baseIni = safeReaction + safeIntuition;
     target.overflowHealth = Math.max(1, overflowHealth);
     target.physicalHealth = Math.max(1, physicalHealth);
     target.stunHealth = Math.max(1, stunHealth);
     this.participantOwners.set(target, playerName);
     this.participantClaimable.set(target, true);
     this.participantEdgeRatings.set(target, Math.max(0, Number(edgeRating || 0)));
-    this.participantReactions.set(target, safeReaction);
-    this.participantIntuitions.set(target, safeIntuition);
+
+    const safeReaction = Math.max(0, Number(reaction || 0));
+    const safeIntuition = Math.max(0, Number(intuition || 0));
+
+    if (isMatrix && target instanceof MatrixParticipant) {
+      const safeDP = Math.max(1, Number(dataProcessing || 1));
+      const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+                 : vrModeStr === "cold-sim" ? VRMode.ColdSim
+                 : VRMode.AR;
+      target.dataProcessing = safeDP;
+      if (mode === VRMode.AR) {
+        // AR: physical initiative — REA+INT+initiativeDice, no catatonia.
+        // jackedIn is NOT reset here — it's controlled by the GM via gmJackIn/gmJackOut.
+        target.vrMode = VRMode.AR;
+        target.dices = Math.max(1, initiativeDice);
+        target.baseIni = safeReaction + safeIntuition;
+        target.blocksPhysicalActions = false;
+      } else {
+        // Cold/Hot-Sim: Matrix initiative — DP+INT+3d6/4d6, physically catatonic.
+        target.applyJackInMode(mode, safeIntuition);
+      }
+      this.participantReactions.set(target, safeReaction);
+      this.participantIntuitions.set(target, safeIntuition);
+    } else {
+      target.dices = Math.max(1, initiativeDice);
+      target.baseIni = safeReaction + safeIntuition;
+      this.participantReactions.set(target, safeReaction);
+      this.participantIntuitions.set(target, safeIntuition);
+    }
+
     if (!this.participantTieBreakers.has(target)) {
       this.participantTieBreakers.set(target, Math.random());
     }
@@ -807,7 +1051,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const actor = this.actModalParticipant;
+    const illegalActions = this.actModalIllegalOsActions;
     this.performAct(actor, this.buildDeclaredActionLog(actor));
+    if (illegalActions.length > 0) {
+      const names = illegalActions.map(a => a.name).join(", ");
+      this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
+    }
     this.clearDeclaredActionSelection(actor);
     if (this.actModalRef) {
       this.actModalRef.close();
@@ -859,6 +1108,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && (!this.isMatrix(sender) || !this.asMatrix(sender).jackedIn)) {
+      return false;
+    }
+    if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+      return false;
+    }
     const selection = this.getDeclaredActionSelection(sender);
     if (action.economy !== "simple" && this.isDeclaredActionSelected(sender, action)) {
       return true;
@@ -936,6 +1193,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getActionDisabledReason(sender: IParticipant, action: DeclaredActionItem): string {
+    const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
+    const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (isCyberdeckAct && !this.isMatrix(sender)) {
+      return "Requires a cyberdeck.";
+    }
+    if (isCyberdeckAct && this.isMatrix(sender) && !this.asMatrix(sender).jackedIn) {
+      return "Must be jacked in to use this action.";
+    }
+    if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
+      return "Cannot take physical actions while in VR.";
+    }
     if (this.isDeclaredActionSelected(sender, action)) {
       const selection = this.getDeclaredActionSelection(sender);
       if (action.economy === "simple"
@@ -947,7 +1215,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return "Selected. Click again to deselect.";
     }
     if (this.canUseDeclaredAction(sender, action)) {
-      return "Click to select.";
+      return "";
     }
     const selection = this.getDeclaredActionSelection(sender);
     if (action.economy === "simple" && selection.complex) {
@@ -1212,6 +1480,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(sender);
     this.participantTieBreakers.delete(sender);
     this.combatManager.removeParticipant(sender);
+    if (this._selectedActor === sender) {
+      this.selectedActor = null;
+    }
     this.syncSharedState();
   }
 
@@ -1547,10 +1818,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  onChange(e: Event) {
-    console.log(e);
-  }
-
   onParticipantUpdated() {
     this.enforceParticipantRollBounds();
     this.syncSharedState();
@@ -1576,7 +1843,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getParticipantBaseInitiative(p: IParticipant): number {
-    return Math.max(0, this.getParticipantReaction(p) + this.getParticipantIntuition(p));
+    const intuition = this.getParticipantIntuition(p);
+    if (this.isMatrix(p)) {
+      return Math.max(0, p.dataProcessing + intuition);
+    }
+    return Math.max(0, this.getParticipantReaction(p) + intuition);
   }
 
   onParticipantEdgeRatingChanged(p: IParticipant, value: number) {
@@ -1618,6 +1889,224 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.selectActor(p);
     }
     this.syncSharedState();
+  }
+
+  isDeckPanelExpanded(p: IParticipant): boolean {
+    return this.expandedDeckPanels.has(p);
+  }
+
+  toggleDeckPanel(p: IParticipant) {
+    if (this.expandedDeckPanels.has(p)) {
+      this.expandedDeckPanels.delete(p);
+    } else {
+      this.expandedDeckPanels.add(p);
+    }
+  }
+
+  enableDeck(p: IParticipant) {
+    UndoHandler.StartActions();
+    const mp = this.promoteToMatrixParticipant(p);
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.participantIntuitions.get(mp) ?? 0;
+    mp.baseIni = reaction + intuition;
+    this.pendingVrModes.set(mp, VRMode.AR);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  removeDeck(p: IParticipant) {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    this.pendingVrModes.delete(p);
+    this.demoteToParticipant(p as MatrixParticipant);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  getPendingVrMode(p: IParticipant): VRMode {
+    return this.pendingVrModes.get(p) ?? VRMode.AR;
+  }
+
+  setPendingVrMode(p: IParticipant, mode: VRMode): void {
+    this.pendingVrModes.set(p, mode);
+  }
+
+  gmJackIn(p: IParticipant): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    const mp = p as MatrixParticipant;
+    const mode = this.getPendingVrMode(p);
+    this.applyVRMode(mp, mode);
+    mp.jackedIn = true; // force true even for AR so Phase 2 shows
+    this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
+    mp.rollInitiative();
+    const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
+    LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  gmJackOut(p: IParticipant): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    const mp = p as MatrixParticipant;
+    // Jack Out: clear VR mode, restore physical initiative.
+    mp.vrMode = VRMode.None;
+    mp.jackedIn = false;
+    mp.blocksPhysicalActions = false;
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.getParticipantIntuition(mp);
+    mp.baseIni = reaction + intuition;
+    mp.dices = 1;
+    this.pendingVrModes.set(p, VRMode.AR);
+    mp.rollInitiative();
+    LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  onDeckStatChanged(p: IParticipant, field: 'attack' | 'sleaze' | 'firewall' | 'deviceRating', value: number): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    (p as MatrixParticipant)[field] = Math.max(0, Number(value || 0));
+    this.syncSharedState();
+  }
+
+  private promoteToMatrixParticipant(p: IParticipant, defaultDP = 6): MatrixParticipant {
+    const mp = new MatrixParticipant();
+    const src = p as unknown as Record<string, unknown>;
+    const dst = mp as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    mp.dataProcessing = defaultDP;
+    mp.vrMode = VRMode.None;
+    const existingId = this.participantIds.get(p);
+    if (existingId) this.participantIds.set(mp, existingId);
+    const owner = this.participantOwners.get(p);
+    if (owner) this.participantOwners.set(mp, owner);
+    const claimable = this.participantClaimable.get(p);
+    if (claimable !== undefined) this.participantClaimable.set(mp, claimable);
+    const edge = this.participantEdgeRatings.get(p);
+    if (edge !== undefined) this.participantEdgeRatings.set(mp, edge);
+    const reaction = this.participantReactions.get(p);
+    if (reaction !== undefined) this.participantReactions.set(mp, reaction);
+    const intuition = this.participantIntuitions.get(p);
+    if (intuition !== undefined) this.participantIntuitions.set(mp, intuition);
+    const tb = this.participantTieBreakers.get(p);
+    if (tb !== undefined) this.participantTieBreakers.set(mp, tb);
+    const damage = existingId ? this.lastKnownDamage.get(existingId) : undefined;
+    if (damage && existingId) this.lastKnownDamage.set(existingId, damage);
+    const das = this.declaredActionSelections.get(p);
+    if (das) {
+      this.declaredActionSelections.set(mp, das);
+      this.declaredActionSelections.delete(p);
+    }
+    this.participantIds.delete(p);
+    this.participantOwners.delete(p);
+    this.participantClaimable.delete(p);
+    this.participantEdgeRatings.delete(p);
+    this.participantReactions.delete(p);
+    this.participantIntuitions.delete(p);
+    this.participantTieBreakers.delete(p);
+    if (this.expandedDeckPanels.has(p)) {
+      this.expandedDeckPanels.delete(p);
+      this.expandedDeckPanels.add(mp);
+    }
+    if (this._selectedActor === p) this._selectedActor = mp;
+    if (this.actModalParticipant === p) this.actModalParticipant = mp;
+    this.combatManager.removeParticipant(p);
+    this.combatManager.addParticipant(mp);
+    return mp;
+  }
+
+  private demoteToParticipant(mp: MatrixParticipant): Participant {
+    const p = new Participant();
+    const src = mp as unknown as Record<string, unknown>;
+    const dst = p as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.participantIntuitions.get(mp) ?? 0;
+    p.dices = 1;
+    p.baseIni = reaction + intuition;
+    const existingId = this.participantIds.get(mp);
+    if (existingId) this.participantIds.set(p, existingId);
+    const owner = this.participantOwners.get(mp);
+    if (owner) this.participantOwners.set(p, owner);
+    const claimable = this.participantClaimable.get(mp);
+    if (claimable !== undefined) this.participantClaimable.set(p, claimable);
+    const edge = this.participantEdgeRatings.get(mp);
+    if (edge !== undefined) this.participantEdgeRatings.set(p, edge);
+    const reaction2 = this.participantReactions.get(mp);
+    if (reaction2 !== undefined) this.participantReactions.set(p, reaction2);
+    const intuition2 = this.participantIntuitions.get(mp);
+    if (intuition2 !== undefined) this.participantIntuitions.set(p, intuition2);
+    const tb = this.participantTieBreakers.get(mp);
+    if (tb !== undefined) this.participantTieBreakers.set(p, tb);
+    const das = this.declaredActionSelections.get(mp);
+    if (das) {
+      this.declaredActionSelections.set(p, das);
+      this.declaredActionSelections.delete(mp);
+    }
+    this.participantIds.delete(mp);
+    this.participantOwners.delete(mp);
+    this.participantClaimable.delete(mp);
+    this.participantEdgeRatings.delete(mp);
+    this.participantReactions.delete(mp);
+    this.participantIntuitions.delete(mp);
+    this.participantTieBreakers.delete(mp);
+    this.expandedDeckPanels.delete(mp);
+    if (this._selectedActor === mp) this._selectedActor = p;
+    if (this.actModalParticipant === mp) this.actModalParticipant = p;
+    this.combatManager.removeParticipant(mp);
+    this.combatManager.addParticipant(p);
+    return p;
+  }
+
+  onMatrixDPChanged(p: IParticipant, value: number): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    p.dataProcessing = Math.max(1, Number(value || 1));
+    p.baseIni = this.getParticipantBaseInitiative(p);
+    this.syncSharedState();
+  }
+
+  onVRModeChange(p: IParticipant, mode: VRMode): void {
+    if (!this.isMatrix(p)) return;
+    UndoHandler.StartActions();
+    this.applyVRMode(p as MatrixParticipant, mode);
+    LogHandler.log(this.currentBTTime, `${p.name} VR mode → ${mode}`);
+    this.syncSharedState();
+  }
+
+  private applyVRMode(mp: MatrixParticipant, mode: VRMode): void {
+    const intuition = this.getParticipantIntuition(mp);
+    if (mode === VRMode.AR) {
+      mp.vrMode = VRMode.AR;
+      const reaction = this.participantReactions.get(mp) ?? 0;
+      mp.baseIni = reaction + intuition;
+      mp.dices = 1;
+      mp.jackedIn = false;
+      mp.blocksPhysicalActions = false;
+    } else {
+      mp.applyJackInMode(mode, intuition);
+    }
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {
@@ -1968,4 +2457,3 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return el;
   }
 }
-

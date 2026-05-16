@@ -175,43 +175,33 @@ class CombatManager extends Undoable {
     copy.waiting = false;
     copy.sortOrder = this.nextSortOrder++;
 
-    let regexresult = p.name.match("\\d*$");
+    const { base } = CombatManager.splitNameAndIndex(p.name);
 
-    let name = p.name;
-    let int;
-    let numberStr: string | null = null
-    if (regexresult) {
-      const number = regexresult[0];
-      //  Extract name and numbner
-      name = p.name.substring(0, regexresult.index);
-      int = Number(number) || 0;
-    }
-
-    // Check for other Participants with the same name
+    // Find the highest trailing number among all participants sharing this base name.
     let high = 0;
     for (const participant of this.participants.items) {
-      if (participant.name.match(name)) {
-        regexresult = participant.name.match("\\d*$")
-        if (regexresult) {
-          numberStr = regexresult[0]
-        }
-        if (numberStr) {
-          int = Number(numberStr) || 0;
-          if (int > high) {
-            high = int;
-          }
-        }
+      const { base: participantBase, index } = CombatManager.splitNameAndIndex(participant.name);
+      if (participantBase === base && index > high) {
+        high = index;
       }
     }
 
     if (high === 0) {
       high++;
-      p.name = p.name.trim() + " 1";
+      p.name = base + " 1";
     }
 
     // Set the name for the Copy
-    copy.name = `${name.trim()} ${high + 1}`;
+    copy.name = `${base} ${high + 1}`;
     this.participants.insert(copy);
+  }
+
+  private static splitNameAndIndex(name: string): { base: string; index: number } {
+    const match = name.match(/^(.*?) (\d+)$/);
+    if (match) {
+      return { base: match[1], index: Number(match[2]) };
+    }
+    return { base: name, index: 0 };
   }
 
   goToNextActors() {

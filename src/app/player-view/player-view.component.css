@@ -2,6 +2,14 @@
   font-weight: 600;
 }
 
+/* Deck panel -------------------------------------------------------- */
+.deck-config-panel {
+  background: rgba(253, 126, 20, 0.06);
+  border-left: 3px solid #fd7e14;
+  border-radius: 0 4px 4px 0;
+  padding: 0.75rem 1rem;
+}
+
 .log-list {
   max-height: 22rem;
   overflow-y: auto;

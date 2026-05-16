@@ -314,7 +314,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   isInFullDefense(): boolean {
-    return this.actionHistory.some(a => a.key == "fullDefense")
+    return this.actionHistory.some(a => a.key === "fullDefense");
   }
 
   get actionIniModifier(): number {

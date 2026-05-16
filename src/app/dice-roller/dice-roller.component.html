@@ -42,7 +42,7 @@
       @for (value of localValues; track $index) {
       <span class="die-result-badge" [class.die-result-hit]="isHit(value)" [class.die-result-miss]="!isHit(value)">{{ value }}</span>
       }
-      <span class="dice-hits-summary">Hits: {{ localHitCount }}</span>
+      <span class="dice-hits-summary">Total Hits: {{ localHitCount }}</span>
     </div>
     }
     } @else {
@@ -80,7 +80,7 @@
             @for (value of roll.values; track $index) {
             <span class="die-result-badge" [class.die-result-hit]="isHit(value)" [class.die-result-miss]="!isHit(value)">{{ value }}</span>
             }
-            <span class="dice-hits-summary">Hits: {{ getHitCount(roll.values) }}</span>
+            <span class="dice-hits-summary">Total Hits: {{ getHitCount(roll.values) }}</span>
           </div>
           }
         </div>
