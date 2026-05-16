@@ -222,18 +222,18 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   activateDeck() {
     if (!this.primaryCharacter) return;
-    // Enable deck on server (no initiative roll — player picks mode and jacks in separately).
+    // Enable deck on server — stats only, vrMode set to None until Jack In.
     this.session.sendCommand({
       type: "configure_deck",
       player: this.playerToken,
       payload: {
         isMatrix: true,
+        create: true,
         dataProcessing: this.dataProcessing,
         attack: this.attack,
         sleaze: this.sleaze,
         firewall: this.firewall,
-        deviceRating: this.deviceRating,
-        vrMode: "AR"
+        deviceRating: this.deviceRating
       }
     });
   }
@@ -245,6 +245,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       player: this.playerToken,
       payload: {
         isMatrix: true,
+        jackIn: true,
         dataProcessing: this.dataProcessing,
         attack: this.attack,
         sleaze: this.sleaze,
@@ -265,6 +266,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       player: this.playerToken,
       payload: {
         isMatrix: true,
+        jackIn: true,
         dataProcessing: this.dataProcessing,
         attack: this.attack,
         sleaze: this.sleaze,
@@ -280,18 +282,18 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   jackOut() {
     if (!this.primaryCharacter) return;
-    // Keep deck active on the server (isMatrix stays true) — just reset to AR initiative.
+    // Keep deck active (isMatrix stays true) but remove VR mode — reset initiative to AR.
     this.session.sendCommand({
       type: "configure_deck",
       player: this.playerToken,
       payload: {
         isMatrix: true,
+        jackOut: true,
         dataProcessing: this.dataProcessing,
         attack: this.attack,
         sleaze: this.sleaze,
         firewall: this.firewall,
-        deviceRating: this.deviceRating,
-        vrMode: "AR"
+        deviceRating: this.deviceRating
       }
     });
     this.vrMode = "AR";
@@ -315,7 +317,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   onDeckStatChange() {
-    // Sync stat changes once the deck is active on the server.
+    // Sync stat changes once the deck is active on the server — stats only, no mode change.
     if (!this.primaryCharacter?.isMatrix) return;
     this.session.sendCommand({
       type: "configure_deck",
@@ -326,8 +328,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         attack: this.attack,
         sleaze: this.sleaze,
         firewall: this.firewall,
-        deviceRating: this.deviceRating,
-        vrMode: this.primaryCharacter?.vrMode ?? this.vrMode
+        deviceRating: this.deviceRating
       }
     });
   }
@@ -888,7 +889,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       if (pc.sleaze != null) this.sleaze = pc.sleaze;
       if (pc.firewall != null) this.firewall = pc.firewall;
       if (pc.deviceRating != null) this.deviceRating = pc.deviceRating;
-      if (pc.vrMode) this.vrMode = pc.vrMode;
+      if (pc.vrMode && pc.vrMode !== 'none') this.vrMode = pc.vrMode;
       // On first state load (reconnect/claim), restore panel + jack-in state.
       if (isFirstState) {
         this.deckConfigExpanded = true;

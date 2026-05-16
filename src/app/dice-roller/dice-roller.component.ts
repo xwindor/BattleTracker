@@ -29,6 +29,7 @@ export interface RemoteRoll {
 })
 export class DiceRollerComponent implements OnChanges {
   @Input() incomingRoll: { roller: string; values: number[] } | null = null;
+  @Input() ownRoll: { values: number[] } | null = null;
   @Output() rolledEvent = new EventEmitter<number[]>();
 
   diceCount = 2;
@@ -40,6 +41,14 @@ export class DiceRollerComponent implements OnChanges {
 
   get localHitCount(): number {
     return this.localValues.filter(v => v >= 5).length;
+  }
+
+  get localTotal(): number {
+    return this.localValues.reduce((s, v) => s + v, 0);
+  }
+
+  getTotalCount(values: number[]): number {
+    return values.reduce((s, v) => s + v, 0);
   }
 
   // ── Other players (stacked) ───────────────────────────────────────────
@@ -55,8 +64,8 @@ export class DiceRollerComponent implements OnChanges {
   private readonly faceRotations: Record<number, { x: number; y: number }> = {
     1: { x: 0,    y: 0   },
     2: { x: -90,  y: 0   },
-    3: { x: 0,    y: -90 },
-    4: { x: 0,    y: 90  },
+    3: { x: 0,    y: 90  },
+    4: { x: 0,    y: -90 },
     5: { x: 90,   y: 0   },
     6: { x: 0,    y: 180 }
   };
@@ -66,6 +75,9 @@ export class DiceRollerComponent implements OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes["incomingRoll"] && this.incomingRoll) {
       this.triggerRemoteAnimation(this.incomingRoll.roller, this.incomingRoll.values);
+    }
+    if (changes["ownRoll"] && this.ownRoll) {
+      this.triggerLocalAnimation(this.ownRoll.values);
     }
   }
 
@@ -98,7 +110,7 @@ export class DiceRollerComponent implements OnChanges {
     };
   }
 
-  private triggerLocalAnimation(values: number[]): void {
+  triggerLocalAnimation(values: number[]): void {
     if (this.localRollTimeout !== null) clearTimeout(this.localRollTimeout);
     this.localValues = values;
     this.localRolling = true;

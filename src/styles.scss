@@ -56,6 +56,13 @@ body.skin-alternate {
   color: #def5f9;
 }
 
+body.skin-alternate .deck-panel,
+body.skin-alternate .deck-config-panel {
+  background: rgba(255, 102, 0, 0.09);
+  border-left-color: #ff6600;
+  box-shadow: inset 0 0 18px rgba(255, 102, 0, 0.07);
+}
+
 body.skin-alternate .navbar.bg-dark {
   background: linear-gradient(90deg, #0b252c 0%, #14424b 100%) !important;
   border-bottom: 1px solid #2e7078;
@@ -299,6 +306,12 @@ body.skin-alternate .economy-blocked {
 
 body.skin-alternate .economy-label {
   color: #9cd0d8;
+}
+
+body.skin-vintage .deck-panel,
+body.skin-vintage .deck-config-panel {
+  background: rgba(180, 80, 0, 0.07);
+  border-left-color: #c87320;
 }
 
 body.skin-vintage {

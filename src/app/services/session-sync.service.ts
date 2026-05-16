@@ -26,6 +26,11 @@ export interface SharedParticipantState {
   overwatchAlert?: string;  // 'none' | 'ic-alert' | 'convergence'
   jackedIn?: boolean;
   isVRCatatonic?: boolean;  // mirrors blocksPhysicalActions for the player view
+  dataProcessing?: number;
+  attack?: number;
+  sleaze?: number;
+  firewall?: number;
+  deviceRating?: number;
 }
 
 export interface SharedMatrixParticipantState extends SharedParticipantState {

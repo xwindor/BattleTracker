@@ -82,7 +82,7 @@ export class MatrixParticipant extends Participant {
     this._dataProcessing = 0;
     this._firewall = 0;
     this._deviceRating = 0;
-    this._vrMode = VRMode.AR;
+    this._vrMode = VRMode.None;
     this._overwatch = 0;
     this._jackedIn = false;
     this._blocksPhysicalActions = false;

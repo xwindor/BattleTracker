@@ -555,11 +555,25 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       mp.sleaze = Math.max(0, Number(payload["sleaze"] || 0));
       mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
       mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
-      const vrModeStr = String(payload["vrMode"] || "AR");
-      const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
-                 : vrModeStr === "cold-sim" ? VRMode.ColdSim
-                 : VRMode.AR;
-      this.applyVRMode(mp, mode);
+      if (payload["jackIn"] === true) {
+        // Jack In / Switch Mode: apply the chosen VR mode and mark as jacked in.
+        const vrModeStr = String(payload["vrMode"] || "AR");
+        const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+                   : vrModeStr === "cold-sim" ? VRMode.ColdSim
+                   : VRMode.AR;
+        this.applyVRMode(mp, mode);
+        mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
+      } else if (payload["jackOut"] === true || payload["create"] === true) {
+        // Jack Out or initial deck creation: no VR mode, restore physical initiative.
+        mp.vrMode = VRMode.None;
+        mp.jackedIn = false;
+        mp.blocksPhysicalActions = false;
+        const reaction = this.participantReactions.get(mp) ?? 0;
+        const intuition = this.getParticipantIntuition(mp);
+        mp.baseIni = reaction + intuition;
+        mp.dices = 1;
+      }
+      // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
       return;
     }
@@ -614,7 +628,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const total = target.getCurrentInitiative();
       const intuition = this.getParticipantIntuition(target);
       let baseLabel: string;
-      if (this.isMatrix(target) && this.asMatrix(target).vrMode !== VRMode.AR) {
+      if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
         baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
       } else {
         baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
@@ -1804,10 +1818,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  onChange(e: Event) {
-    console.log(e);
-  }
-
   onParticipantUpdated() {
     this.enforceParticipantRollBounds();
     this.syncSharedState();
@@ -1940,7 +1950,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
-    this.applyVRMode(mp, VRMode.AR); // resets to AR, sets jackedIn=false
+    // Jack Out: clear VR mode, restore physical initiative.
+    mp.vrMode = VRMode.None;
+    mp.jackedIn = false;
+    mp.blocksPhysicalActions = false;
+    const reaction = this.participantReactions.get(mp) ?? 0;
+    const intuition = this.getParticipantIntuition(mp);
+    mp.baseIni = reaction + intuition;
+    mp.dices = 1;
     this.pendingVrModes.set(p, VRMode.AR);
     mp.rollInitiative();
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
@@ -1970,7 +1987,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     dst["_actionHistory"] = [];
     mp.dataProcessing = defaultDP;
-    mp.vrMode = VRMode.AR;
+    mp.vrMode = VRMode.None;
     const existingId = this.participantIds.get(p);
     if (existingId) this.participantIds.set(mp, existingId);
     const owner = this.participantOwners.get(p);
