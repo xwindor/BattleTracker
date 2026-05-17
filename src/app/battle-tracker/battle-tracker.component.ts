@@ -7,7 +7,6 @@ import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import { Participant } from "Combat/Participants/Participant";
 import { LogHandler } from "Logging";
 import { Action } from "Interfaces/Action";
-import { NgxSliderModule } from '@angular-slider/ngx-slider';
 import { FormsModule } from '@angular/forms';
 import { DragDropModule } from '@angular/cdk/drag-drop';
 import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
@@ -40,7 +39,6 @@ interface LocalLogEntry {
   styleUrls: ["./battle-tracker.component.css"],
   imports: [
     CommonModule,
-    NgxSliderModule,
     NgbNavModule,
     NgbDropdownModule,
     NgbTooltip,
@@ -101,9 +99,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     fullDefense: "Full Defense",
     block: "Block",
     intercept: "Intercept",
-    hitTheDirt: "Hit the Dirt",
+    hitTheDirt: "Hit The Dirt",
     dodge: "Dodge",
-    parry: "Parry"
+    parry: "Parry",
+    counterstrike: "Counterstrike",
+    diveForCover: "Dive For Cover",
+    reversal: "Reversal",
+    rightBackAtYa: "Right Back At Ya",
+    runForYourLife: "Run For Your Life",
+    diveOnTheGrenade: "Dive On The Grenade",
+    sacrificeThrow: "Sacrifice Throw",
+    riposte: "Riposte",
+    protectingThePrinciple: "Protecting The Principle",
+    shadowBlock: "Shadow Block",
+    iAmTheFirewall: "I Am The Firewall",
+    custom: "Custom"
   };
   private readonly actionDescriptions: Record<string, string> = {
     block: "Interrupt defense vs melee. Add Unarmed Combat to your defense test once for this attack only (not for the whole Combat Turn).",
@@ -178,6 +188,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly participantIntuitions = new Map<IParticipant, number>();
   private readonly participantTieBreakers = new Map<IParticipant, number>();
   private readonly lastKnownDamage = new Map<string, { physical: number; stun: number }>();
+  private damageLogFlushTimeout: number | null = null;
+  private readonly damageLogDebounceMs = 500;
 
   // -- OS threshold alert state --
   @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
@@ -313,6 +325,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       window.clearTimeout(this.clearSharedLogFlashTimeout);
       this.clearSharedLogFlashTimeout = null;
     }
+    if (this.damageLogFlushTimeout !== null) {
+      window.clearTimeout(this.damageLogFlushTimeout);
+      this.damageLogFlushTimeout = null;
+    }
     this.clearSharedLogDecodeAnimations();
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
@@ -428,6 +444,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.shareInfo = "";
     if (!this.shareRoomCode) {
       return;
+    }
+    if (this.damageLogFlushTimeout !== null) {
+      window.clearTimeout(this.damageLogFlushTimeout);
+      this.damageLogFlushTimeout = null;
+      this.flushDamageLog();
     }
     const room = this.shareRoomCode;
     this.isClosingSession = true;
@@ -789,6 +810,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   private recordDamageChanges() {
+    if (this.damageLogFlushTimeout !== null) {
+      window.clearTimeout(this.damageLogFlushTimeout);
+    }
+    this.damageLogFlushTimeout = window.setTimeout(() => {
+      this.flushDamageLog();
+      this.damageLogFlushTimeout = null;
+    }, this.damageLogDebounceMs);
+  }
+
+  private flushDamageLog() {
     for (const participant of this.combatManager.participants.items) {
       const id = this.getParticipantId(participant);
       const currentPhysical = Math.max(0, Number(participant.physicalDamage || 0));
@@ -1513,6 +1544,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   async btnReset_Click() {
     LogHandler.log(this.currentBTTime, "Reset_Click");
+    if (this.damageLogFlushTimeout !== null) {
+      window.clearTimeout(this.damageLogFlushTimeout);
+      this.damageLogFlushTimeout = null;
+      this.flushDamageLog();
+    }
     const confirmationText = "Are you sure you want to end combat?";
     const confirmed = await this.confirmationDialog.simpleConfirm(confirmationText);
     if (!confirmed) {

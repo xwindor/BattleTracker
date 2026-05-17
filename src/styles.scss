@@ -304,6 +304,23 @@ body.skin-alternate .economy-blocked {
   color: #89adb4;
 }
 
+body.skin-alternate .interrupt-badges {
+  border-left-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+body.skin-alternate .interrupt-badge {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+body.skin-alternate .interrupt-badge-persistent {
+  background: rgba(248, 113, 113, 0.24);
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fecaca;
+}
+
 body.skin-alternate .economy-label {
   color: #9cd0d8;
 }
@@ -825,6 +842,19 @@ body.skin-cyberdeck .btn-success {
 
 body.skin-cyberdeck .btn-danger {
   background: rgba(255, 95, 131, 0.2);
+  border-color: var(--cd-danger);
+  color: #ffd2de;
+}
+
+body.skin-cyberdeck .btn-outline-danger {
+  border-color: var(--cd-danger);
+  color: var(--cd-danger);
+  background: transparent;
+}
+
+body.skin-cyberdeck .btn-outline-danger:hover,
+body.skin-cyberdeck .btn-outline-danger:focus {
+  background: rgba(255, 95, 131, 0.15);
   border-color: var(--cd-danger);
   color: #ffd2de;
 }
@@ -1862,3 +1892,21 @@ body.skin-cyberdeck .player-participant.active-actor .gm-chip-initdice {
   background: rgba(12, 27, 37, 0.92) !important;
 }
 
+
+body.skin-cyberdeck .interrupt-badges {
+  border-left-color: rgba(255, 95, 131, 0.45);
+  background: rgba(255, 95, 131, 0.05);
+}
+
+body.skin-cyberdeck .interrupt-badge {
+  background: rgba(255, 95, 131, 0.12);
+  color: var(--cd-danger);
+  border-color: rgba(255, 95, 131, 0.35);
+}
+
+body.skin-cyberdeck .interrupt-badge-persistent {
+  background: rgba(255, 95, 131, 0.22);
+  border-color: rgba(255, 95, 131, 0.6);
+  color: #ffb3c6;
+  box-shadow: 0 0 0.4rem rgba(255, 95, 131, 0.3);
+}

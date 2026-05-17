@@ -91,6 +91,26 @@
   padding: 0.65rem 0.75rem;
 }
 
+@keyframes pulse-red-nudge {
+  0%, 100% { border-color: #93c5fd; box-shadow: none; background: #eff6ff; }
+  50% { border-color: #dc2626; box-shadow: 0 0 0 4px rgba(220,38,38,0.35); background: rgba(220,38,38,0.08); }
+}
+
+.nudge-pulse {
+  animation: pulse-red-nudge 0.5s ease-in-out 3;
+}
+
+.notify-mute-btn {
+  font-size: 1rem;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.65;
+}
+
+.notify-mute-btn:hover {
+  opacity: 1;
+}
+
 .roll-input {
   max-width: 12rem;
 }
@@ -145,6 +165,10 @@
 .action-item-twirl {
   min-width: 2rem;
   padding: 0 0.4rem;
+}
+
+.action-item-twirl[aria-expanded="true"] .fa-circle-info {
+  color: #1e40af;
 }
 
 .action-item-details {

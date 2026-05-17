@@ -45,6 +45,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   state: SharedCombatState | null = null;
   log: SharedLogEntry[] = [];
   promptRoll = false;
+  rollPromptNudge = false;
+  notifyMuted = false;
   info = "";
   selectedClaimParticipantId = "";
   actModalParticipant: SharedParticipantState | null = null;
@@ -89,6 +91,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   private pendingLogScroll = false;
   private flashedLogIndex = -1;
   private clearLogFlashTimeout: number | null = null;
+  private nudgeTimeout: number | null = null;
+  private audioCtx: AudioContext | null = null;
   private lastKnownCombatStarted = false;
   private explicitCombatEndedNotice = false;
   private readonly matrixChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$#@%*+-";
@@ -113,12 +117,21 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (room) {
       this.room = room.toUpperCase();
     }
+    this.notifyMuted = localStorage.getItem('bt.playerNotifyMuted.v1') === 'true';
   }
 
   ngOnDestroy() {
     if (this.clearLogFlashTimeout !== null) {
       window.clearTimeout(this.clearLogFlashTimeout);
       this.clearLogFlashTimeout = null;
+    }
+    if (this.nudgeTimeout !== null) {
+      window.clearTimeout(this.nudgeTimeout);
+      this.nudgeTimeout = null;
+    }
+    if (this.audioCtx) {
+      this.audioCtx.close();
+      this.audioCtx = null;
     }
     this.clearLogDecodeAnimations();
     if (this.connected && this.session.currentRoom) {
@@ -162,6 +175,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.session.onCommand((command) => {
         if (command.type === "request_rolls") {
           this.promptRoll = true;
+          this.triggerRollNudge();
         } else if (command.type === "clear_roll_prompt") {
           this.promptRoll = false;
         } else if (command.type === "combat_ended") {
@@ -787,6 +801,55 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       const count = counts.get(action) || 0;
       return count > 1 ? `${action} x${count}` : action;
     });
+  }
+
+  toggleNotifyMute(): void {
+    this.notifyMuted = !this.notifyMuted;
+    localStorage.setItem('bt.playerNotifyMuted.v1', String(this.notifyMuted));
+  }
+
+  private triggerRollNudge(): void {
+    this.rollPromptNudge = false;
+    if (this.nudgeTimeout !== null) {
+      window.clearTimeout(this.nudgeTimeout);
+      this.nudgeTimeout = null;
+    }
+    setTimeout(() => {
+      this.rollPromptNudge = true;
+      this.nudgeTimeout = window.setTimeout(() => {
+        this.rollPromptNudge = false;
+        this.nudgeTimeout = null;
+      }, 1500);
+    }, 0);
+    this.playNudgeChime();
+  }
+
+  private playNudgeChime(): void {
+    if (this.notifyMuted) return;
+    try {
+      if (!this.audioCtx) {
+        this.audioCtx = new AudioContext();
+      }
+      const ctx = this.audioCtx;
+      const now = ctx.currentTime;
+      const playNote = (freq: number, start: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.3, start + 0.01);
+        gain.gain.linearRampToValueAtTime(0, start + duration);
+        osc.start(start);
+        osc.stop(start + duration);
+      };
+      playNote(880, now, 0.12);
+      playNote(1320, now + 0.13, 0.18);
+    } catch {
+      // audio unavailable — non-critical
+    }
   }
 
   private scrollLogToBottom() {

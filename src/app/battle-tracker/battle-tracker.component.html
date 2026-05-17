@@ -44,7 +44,7 @@
               {{ combatManager.hasMoreIniPasses() ? "Next Initiative Pass" : "End Combat Turn" }}
             </button>
             }
-            <button type="button" class="btn btn-danger" (click)="btnReset_Click()">
+            <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">
               End Combat
             </button>
           </div>
@@ -215,7 +215,7 @@
                       <button type="button" class="btn btn-outline-secondary btn-sm interrupt-twirl"
                         (click)="toggleActionDetails($event, action)" [attr.aria-expanded]="isActionDetailsOpen(action)"
                         [attr.title]="isActionDetailsOpen(action) ? 'Hide details' : 'Show details'">
-                        {{ isActionDetailsOpen(action) ? "v" : ">" }}
+                        <i class="fa fa-circle-info" aria-hidden="true"></i>
                       </button>
                     </div>
                     }
@@ -230,7 +230,7 @@
                       <button type="button" class="btn btn-outline-secondary btn-sm interrupt-twirl"
                         (click)="toggleActionDetails($event, action)" [attr.aria-expanded]="isActionDetailsOpen(action)"
                         [attr.title]="isActionDetailsOpen(action) ? 'Hide details' : 'Show details'">
-                        {{ isActionDetailsOpen(action) ? "v" : ">" }}
+                        <i class="fa fa-circle-info" aria-hidden="true"></i>
                       </button>
                     </div>
                     }
@@ -245,7 +245,6 @@
               </div>
             </div>
             }
-            <img src="./assets/shield.svg" [hidden]="!p.isInFullDefense()" alt="Shield Icon" title="Full Defense" />
           </div>
           <div class="col-5 col-xl-3 text-right">
             <div class="btn-group" role="group">
@@ -281,6 +280,16 @@
               </button>
             </div>
           </div>
+          @if (p.actionHistory.length > 0) {
+          <div class="col-12 interrupt-badges">
+            @for (action of p.actionHistory; track $index) {
+            <span class="interrupt-badge" [class.interrupt-badge-persistent]="action.persist"
+              [title]="getActionTooltip(action)">
+              {{ getActionLabel(action) }} ({{ action.iniMod }})
+            </span>
+            }
+          </div>
+          }
           @if (last) {
           <span>{{ ngReady() }}</span>
           }
@@ -480,54 +489,49 @@
               <button ngbNavLink>Stats</button>
               <ng-template ngbNavContent>
                 <h4>Stats</h4>
-                <div class="row">
-                  <div class="col-12">
-                    <span>Initiative Dices</span>
-                  </div>
-                  <div class="col-12">
-                    <ngx-slider [(value)]="selectedActor.dices"
-                      [options]="{ floor: 1, ceil: 5, step: 1, showTicks: true, tickStep: 1, animate: false}">
-                    </ngx-slider>
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="col-12">
-                    <span>Overflow</span>
-                  </div>
-                  <div class="col-12">
-                    <ngx-slider [(value)]="selectedActor.overflowHealth"
-                      [options]="{ floor: 0, ceil: 20, step: 1, showTicks: true, tickStep: 5, animate: false}">
-                    </ngx-slider>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Initiative Dices</span></div>
+                  <div class="col-5">
+                    <input type="number" class="form-control form-control-sm"
+                      [min]="1" [max]="5" step="1"
+                      [(ngModel)]="selectedActor.dices"
+                      (ngModelChange)="onParticipantDiceCountChanged(selectedActor, $event)">
                   </div>
                 </div>
-                <div class="row">
-                  <div class="col-12">
-                    <span>Physical Health</span>
-                  </div>
-                  <div class="col-12">
-                    <ngx-slider [(value)]="selectedActor.physicalHealth"
-                      [options]="{ floor: 0, ceil: 20, step: 1, showTicks: true, tickStep: 5, animate: false}">
-                    </ngx-slider>
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="col-12">
-                    <span>Stun Health</span>
-                  </div>
-                  <div class="col-12">
-                    <ngx-slider [(value)]="selectedActor.stunHealth"
-                      [options]="{ floor: 0, ceil: 20, step: 1, showTicks: true, tickStep: 5, animate: false}">
-                    </ngx-slider>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Overflow</span></div>
+                  <div class="col-5">
+                    <input type="number" class="form-control form-control-sm"
+                      [min]="0" [max]="20" step="1"
+                      [(ngModel)]="selectedActor.overflowHealth"
+                      (ngModelChange)="onParticipantUpdated()">
                   </div>
                 </div>
-                <div class="row">
-                  <div class="col-12">
-                    <span>Pain Tolerance</span>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Physical Health</span></div>
+                  <div class="col-5">
+                    <input type="number" class="form-control form-control-sm"
+                      [min]="0" [max]="20" step="1"
+                      [(ngModel)]="selectedActor.physicalHealth"
+                      (ngModelChange)="onParticipantUpdated()">
                   </div>
-                  <div class="col-12">
-                    <ngx-slider [(value)]="selectedActor.painTolerance"
-                      [options]="{ floor: 0, ceil: 15, step: 1, showTicks: true, tickStep: 5, animate: false}">
-                    </ngx-slider>
+                </div>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Stun Health</span></div>
+                  <div class="col-5">
+                    <input type="number" class="form-control form-control-sm"
+                      [min]="0" [max]="20" step="1"
+                      [(ngModel)]="selectedActor.stunHealth"
+                      (ngModelChange)="onParticipantUpdated()">
+                  </div>
+                </div>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Pain Tolerance</span></div>
+                  <div class="col-5">
+                    <input type="number" class="form-control form-control-sm"
+                      [min]="0" [max]="15" step="1"
+                      [(ngModel)]="selectedActor.painTolerance"
+                      (ngModelChange)="onParticipantUpdated()">
                   </div>
                 </div>
                 <div class="row">
@@ -609,7 +613,7 @@
               (click)="toggleDeclaredActionDetails($event, actionName)"
               [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
               [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
-              {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+              <i class="fa fa-circle-info" aria-hidden="true"></i>
             </button>
           </div>
           @if (isDeclaredActionDetailsOpen(actionName)) {
@@ -660,7 +664,7 @@
                 (click)="toggleDeclaredActionDetails($event, actionName)"
                 [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
                 [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
-                {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+                <i class="fa fa-circle-info" aria-hidden="true"></i>
               </button>
             </div>
             @if (isDeclaredActionDetailsOpen(actionName)) {

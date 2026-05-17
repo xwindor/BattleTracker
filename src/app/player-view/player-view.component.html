@@ -89,20 +89,27 @@
   </div>
   }
   <div class="card mb-3">
-    <div class="card-header d-flex justify-content-between">
+    <div class="card-header d-flex justify-content-between align-items-center">
       <span>Initiative Order</span>
-      <span>
-        @if (state.started) {
-        Combat Turn {{ state.round }} | Pass {{ state.pass }}
-        }
-        @else {
-        Combat not active
-        }
-      </span>
+      <div class="d-flex align-items-center gap-2">
+        <span>
+          @if (state.started) {
+          Combat Turn {{ state.round }} | Pass {{ state.pass }}
+          }
+          @else {
+          Combat not active
+          }
+        </span>
+        <button type="button" class="btn btn-link notify-mute-btn p-0"
+          (click)="toggleNotifyMute()"
+          [title]="notifyMuted ? 'Unmute roll notifications' : 'Mute roll notifications'">
+          {{ notifyMuted ? '🔇' : '🔔' }}
+        </button>
+      </div>
     </div>
     <div class="card-body">
       @if (promptRoll) {
-      <div class="roll-banner mb-3">
+      <div class="roll-banner mb-3" [class.nudge-pulse]="rollPromptNudge">
         <div class="fw-semibold mb-1">GM requested initiative rolls.</div>
         <div class="d-flex gap-2 align-items-center flex-wrap">
           <input type="number" class="form-control roll-input" [(ngModel)]="manualRoll"
@@ -384,7 +391,7 @@
               (click)="toggleDeclaredActionDetails($event, actionName)"
               [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
               [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
-              {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+              <i class="fa fa-circle-info" aria-hidden="true"></i>
             </button>
           </div>
           @if (isDeclaredActionDetailsOpen(actionName)) {
@@ -435,7 +442,7 @@
                 (click)="toggleDeclaredActionDetails($event, actionName)"
                 [attr.aria-expanded]="isDeclaredActionDetailsOpen(actionName)"
                 [attr.title]="isDeclaredActionDetailsOpen(actionName) ? 'Hide details' : 'Show details'">
-                {{ isDeclaredActionDetailsOpen(actionName) ? "v" : ">" }}
+                <i class="fa fa-circle-info" aria-hidden="true"></i>
               </button>
             </div>
             @if (isDeclaredActionDetailsOpen(actionName)) {
