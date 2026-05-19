@@ -92,8 +92,9 @@ export class MatrixParticipant extends Participant {
   /**
    * Apply a jack-in (or mid-combat mode switch) for this decker.
    * Recomputes baseIni and dices per Table 24 (4/3/1 d6) and flips the
-   * VR catatonia flag. The caller is responsible for re-rolling initiative
-   * if combat is already in progress.
+   * VR catatonia flag. The caller is responsible for applying initiative
+   * correctly: fresh roll if not yet rolled this pass, dice delta otherwise
+   * (SR5E: only roll extra/lost dice and add/subtract to the existing score).
    */
   applyJackInMode(mode: VRMode, intuition: number): void {
     this.vrMode = mode;

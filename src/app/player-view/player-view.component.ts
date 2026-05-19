@@ -3,14 +3,12 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
-import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
+import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
-
-interface DeclaredActionSelection {
-  free: string | null;
-  simple: string[];
-  complex: string | null;
-}
+import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
+import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
+import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
 
 @Component({
   standalone: true,
@@ -58,7 +56,6 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     simple: [],
     complex: null
   };
-  private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
   readonly declaredActions = DECLARED_ACTIONS;
 
   get physicalActionCategories() {
@@ -95,18 +92,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   private audioCtx: AudioContext | null = null;
   private lastKnownCombatStarted = false;
   private explicitCombatEndedNotice = false;
-  private readonly matrixChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$#@%*+-";
   private readonly activeLogDecodeTimers = new Map<number, number>();
   private readonly activeLogDecodeText = new Map<number, string>();
   
   private readonly interruptActions = [
-    { key: "block", label: "Block" },
-    { key: "parry", label: "Parry" },
-    { key: "dodge", label: "Dodge" },
-    { key: "hitTheDirt", label: "Hit The Dirt" },
-    { key: "intercept", label: "Intercept" },
-    { key: "fullDefense", label: "Full Defense" }
-  ];
+    "block", "parry", "dodge", "hitTheDirt", "intercept", "fullDefense"
+  ].map(key => ({ key, label: INTERRUPT_ACTION_META[key]?.label ?? key }));
 
   constructor(private session: SessionSyncService, private modalService: NgbModal) {}
 
@@ -351,6 +342,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     const actor = this.primaryCharacter;
     const participantId = overrideId ?? actor?.id;
     if (!participantId) return;
+    // SR5E mid-combat rule: if combat is active and the participant has already rolled
+    // this pass, the server applies only the dice delta — don't overwrite with a fresh roll.
+    const combatActive = this.state?.started === true;
+    const alreadyRolled = actor && !actor.pendingRoll;
+    if (combatActive && alreadyRolled) {
+      return;
+    }
     const diceCount = mode === "hot-sim" ? 4 : mode === "cold-sim" ? 3 : 1;
     const values: number[] = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1);
     const diceSum = values.reduce((s, v) => s + v, 0);
@@ -453,7 +451,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       return;
     }
     const max = this.getPrimaryCharacterManualRollMax();
-    const clamped = this.clampRollToBounds(numeric, max);
+    const clamped = clampRollToBounds(numeric, max);
     this.manualRoll = String(clamped);
   }
 
@@ -478,6 +476,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (this.actModalRef) {
       this.actModalRef.dismiss();
     }
+  }
+
+  clearActPlannerSelection(): void {
+    this.declaredActionSelection = { free: null, simple: [], complex: null };
+  }
+
+  isActPlannerSelectionEmpty(): boolean {
+    return this.declaredActionSelection.free === null
+      && this.declaredActionSelection.simple.length === 0
+      && this.declaredActionSelection.complex === null;
   }
 
   submitActPlanner() {
@@ -552,13 +560,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   getLogTextClass(text: string): string {
-    if (/Free:|Simple:|Complex:|Interrupt|Act/i.test(text)) {
-      return "log-text-action";
-    }
-    if (/roll/i.test(text)) {
-      return "log-text-roll";
-    }
-    return "log-text-system";
+    return getLogTextClass(text);
   }
 
   getLogDisplayText(entry: SharedLogEntry, index: number): string {
@@ -566,43 +568,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   formatLogText(text: string): string {
-    let formatted = this.escapeHtml(text);
-    const rollPattern = /(initiative roll:\s*)(-?\d+)/i;
-    if (rollPattern.test(formatted)) {
-      return formatted.replace(rollPattern, `$1<span class="log-keyword-roll">$2</span>`);
-    }
-
-    const interruptPattern = /^(Interrupt\s+)(.+)$/i;
-    if (interruptPattern.test(formatted)) {
-      return formatted.replace(interruptPattern, `$1<span class="log-keyword-action">$2</span>`);
-    }
-
-    const categoryPattern = /(Free|Simple|Complex):\s*([^|]+)/gi;
-    if (categoryPattern.test(formatted)) {
-      return formatted.replace(categoryPattern, (_match, label: string, actions: string) => {
-        const highlightedActions = actions
-          .split(",")
-          .map((action: string) => action.trim())
-          .filter((action: string) => action.length > 0)
-          .map((action: string) => `<span class="log-keyword-action">${action}</span>`)
-          .join(", ");
-        return `${label}: ${highlightedActions}`;
-      });
-    }
-    formatted = formatted.replace(/(healed\s+Physical\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
-    formatted = formatted.replace(/(healed\s+Stun\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
-    formatted = formatted.replace(/(Physical\s+)(\d+)/gi, `$1<span class="log-keyword-physical">$2</span>`);
-    formatted = formatted.replace(/(Stun\s+)(\d+)/gi, `$1<span class="log-keyword-stun">$2</span>`);
-    return formatted;
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+    return formatLogText(text);
   }
 
   toggleDeclaredActionCategory(categoryId: DeclaredActionCategoryId) {
@@ -629,13 +595,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   isDeclaredActionSelected(action: DeclaredActionItem): boolean {
-    if (action.economy === "free") {
-      return this.declaredActionSelection.free === action.name;
-    }
-    if (action.economy === "simple") {
-      return this.declaredActionSelection.simple.includes(action.name);
-    }
-    return this.declaredActionSelection.complex === action.name;
+    return DeclaredActionEngine.isDeclaredActionSelected(this.declaredActionSelection, action);
   }
 
   canUseDeclaredAction(action: DeclaredActionItem): boolean {
@@ -647,19 +607,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (isPhysicalAct && this.primaryCharacter?.isVRCatatonic) {
       return false;
     }
-    if (action.economy !== "simple" && this.isDeclaredActionSelected(action)) {
-      return true;
-    }
-    if (action.economy === "free") {
-      return true;
-    }
-    if (action.economy === "simple") {
-      if (this.getSimpleActionSelectionCount(action.name) > 0) {
-        return true;
-      }
-      return this.declaredActionSelection.complex === null && this.declaredActionSelection.simple.length < 2;
-    }
-    return this.declaredActionSelection.simple.length === 0 && this.declaredActionSelection.complex === null;
+    return DeclaredActionEngine.canUseDeclaredAction(this.declaredActionSelection, action);
   }
 
   getDeclaredActionDisabledReason(action: DeclaredActionItem): string {
@@ -684,40 +632,15 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     if (!this.canUseDeclaredAction(action)) {
       return;
     }
-    if (action.economy === "free") {
-      this.declaredActionSelection.free = this.declaredActionSelection.free === action.name ? null : action.name;
-      return;
-    }
-    if (action.economy === "simple") {
-      const simpleCount = this.getSimpleActionSelectionCount(action.name);
-      if (simpleCount > 0) {
-        if (this.canAddSimpleDuplicate(action.name)) {
-          this.declaredActionSelection.simple = [ ...this.declaredActionSelection.simple, action.name ];
-        } else if (this.isRepeatableSimpleAction(action.name)) {
-          this.declaredActionSelection.simple = this.declaredActionSelection.simple.filter(a => a !== action.name);
-        } else {
-          this.declaredActionSelection.simple = this.removeOneSimpleActionSelection(this.declaredActionSelection.simple, action.name);
-        }
-      } else {
-        this.declaredActionSelection.simple = [ ...this.declaredActionSelection.simple, action.name ];
-      }
-      return;
-    }
-    this.declaredActionSelection.complex = this.declaredActionSelection.complex === action.name ? null : action.name;
-    if (this.declaredActionSelection.complex) {
-      this.declaredActionSelection.simple = [];
-    }
+    this.declaredActionSelection = DeclaredActionEngine.toggleDeclaredAction(this.declaredActionSelection, action);
   }
 
   getDeclaredActionValidationMessage(): string {
-    if (!this.declaredActionSelection.free && this.declaredActionSelection.simple.length === 0 && !this.declaredActionSelection.complex) {
-      return "Select at least one action.";
-    }
-    return "Valid action set.";
+    return DeclaredActionEngine.getValidationResult(this.declaredActionSelection).message;
   }
 
   isDeclaredActionSelectionValid(): boolean {
-    return this.getDeclaredActionValidationMessage() === "Valid action set.";
+    return DeclaredActionEngine.getValidationResult(this.declaredActionSelection).valid;
   }
 
   getFreeUsageText(): string {
@@ -733,74 +656,15 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   private buildDeclaredActionLog(): string {
-    const parts: string[] = [];
-    if (this.declaredActionSelection.free) {
-      parts.push(`Free: ${this.declaredActionSelection.free}`);
-    }
-    if (this.declaredActionSelection.simple.length > 0) {
-      parts.push(`Simple: ${this.formatActionListWithCounts(this.declaredActionSelection.simple).join(", ")}`);
-    }
-    if (this.declaredActionSelection.complex) {
-      parts.push(`Complex: ${this.declaredActionSelection.complex}`);
-    }
-    return parts.length > 0 ? parts.join(" | ") : "Act";
+    return DeclaredActionEngine.buildDeclaredActionLog(this.declaredActionSelection) ?? "Act";
   }
 
   private clampInitiativeRoll(value: number, initiativeDice: number | undefined): number {
-    const max = this.getInitiativeRollMax(initiativeDice);
-    return this.clampRollToBounds(value, max);
+    return clampInitiativeRoll(value, initiativeDice);
   }
 
   private getInitiativeRollMax(initiativeDice: number | undefined): number {
-    const diceCount = Math.max(1, Number(initiativeDice || 1));
-    return diceCount * 6;
-  }
-
-  private clampRollToBounds(value: number, max: number): number {
-    const normalized = Math.floor(Number(value) || 0);
-    return Math.max(0, Math.min(max, normalized));
-  }
-
-  private isRepeatableSimpleAction(actionName: string): boolean {
-    return this.repeatableSimpleActions.has(actionName);
-  }
-
-  private getSimpleActionSelectionCount(actionName: string): number {
-    return this.declaredActionSelection.simple.filter(action => action === actionName).length;
-  }
-
-  private canAddSimpleDuplicate(actionName: string): boolean {
-    if (!this.isRepeatableSimpleAction(actionName)) {
-      return false;
-    }
-    if (this.declaredActionSelection.complex !== null || this.declaredActionSelection.simple.length >= 2) {
-      return false;
-    }
-    return this.getSimpleActionSelectionCount(actionName) < 2;
-  }
-
-  private removeOneSimpleActionSelection(actions: string[], actionName: string): string[] {
-    const next = [ ...actions ];
-    const index = next.indexOf(actionName);
-    if (index !== -1) {
-      next.splice(index, 1);
-    }
-    return next;
-  }
-
-  private formatActionListWithCounts(actions: string[]): string[] {
-    const counts = new Map<string, number>();
-    const ordered: string[] = [];
-    for (const action of actions) {
-      if (!counts.has(action)) {
-        ordered.push(action);
-      }
-      counts.set(action, (counts.get(action) || 0) + 1);
-    }
-    return ordered.map(action => {
-      const count = counts.get(action) || 0;
-      return count > 1 ? `${action} x${count}` : action;
-    });
+    return getInitiativeRollMax(initiativeDice);
   }
 
   toggleNotifyMute(): void {
@@ -898,23 +762,11 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   private buildDecodeFrame(finalText: string, revealedChars: number): string {
-    let frame = "";
-    for (let i = 0; i < finalText.length; i++) {
-      const currentChar = finalText[i];
-      if (currentChar === " " || i < revealedChars) {
-        frame += currentChar;
-      } else if (/[A-Za-z0-9]/.test(currentChar)) {
-        frame += this.randomMatrixChar();
-      } else {
-        frame += currentChar;
-      }
-    }
-    return frame;
+    return buildDecodeFrame(finalText, revealedChars);
   }
 
   private randomMatrixChar(): string {
-    const index = Math.floor(Math.random() * this.matrixChars.length);
-    return this.matrixChars[index];
+    return randomMatrixChar();
   }
 
   private clearLogDecodeAnimations() {

@@ -19,13 +19,11 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
-import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
-
-interface DeclaredActionSelection {
-  free: string | null;
-  simple: string[];
-  complex: string | null;
-}
+import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
+import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
+import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
+import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
+import { getInitiativeRollMax, clampInitiativeRoll } from "app/shared/roll-utils";
 
 interface LocalLogEntry {
   timestamp: Date;
@@ -95,73 +93,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  private readonly actionLabels: Record<string, string> = {
-    fullDefense: "Full Defense",
-    block: "Block",
-    intercept: "Intercept",
-    hitTheDirt: "Hit The Dirt",
-    dodge: "Dodge",
-    parry: "Parry",
-    counterstrike: "Counterstrike",
-    diveForCover: "Dive For Cover",
-    reversal: "Reversal",
-    rightBackAtYa: "Right Back At Ya",
-    runForYourLife: "Run For Your Life",
-    diveOnTheGrenade: "Dive On The Grenade",
-    sacrificeThrow: "Sacrifice Throw",
-    riposte: "Riposte",
-    protectingThePrinciple: "Protecting The Principle",
-    shadowBlock: "Shadow Block",
-    iAmTheFirewall: "I Am The Firewall",
-    custom: "Custom"
-  };
-  private readonly actionDescriptions: Record<string, string> = {
-    block: "Interrupt defense vs melee. Add Unarmed Combat to your defense test once for this attack only (not for the whole Combat Turn).",
-    dodge: "Interrupt defense. Add Gymnastics to your defense test once for this attack only (not for the whole Combat Turn).",
-    hitTheDirt: "If you've already used your Free Action, drop prone under suppressive fire without making the Reaction + Edge test. You will be prone on your next Action Phase and must use Stand Up to get up.",
-    intercept: "Interrupt to attack a target moving past you or breaking from melee (within 1 + Reach meters). You must have enough Initiative left this Action Phase to do it.",
-    parry: "Interrupt defense vs melee. Add your relevant melee weapon skill to your defense test once for this attack only; relevant bonus dice (such as weapon focus dice) can apply.",
-    fullDefense: "Interrupt stance for the rest of the Combat Turn. Add Willpower to all defense tests this turn. Can be taken before your Action Phase if not surprised, and it stacks with other interrupt actions."
-  };
   
-  private readonly simpleAttackActions = new Set<string>([
-    "Quick Draw",
-    "Fire Bow",
-    "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
-    "Throw Weapon",
-    "Reckless Spellcasting"
-  ]);
-  private readonly repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
-  private readonly callShotCompatibleActions = new Set<string>([
-    "Fire Bow",
-    "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
-    "Throw Weapon",
-    "Melee Attack",
-    "Cast Spell",
-    "Reckless Spellcasting",
-    "Quick Draw",
-    "Fire Long Burst or Semi-Auto Burst",
-    "Fire Full-Auto Weapon",
-    "Fire Mounted or Vehicle Weapon",
-    "Load and Fire Bow"
-  ]);
-  private readonly multipleAttackCompatibleActions = new Set<string>([
-    "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto",
-    "Throw Weapon",
-    "Melee Attack",
-    "Cast Spell",
-    "Reckless Spellcasting",
-    "Quick Draw",
-    "Fire Long Burst or Semi-Auto Burst",
-    "Fire Full-Auto Weapon",
-    "Fire Mounted or Vehicle Weapon",
-    "Fire Bow",
-    "Load and Fire Bow"
-  ]);
-  private readonly actionConflicts: Record<string, string[]> = {
-    "Quick Draw": [ "Ready Weapon", "Fire Bow", "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto", "Throw Weapon" ],
-    "Ready Weapon": [ "Quick Draw" ]
-  };
   shareRoomCode = "";
   shareJoinCode = "";
   shareError = "";
@@ -205,15 +137,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return new BTTime(this.combatManager.combatTurn, this.combatManager.initiativePass, this.combatManager.currentInitiative);
   }
 
-  private _selectedActor: IParticipant | null = null
-
-  get selectedActor(): IParticipant | null {
-    return this._selectedActor;
-  }
-
-  set selectedActor(val: IParticipant | null) {
-    this.Set("selectedActor", val);
-  }
+  selectedActor: IParticipant | null = null;
 
   constructor(
     private ref: ChangeDetectorRef,
@@ -582,10 +506,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                    : vrModeStr === "cold-sim" ? VRMode.ColdSim
                    : VRMode.AR;
+        const oldDices = mp.dices;
+        const wasRolled = mp.diceIni > 0 && this.combatManager.started;
         this.applyVRMode(mp, mode);
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
+        if (wasRolled) {
+          // SR5E: mid-combat jack in — roll only the delta dice; player won't send a fresh roll.
+          mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, mp.dices));
+        }
+        // else: combat not started or no roll yet — player will send roll_submission with full roll.
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
+        const oldDices = mp.dices;
+        const wasRolled = payload["jackOut"] === true && mp.diceIni > 0 && this.combatManager.started;
         mp.vrMode = VRMode.None;
         mp.jackedIn = false;
         mp.blocksPhysicalActions = false;
@@ -593,6 +526,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         const intuition = this.getParticipantIntuition(mp);
         mp.baseIni = reaction + intuition;
         mp.dices = 1;
+        if (wasRolled) {
+          // SR5E: mid-combat jack out — roll only the lost dice and subtract; player won't send fresh roll.
+          mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, 1));
+        }
+        // else: create (no existing roll) or combat not started — player will send roll_submission.
       }
       // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
@@ -681,7 +619,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         ? (command.payload!["illegalActions"] as string[])
         : [];
       const target = this.findPlayerParticipant(playerName, participantId);
-      if (!target || target.status !== StatusEnum.Active) {
+      if (!target || (target.status !== StatusEnum.Active && target.status !== StatusEnum.Delaying)) {
         return;
       }
       this.performAct(target, declaredAction, target.name || "Player");
@@ -760,7 +698,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           playerControlled: this.participantOwners.has(p),
           claimable: this.participantClaimable.get(p) === true,
           ownerName: this.participantOwners.get(p),
-          canAct: p.status === StatusEnum.Active,
+          canAct: p.status === StatusEnum.Active || p.status === StatusEnum.Delaying,
           canDelay: p.status === StatusEnum.Active,
           canInterrupt: p.getCurrentInitiative() >= 1,
           initiativeDice: p.dices,
@@ -1077,6 +1015,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
+  clearActModalSelection(): void {
+    if (this.actModalParticipant) {
+      this.clearDeclaredActionSelection(this.actModalParticipant);
+    }
+  }
+
+  isActModalSelectionEmpty(sender: IParticipant): boolean {
+    const sel = this.getDeclaredActionSelection(sender);
+    return sel.free === null && sel.simple.length === 0 && sel.complex === null;
+  }
+
   submitActModal() {
     if (!this.actModalParticipant || !this.isDeclaredActionSelectionValid(this.actModalParticipant)) {
       return;
@@ -1147,61 +1096,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return false;
     }
-    const selection = this.getDeclaredActionSelection(sender);
-    if (action.economy !== "simple" && this.isDeclaredActionSelected(sender, action)) {
-      return true;
-    }
-    if (action.economy === "free") {
-      if (this.hasConflictingSelectedAction(selection, action.name)) {
-        return false;
-      }
-      return true;
-    }
-    if (action.economy === "simple") {
-      if (this.getSimpleActionSelectionCount(selection, action.name) > 0) {
-        return true;
-      }
-      if (this.simpleAttackActions.has(action.name) && this.getSimpleAttackCount(selection) >= 1) {
-        return false;
-      }
-      if (this.hasConflictingSelectedAction(selection, action.name)) {
-        return false;
-      }
-      return selection.complex === null && selection.simple.length < 2;
-    }
-    if (this.hasConflictingSelectedAction(selection, action.name)) {
-      return false;
-    }
-    return selection.simple.length === 0 && selection.complex === null;
+    return DeclaredActionEngine.canUseDeclaredAction(this.getDeclaredActionSelection(sender), action);
   }
 
   isDeclaredActionSelectionValid(sender: IParticipant): boolean {
-    const selection = this.getDeclaredActionSelection(sender);
-    return this.getDeclaredActionValidationMessage(sender) === "Valid action set. Ready to submit.";
+    return DeclaredActionEngine.getValidationResult(this.getDeclaredActionSelection(sender)).valid;
   }
 
   getDeclaredActionValidationMessage(sender: IParticipant): string {
-    const selection = this.getDeclaredActionSelection(sender);
-    const selected = this.getSelectedActionNames(selection);
-    if (!selection.free && selection.simple.length === 0 && !selection.complex) {
-      return "Select at least one action to submit.";
-    }
-    if (selection.complex && selection.simple.length > 0) {
-      return "Complex and Simple actions cannot be combined.";
-    }
-    if (this.getSimpleAttackCount(selection) > 1) {
-      return "Only one Simple attack action can be selected per Action Phase.";
-    }
-    if (selected.has("Call a Shot") && !this.hasAny(selected, this.callShotCompatibleActions)) {
-      return "Call a Shot requires a compatible attack action.";
-    }
-    if (selected.has("Multiple Attacks") && !this.hasAny(selected, this.multipleAttackCompatibleActions)) {
-      return "Multiple Attacks requires a compatible attack action.";
-    }
-    if (selection.simple.length > 2) {
-      return "You can select at most 2 Simple actions.";
-    }
-    return "Valid action set. Ready to submit.";
+    return DeclaredActionEngine.getValidationResult(this.getDeclaredActionSelection(sender)).message;
   }
 
   getSelectionStateClass(sender: IParticipant): "valid" | "invalid" {
@@ -1238,9 +1141,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.isDeclaredActionSelected(sender, action)) {
       const selection = this.getDeclaredActionSelection(sender);
       if (action.economy === "simple"
-        && this.isRepeatableSimpleAction(action.name)
-        && this.getSimpleActionSelectionCount(selection, action.name) === 1
-        && this.canAddSimpleDuplicate(selection, action.name)) {
+        && DeclaredActionEngine.isRepeatableSimpleAction(action.name)
+        && DeclaredActionEngine.getSimpleActionSelectionCount(selection, action.name) === 1
+        && DeclaredActionEngine.canAddSimpleDuplicate(selection, action.name)) {
         return "Click to add this action a second time.";
       }
       return "Selected. Click again to deselect.";
@@ -1255,7 +1158,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (action.economy === "simple" && selection.simple.length >= 2) {
       return "Maximum of 2 Simple actions reached.";
     }
-    if (action.economy === "simple" && this.simpleAttackActions.has(action.name) && this.getSimpleAttackCount(selection) >= 1) {
+    if (action.economy === "simple" && DeclaredActionEngine.getSimpleAttackCount(selection) >= 1) {
       return "Only one Simple attack action is allowed.";
     }
     if (action.economy === "complex" && selection.simple.length > 0) {
@@ -1264,50 +1167,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (action.economy === "complex" && selection.complex) {
       return "A Complex action is already selected.";
     }
-    if (this.hasConflictingSelectedAction(selection, action.name)) {
+    if (DeclaredActionEngine.hasConflictingSelectedAction(selection, action.name)) {
       return "Conflicts with an already selected action.";
     }
     return "Not allowed by current action limits.";
-  }
-
-  private getSelectedActionNames(selection: DeclaredActionSelection): Set<string> {
-    const selected = new Set<string>();
-    if (selection.free) {
-      selected.add(selection.free);
-    }
-    selection.simple.forEach(action => selected.add(action));
-    if (selection.complex) {
-      selected.add(selection.complex);
-    }
-    return selected;
-  }
-
-  private hasAny(selected: Set<string>, candidates: Set<string>): boolean {
-    for (const action of selected) {
-      if (candidates.has(action)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private getSimpleAttackCount(selection: DeclaredActionSelection): number {
-    return selection.simple.filter(action => this.simpleAttackActions.has(action)).length;
-  }
-
-  private getConflictsForAction(actionName: string): string[] {
-    return this.actionConflicts[actionName] || [];
-  }
-
-  private hasConflictingSelectedAction(selection: DeclaredActionSelection, actionName: string): boolean {
-    const selected = this.getSelectedActionNames(selection);
-    const conflicts = this.getConflictsForAction(actionName);
-    if ([ ...selected ].some(a => conflicts.includes(a))) {
-      return true;
-    }
-    return [ ...selected ].some(selectedAction =>
-      this.getConflictsForAction(selectedAction).includes(actionName)
-    );
   }
 
   private toggleDeclaredActionSelection(sender: IParticipant, action: DeclaredActionItem): void {
@@ -1315,47 +1178,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const selection = this.getDeclaredActionSelection(sender);
-    if (action.economy === "free") {
-      selection.free = selection.free === action.name ? null : action.name;
-      return;
-    }
-    if (action.economy === "simple") {
-      const simpleCount = this.getSimpleActionSelectionCount(selection, action.name);
-      if (simpleCount > 0) {
-        if (this.canAddSimpleDuplicate(selection, action.name)) {
-          selection.simple = [ ...selection.simple, action.name ];
-        } else if (this.isRepeatableSimpleAction(action.name)) {
-          selection.simple = selection.simple.filter(a => a !== action.name);
-        } else {
-          selection.simple = this.removeOneSimpleActionSelection(selection.simple, action.name);
-        }
-      } else {
-        selection.simple = [ ...selection.simple, action.name ];
-      }
-      return;
-    }
-    selection.complex = selection.complex === action.name ? null : action.name;
-    if (selection.complex !== null) {
-      selection.simple = [];
-    }
+    this.declaredActionSelections.set(sender, DeclaredActionEngine.toggleDeclaredAction(selection, action));
   }
 
   private buildDeclaredActionLog(sender: IParticipant): string | null {
-    const selection = this.getDeclaredActionSelection(sender);
-    const parts: string[] = [];
-    if (selection.free) {
-      parts.push(`Free: ${selection.free}`);
-    }
-    if (selection.simple.length > 0) {
-      parts.push(`Simple: ${this.formatActionListWithCounts(selection.simple).join(", ")}`);
-    }
-    if (selection.complex) {
-      parts.push(`Complex: ${selection.complex}`);
-    }
-    if (parts.length === 0) {
-      return null;
-    }
-    return parts.join(" | ");
+    return DeclaredActionEngine.buildDeclaredActionLog(this.getDeclaredActionSelection(sender));
   }
 
   private getDeclaredActionSelection(sender: IParticipant): DeclaredActionSelection {
@@ -1377,54 +1204,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       free: null,
       simple: [],
       complex: null
-    });
-  }
-
-  private isRepeatableSimpleAction(actionName: string): boolean {
-    return this.repeatableSimpleActions.has(actionName);
-  }
-
-  private getSimpleActionSelectionCount(selection: DeclaredActionSelection, actionName: string): number {
-    return selection.simple.filter(action => action === actionName).length;
-  }
-
-  private canAddSimpleDuplicate(selection: DeclaredActionSelection, actionName: string): boolean {
-    if (!this.isRepeatableSimpleAction(actionName)) {
-      return false;
-    }
-    if (selection.complex !== null || selection.simple.length >= 2) {
-      return false;
-    }
-    if (this.getSimpleActionSelectionCount(selection, actionName) >= 2) {
-      return false;
-    }
-    if (this.simpleAttackActions.has(actionName) && this.getSimpleAttackCount(selection) >= 1) {
-      return false;
-    }
-    return !this.hasConflictingSelectedAction(selection, actionName);
-  }
-
-  private removeOneSimpleActionSelection(actions: string[], actionName: string): string[] {
-    const next = [ ...actions ];
-    const index = next.indexOf(actionName);
-    if (index !== -1) {
-      next.splice(index, 1);
-    }
-    return next;
-  }
-
-  private formatActionListWithCounts(actions: string[]): string[] {
-    const counts = new Map<string, number>();
-    const ordered: string[] = [];
-    for (const action of actions) {
-      if (!counts.has(action)) {
-        ordered.push(action);
-      }
-      counts.set(action, (counts.get(action) || 0) + 1);
-    }
-    return ordered.map(action => {
-      const count = counts.get(action) || 0;
-      return count > 1 ? `${action} x${count}` : action;
     });
   }
 
@@ -1511,7 +1290,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(sender);
     this.participantTieBreakers.delete(sender);
     this.combatManager.removeParticipant(sender);
-    if (this._selectedActor === sender) {
+    if (this.selectedActor === sender) {
       this.selectedActor = null;
     }
     this.syncSharedState();
@@ -1610,16 +1389,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   getActionLabel(action: Action): string {
-    return this.actionLabels[action.key] || action.key;
+    return getInterruptLabel(action.key);
   }
 
   getActionTooltip(action: Action): string {
-    const description = this.actionDescriptions[action.key] || "No description available.";
+    const description = getInterruptDescription(action.key) || "No description available.";
     return `${description} Initiative cost: ${action.iniMod}`;
   }
 
   getActionDetails(action: Action): string {
-    const description = this.actionDescriptions[action.key] || "No description available.";
+    const description = getInterruptDescription(action.key) || "No description available.";
     return `${description} Initiative cost: ${action.iniMod}.`;
   }
 
@@ -1719,123 +1498,72 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   inpName_KeyDown(e: KeyboardEvent) {
-    const keyCode = e.code
-
-    if (keyCode === "Tab" && !e.shiftKey) // Tab key
-    {
-      e.preventDefault();
-
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      if (!row) return;
-
-      const nextRow = row.nextElementSibling as HTMLElement;
-      if (nextRow) {
-        const field = nextRow.querySelector("input") as HTMLInputElement;
-        if (field) {
-          field.select();
-          nextRow.click();
-          return;
-        }
-      }
-
+    this.handleTabNav(e, 'input[name="name"]', (row) => {
       LogHandler.log(this.currentBTTime, "TabAddParticipant");
       UndoHandler.StartActions();
       this.addParticipant();
-
       const index = row.getAttribute("data-indexnr");
       this.indexToSelect = index !== null ? 1 + Number(index) : -1;
-    }
-    else if (keyCode === "Tab" && e.shiftKey) // Shift + Tab
-    {
-      e.preventDefault();
-
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      if (!row) return;
-
-      const prevRow = row.previousElementSibling as HTMLElement;
-      if (prevRow) {
-        const field = prevRow.querySelector("input") as HTMLInputElement;
-        if (field) {
-          field.select();
-          prevRow.click();
-          return;
-        }
-      }
-    }
+      this.focusPendingRow();
+    });
   }
 
   inpDiceIni_KeyDown(e: KeyboardEvent) {
-    const keyCode = e.code;
-
-    if (keyCode === "Tab" && !e.shiftKey) {
-      e.preventDefault();
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      const nextRow = row?.nextElementSibling as HTMLElement | null;
-      if (nextRow != null) {
-        const field: HTMLInputElement = nextRow.querySelectorAll(".inpDiceIni")[0] as HTMLInputElement;
-        if (field) {
-          field.select();
-          nextRow.click()
-          return;
-        }
-      }
-    } else if (keyCode === "Tab" && e.shiftKey) {
-      e.preventDefault();
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      const prevRow = row?.previousElementSibling as HTMLElement | null;
-      if (prevRow != null) {
-        const field: HTMLInputElement = prevRow.querySelectorAll(".inpDiceIni")[0] as HTMLInputElement;
-        if (field) {
-          field.select();
-          prevRow.click()
-          return;
-        }
-      }
-    }
+    this.handleTabNav(e, ".inpDiceIni");
   }
 
   inpBaseIni_KeyDown(e: KeyboardEvent) {
-    const keyCode = e.code;
-    const shift = e.shiftKey;
+    this.handleTabNav(e, ".inpBaseIni");
+  }
 
-    if (keyCode === "Tab" && !shift) {
+  private handleTabNav(
+    e: KeyboardEvent,
+    selector: string,
+    onCreateNewRow?: (currentRow: HTMLElement) => void
+  ): void {
+    if (e.code !== "Tab") return;
+    const row = (e.target as HTMLElement).closest(".participant") as HTMLElement | null;
+    if (!row) return;
+
+    if (e.shiftKey) {
+      const prevRow = row.previousElementSibling as HTMLElement | null;
+      if (!prevRow) return;
+      const field = prevRow.querySelector(selector) as HTMLInputElement | null;
+      if (!field) return;
       e.preventDefault();
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      const nextRow = row?.nextElementSibling as HTMLElement | null;
-      if (nextRow != null) {
-        const field: HTMLInputElement = nextRow.querySelectorAll(".inpBaseIni")[0] as HTMLInputElement;
-        if (field) {
-          field.select();
-          nextRow.click()
-          return;
-        }
-      }
-    } else if (keyCode === "Tab" && shift) {
+      field.select();
+      prevRow.click();
+      return;
+    }
+
+    const nextRow = row.nextElementSibling as HTMLElement | null;
+    if (nextRow) {
+      const field = nextRow.querySelector(selector) as HTMLInputElement | null;
+      if (!field) return;
       e.preventDefault();
-      const row = this.closestByClass(e.target as HTMLElement, "participant");
-      const prevRow = row?.previousElementSibling as HTMLElement | null;
-      if (prevRow != null) {
-        const field: HTMLInputElement = prevRow.querySelectorAll(".inpBaseIni")[0] as HTMLInputElement;
-        if (field) {
-          field.select();
-          prevRow.click();
-          return;
-        }
-      }
+      field.select();
+      nextRow.click();
+      return;
+    }
+
+    if (onCreateNewRow) {
+      e.preventDefault();
+      onCreateNewRow(row);
     }
   }
 
-  ngReady() {
-    const row = document.getElementById("participant" + this.indexToSelect);
-    if (row) {
-      const field: HTMLInputElement = row.querySelectorAll("input")[0] as HTMLInputElement;
-      if (field) {
-        this.indexToSelect = -1;
-        field.select();
-        row.click();
-      }
-      this.changeDetector.detectChanges();
-    }
+  private focusPendingRow() {
+    const target = this.indexToSelect;
+    if (target < 0) return;
+    this.indexToSelect = -1;
+    queueMicrotask(() => {
+      const row = document.getElementById("participant" + target);
+      if (!row) return;
+      const field = row.querySelector("input") as HTMLInputElement | null;
+      if (!field) return;
+      field.select();
+      row.click();
+    });
   }
 
   // Focus Handler
@@ -1860,10 +1588,33 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   onParticipantDiceCountChanged(p: IParticipant, value: number) {
+    const oldDices = p.dices;
     const normalizedDiceCount = Math.max(1, Math.floor(Number(value || 1)));
     p.dices = normalizedDiceCount;
-    p.diceIni = this.clampInitiativeRoll(p.diceIni, p);
+    if (this.combatManager.started && p.diceIni > 0 && oldDices !== normalizedDiceCount) {
+      // SR5E: mid-combat dice change — only roll delta dice and add/subtract.
+      p.diceIni = Math.max(1, p.diceIni + this.rollDiceDelta(oldDices, normalizedDiceCount));
+    } else {
+      p.diceIni = this.clampInitiativeRoll(p.diceIni, p);
+    }
     this.syncSharedState();
+  }
+
+  /**
+   * Roll the dice difference between two dice counts and return the signed delta.
+   * Positive = gained dice (roll extra, add to score).
+   * Negative = lost dice (roll lost, subtract from score).
+   * Used to apply SR5E mid-combat initiative adjustments correctly.
+   */
+  private rollDiceDelta(oldDices: number, newDices: number): number {
+    const delta = newDices - oldDices;
+    if (delta === 0) return 0;
+    let sum = 0;
+    const count = Math.abs(delta);
+    for (let i = 0; i < count; i++) {
+      sum += Math.floor(Math.random() * 6) + 1;
+    }
+    return delta > 0 ? sum : -sum;
   }
 
   getParticipantEdgeRatingValue(p: IParticipant): number {
@@ -1972,10 +1723,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
     const mode = this.getPendingVrMode(p);
+    const oldDices = mp.dices;
+    const wasRolled = mp.diceIni > 0 && this.combatManager.started;
     this.applyVRMode(mp, mode);
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
     this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
-    mp.rollInitiative();
+    if (wasRolled) {
+      // SR5E: mid-combat jack in — base stat delta is automatic via baseIni change;
+      // only roll the extra/lost dice and add/subtract.
+      mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, mp.dices));
+    } else {
+      mp.rollInitiative(); // haven't rolled yet this pass — fresh roll
+    }
     const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
     LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
     this.syncSharedState();
@@ -1986,6 +1745,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
+    const oldDices = mp.dices;
+    const wasRolled = mp.diceIni > 0 && this.combatManager.started;
     // Jack Out: clear VR mode, restore physical initiative.
     mp.vrMode = VRMode.None;
     mp.jackedIn = false;
@@ -1995,7 +1756,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     mp.baseIni = reaction + intuition;
     mp.dices = 1;
     this.pendingVrModes.set(p, VRMode.AR);
-    mp.rollInitiative();
+    if (wasRolled) {
+      // SR5E: mid-combat jack out — base stat delta is automatic via baseIni change;
+      // roll the lost dice and subtract.
+      mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, 1));
+    } else {
+      mp.rollInitiative(); // haven't rolled yet this pass — fresh roll
+    }
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();
@@ -2056,7 +1823,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.expandedDeckPanels.delete(p);
       this.expandedDeckPanels.add(mp);
     }
-    if (this._selectedActor === p) this._selectedActor = mp;
+    if (this.selectedActor === p) this.selectedActor = mp;
     if (this.actModalParticipant === p) this.actModalParticipant = mp;
     this.combatManager.removeParticipant(p);
     this.combatManager.addParticipant(mp);
@@ -2108,7 +1875,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(mp);
     this.participantTieBreakers.delete(mp);
     this.expandedDeckPanels.delete(mp);
-    if (this._selectedActor === mp) this._selectedActor = p;
+    if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
     this.combatManager.removeParticipant(mp);
     this.combatManager.addParticipant(p);
@@ -2480,16 +2247,4 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  // Helper to find the closest ancestor with a given class
-  private closestByClass(el: HTMLElement, className: string): HTMLElement | null {
-    while (el && !el.classList.contains(className)) {
-      if (el.parentElement != null) {
-        el = el.parentElement;
-      }
-      else {
-        return null
-      }
-    }
-    return el;
-  }
 }
