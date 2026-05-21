@@ -511,10 +511,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         this.applyVRMode(mp, mode);
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
         if (wasRolled) {
-          // SR5E: mid-combat jack in — roll only the delta dice; player won't send a fresh roll.
-          mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, mp.dices));
+          const diceDelta = mp.dices - oldDices;
+          if (diceDelta < 0) {
+            // Lost dice (e.g. Hot Sim → Cold Sim): server applies and logs immediately.
+            this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
+          }
+          // diceDelta > 0: player will submit a delta roll_submission {isDelta:true}.
+          // diceDelta === 0: no dice change; base stat shift is automatic via baseIni.
         }
-        // else: combat not started or no roll yet — player will send roll_submission with full roll.
+        // else: combat not started or no roll yet — player will send a full roll_submission.
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
         const oldDices = mp.dices;
@@ -527,10 +532,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         mp.baseIni = reaction + intuition;
         mp.dices = 1;
         if (wasRolled) {
-          // SR5E: mid-combat jack out — roll only the lost dice and subtract; player won't send fresh roll.
-          mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, 1));
+          // Server always handles jack-out dice loss: roll the lost dice, subtract, log.
+          this.applyAndLogInitiativeDelta(mp, oldDices, 1);
         }
-        // else: create (no existing roll) or combat not started — player will send roll_submission.
+        // else: create or combat not started — player will send full roll_submission.
       }
       // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
@@ -579,8 +584,33 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const playerName = command.player;
       const participantId = String(command.payload?.["participantId"] || "");
       const roll = Number(command.payload?.["roll"] || 0);
+      const isDelta = command.payload?.["isDelta"] === true;
       const target = this.findPlayerParticipant(playerName, participantId);
       if (!target) {
+        return;
+      }
+      if (isDelta) {
+        // Mid-combat delta roll: add to existing diceIni rather than replacing it.
+        target.diceIni = Math.max(1, target.diceIni + roll);
+        const total = target.getCurrentInitiative();
+        const rawValues = command.payload?.["diceValues"];
+        const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+        const sign = roll >= 0 ? '+' : '';
+        if (diceValues.length > 0) {
+          this.appendSharedLog(
+            target.name || "Player",
+            `initiative delta: +[${diceValues.join(", ")}] = ${sign}${roll} → score: ${total}`
+          );
+        } else {
+          this.appendSharedLog(
+            target.name || "Player",
+            `initiative delta: manual(${sign}${roll}) → score: ${total}`
+          );
+        }
+        if (this.initiativePrepActive) {
+          this.updateInitiativePrepInfo();
+        }
+        this.sort();
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
@@ -1592,8 +1622,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const normalizedDiceCount = Math.max(1, Math.floor(Number(value || 1)));
     p.dices = normalizedDiceCount;
     if (this.combatManager.started && p.diceIni > 0 && oldDices !== normalizedDiceCount) {
-      // SR5E: mid-combat dice change — only roll delta dice and add/subtract.
-      p.diceIni = Math.max(1, p.diceIni + this.rollDiceDelta(oldDices, normalizedDiceCount));
+      // SR5E: mid-combat dice change — only roll delta dice, add/subtract, and log.
+      this.applyAndLogInitiativeDelta(p, oldDices, normalizedDiceCount);
     } else {
       p.diceIni = this.clampInitiativeRoll(p.diceIni, p);
     }
@@ -1601,19 +1631,40 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * Roll the dice difference between two dice counts and return the signed delta.
-   * Positive = gained dice (roll extra, add to score).
-   * Negative = lost dice (roll lost, subtract from score).
-   * Used to apply SR5E mid-combat initiative adjustments correctly.
+   * Roll `count` dice and return the individual values and their sum.
    */
+  private rollDiceDetailed(count: number): { values: number[]; sum: number } {
+    const values: number[] = [];
+    for (let i = 0; i < count; i++) {
+      values.push(Math.floor(Math.random() * 6) + 1);
+    }
+    return { values, sum: values.reduce((s, v) => s + v, 0) };
+  }
+
+  /**
+   * Apply SR5E mid-combat initiative delta: roll only the gained or lost dice,
+   * add or subtract from p.diceIni, and log the result to the shared log.
+   * Only call when combat is active and p.diceIni > 0.
+   */
+  private applyAndLogInitiativeDelta(p: IParticipant, oldDices: number, newDices: number): void {
+    const delta = newDices - oldDices;
+    if (delta === 0) return;
+    const { values, sum } = this.rollDiceDetailed(Math.abs(delta));
+    const signed = delta > 0 ? sum : -sum;
+    p.diceIni = Math.max(1, p.diceIni + signed);
+    const sign = delta > 0 ? '+' : '-';
+    const total = p.getCurrentInitiative();
+    this.appendSharedLog(
+      p.name || 'Participant',
+      `initiative delta: ${sign}[${values.join(', ')}] = ${sign}${sum} → score: ${total}`
+    );
+  }
+
+  /** @deprecated Use applyAndLogInitiativeDelta. Kept as internal shim. */
   private rollDiceDelta(oldDices: number, newDices: number): number {
     const delta = newDices - oldDices;
     if (delta === 0) return 0;
-    let sum = 0;
-    const count = Math.abs(delta);
-    for (let i = 0; i < count; i++) {
-      sum += Math.floor(Math.random() * 6) + 1;
-    }
+    const { sum } = this.rollDiceDetailed(Math.abs(delta));
     return delta > 0 ? sum : -sum;
   }
 
@@ -1729,12 +1780,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
     this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
     if (wasRolled) {
-      // SR5E: mid-combat jack in — base stat delta is automatic via baseIni change;
-      // only roll the extra/lost dice and add/subtract.
-      mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, mp.dices));
-    } else {
-      mp.rollInitiative(); // haven't rolled yet this pass — fresh roll
+      // SR5E: mid-combat jack in — base stat delta automatic via baseIni;
+      // only roll the extra/lost dice, apply, and log.
+      this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
     }
+    // No else: initiative is not rolled automatically on jack in outside of combat.
     const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
     LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
     this.syncSharedState();
@@ -1757,12 +1807,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     mp.dices = 1;
     this.pendingVrModes.set(p, VRMode.AR);
     if (wasRolled) {
-      // SR5E: mid-combat jack out — base stat delta is automatic via baseIni change;
-      // roll the lost dice and subtract.
-      mp.diceIni = Math.max(1, mp.diceIni + this.rollDiceDelta(oldDices, 1));
-    } else {
-      mp.rollInitiative(); // haven't rolled yet this pass — fresh roll
+      // SR5E: mid-combat jack out — base stat delta automatic via baseIni;
+      // only roll the lost dice, subtract, and log.
+      this.applyAndLogInitiativeDelta(mp, oldDices, 1);
     }
+    // No else: initiative is not rolled automatically on jack out outside of combat.
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();

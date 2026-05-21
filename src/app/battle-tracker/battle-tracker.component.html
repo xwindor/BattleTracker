@@ -138,17 +138,10 @@
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantEdgeRatingValue(p)"
                 (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              @if (isMatrix(p)) {
-                <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).dataProcessing"
-                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="1" title="Data Processing">
-              } @else {
-                <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="getParticipantReactionValue(p)"
-                  (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
-              }
+              <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
+              <input class="form-control text-center gm-stat-input" type="number"
+                [ngModel]="getParticipantReactionValue(p)"
+                (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
               <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
@@ -290,9 +283,6 @@
             }
           </div>
           }
-          @if (last) {
-          <span>{{ ngReady() }}</span>
-          }
         </div>
         @if (isDeckPanelExpanded(p)) {
         <div class="row deck-panel py-2 px-3 mb-1">
@@ -310,6 +300,10 @@
             <!-- Deck stats + Remove Deck — always visible when deck is active -->
             <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
               <div class="input-group input-group-sm" style="width: auto">
+                <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="asMatrix(p).dataProcessing"
+                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="1" title="Data Processing">
                 <span class="input-group-text gm-stat-chip" title="Attack">A</span>
                 <input class="form-control text-center gm-stat-input" type="number"
                   [ngModel]="asMatrix(p).attack"
@@ -690,6 +684,9 @@
     }
     <div class="d-flex gap-2 justify-content-end w-100">
       <button type="button" class="btn btn-outline-secondary" (click)="closeActModal()">Cancel</button>
+      <button type="button" class="btn btn-outline-warning"
+        [disabled]="!actModalParticipant || isActModalSelectionEmpty(actModalParticipant)"
+        (click)="clearActModalSelection()">Clear</button>
       <button type="button" class="btn btn-primary" (click)="submitActModal()"
         [disabled]="!actModalParticipant || !isDeclaredActionSelectionValid(actModalParticipant)">
         Submit Actions

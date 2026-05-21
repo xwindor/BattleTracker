@@ -38,6 +38,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   deviceRating = 0;
   vrMode = "AR"; // "AR" | "cold-sim" | "hot-sim"
   manualRoll = "";
+  pendingDeltaDice = 0;
+  manualDeltaRoll = "";
   connected = false;
   error = "";
   state: SharedCombatState | null = null;
@@ -260,7 +262,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       }
     });
     this.deckJackedIn = true;
-    this.autoRollForMode(this.vrMode);
+    this.pendingDeltaDice = 0;
+    this.applyInitiativeRollLogic(this.primaryCharacter.vrMode || "none", this.vrMode);
     this.info = "";
   }
 
@@ -281,13 +284,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       }
     });
     this.deckJackedIn = true;
-    this.autoRollForMode(this.vrMode);
+    this.pendingDeltaDice = 0;
+    this.applyInitiativeRollLogic(this.primaryCharacter.vrMode || "none", this.vrMode);
     this.info = "";
   }
 
   jackOut() {
     if (!this.primaryCharacter) return;
-    // Keep deck active (isMatrix stays true) but remove VR mode — reset initiative to AR.
+    // Keep deck active (isMatrix stays true) but remove VR mode.
     this.session.sendCommand({
       type: "configure_deck",
       player: this.playerToken,
@@ -303,7 +307,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     });
     this.vrMode = "AR";
     this.deckJackedIn = false;
-    this.autoRollForMode("AR");
+    this.pendingDeltaDice = 0;
+    // Server applies lost-dice delta automatically on jack out; no player roll needed.
     this.info = "";
   }
 
@@ -367,6 +372,72 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       player: this.playerToken,
       payload: { participantId, roll: diceSum, diceValues: values, diceSum }
     });
+  }
+
+  /** Returns the number of initiative dice for a given VR mode string. */
+  private diceCountForVrMode(mode: string): number {
+    return mode === "hot-sim" ? 4 : mode === "cold-sim" ? 3 : 1;
+  }
+
+  /**
+   * Decide whether to: (a) prompt the player to roll delta dice, (b) do a fresh
+   * full roll via autoRollForMode, or (c) do nothing (server handled it).
+   * Call this after sending the configure_deck command.
+   */
+  private applyInitiativeRollLogic(oldMode: string, newMode: string): void {
+    const actor = this.primaryCharacter;
+    const combatActive = this.state?.started === true;
+    const alreadyRolled = actor && !actor.pendingRoll;
+    if (combatActive && alreadyRolled) {
+      const oldDices = this.diceCountForVrMode(oldMode);
+      const newDices = this.diceCountForVrMode(newMode);
+      const delta = newDices - oldDices;
+      if (delta > 0) {
+        // Gained dice: prompt the player to roll only the delta dice.
+        this.pendingDeltaDice = delta;
+      }
+      // delta <= 0: server applied lost-dice penalty; nothing for the player to do.
+    } else {
+      // Not in combat or haven't rolled yet: fresh full roll.
+      this.autoRollForMode(newMode);
+    }
+  }
+
+  /** Submit a manually-entered initiative delta roll. */
+  submitDeltaRoll() {
+    const actor = this.primaryCharacter;
+    if (!actor || !this.pendingDeltaDice) return;
+    const raw = Number(this.manualDeltaRoll);
+    if (Number.isNaN(raw) || raw < 1) return;
+    const clamped = Math.min(raw, this.pendingDeltaDice * 6);
+    this.session.sendCommand({
+      type: "roll_submission",
+      player: this.playerToken,
+      payload: { participantId: actor.id, roll: clamped, isDelta: true }
+    });
+    this.pendingDeltaDice = 0;
+    this.manualDeltaRoll = "";
+  }
+
+  /** Auto-roll the pending delta dice and submit them as an initiative delta. */
+  submitAutoDeltaRoll() {
+    const actor = this.primaryCharacter;
+    if (!actor || !this.pendingDeltaDice) return;
+    const values = Array.from({ length: this.pendingDeltaDice }, () => Math.floor(Math.random() * 6) + 1);
+    const diceSum = values.reduce((s, v) => s + v, 0);
+    const rollerName = this.characterName || this.playerToken;
+    this.ownDiceRoll = { values };
+    this.session.sendCommand({
+      type: "dice_roll",
+      player: this.playerToken,
+      payload: { roller: rollerName, diceCount: values.length, values }
+    });
+    this.session.sendCommand({
+      type: "roll_submission",
+      player: this.playerToken,
+      payload: { participantId: actor.id, roll: diceSum, diceValues: values, diceSum, isDelta: true }
+    });
+    this.pendingDeltaDice = 0;
   }
 
   claimSelectedCharacter() {
