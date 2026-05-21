@@ -1013,8 +1013,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   btnRollInitiative_Click(sender: IParticipant) {
     UndoHandler.StartActions();
-    LogHandler.log(this.currentBTTime, sender.name + " RollInitiative_Click");
-    sender.rollInitiative();
+    this.rollAndLogInitiative(sender);
   }
 
   btnAct_Click(sender: IParticipant, actModalContent: TemplateRef<unknown>) {
@@ -1642,8 +1641,26 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
+   * Roll all initiative dice for p, update diceIni, and log the result to
+   * both the local GM log and the shared session log (if active).
+   */
+  private rollAndLogInitiative(p: IParticipant): void {
+    const values = Array.from({ length: p.dices }, () => Math.floor(Math.random() * 6) + 1);
+    p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
+    const total = p.getCurrentInitiative();
+    const intuition = this.getParticipantIntuition(p);
+    const baseLabel = this.isMatrix(p) && this.asMatrix(p).jackedIn
+      && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
+      ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
+      : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
+    const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
+    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
+    this.appendSharedLog(p.name || 'Participant', logText);
+  }
+
+  /**
    * Apply SR5E mid-combat initiative delta: roll only the gained or lost dice,
-   * add or subtract from p.diceIni, and log the result to the shared log.
+   * add or subtract from p.diceIni, and log to both the local and shared logs.
    * Only call when combat is active and p.diceIni > 0.
    */
   private applyAndLogInitiativeDelta(p: IParticipant, oldDices: number, newDices: number): void {
@@ -1654,10 +1671,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     p.diceIni = Math.max(1, p.diceIni + signed);
     const sign = delta > 0 ? '+' : '-';
     const total = p.getCurrentInitiative();
-    this.appendSharedLog(
-      p.name || 'Participant',
-      `initiative delta: ${sign}[${values.join(', ')}] = ${sign}${sum} → score: ${total}`
-    );
+    const logText = `initiative delta: ${sign}[${values.join(', ')}] = ${sign}${sum} → score: ${total}`;
+    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
+    this.appendSharedLog(p.name || 'Participant', logText);
   }
 
   /** @deprecated Use applyAndLogInitiativeDelta. Kept as internal shim. */
@@ -2104,7 +2120,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (this.participantOwners.has(participant)) {
         rolledPlayer = true;
       }
-      participant.rollInitiative();
+      this.rollAndLogInitiative(participant);
     }
     if (rolledPlayer && this.shareRoomCode) {
       this.sessionSync.sendCommand({
