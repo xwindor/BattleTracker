@@ -249,6 +249,16 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+.action-category-toggle:hover,
+.action-category-toggle:focus,
+.action-category-toggle:active,
+.action-category-toggle[aria-expanded="true"] {
+  background-color: #f1f3f5;
+  color: #212529;
+  outline: none;
+  box-shadow: none;
+}
+
 .action-state {
   font-size: 0.75rem;
   font-weight: 600;
@@ -512,10 +522,30 @@ input:checked + .slider:before {
   align-items: center;
 }
 
+.action-category-matrix-parent:hover,
+.action-category-matrix-parent:focus,
+.action-category-matrix-parent:active,
+.action-category-matrix-parent[aria-expanded="true"] {
+  background: #e5e9ff;
+  color: #312e81;
+  outline: none;
+  box-shadow: none;
+}
+
 .action-category-matrix-sub {
   padding-left: 1.5rem;
   font-size: 0.9rem;
   background: #fafafa;
+}
+
+.action-category-matrix-sub:hover,
+.action-category-matrix-sub:focus,
+.action-category-matrix-sub:active,
+.action-category-matrix-sub[aria-expanded="true"] {
+  background: #efefef;
+  color: #212529;
+  outline: none;
+  box-shadow: none;
 }
 
 .action-matrix-group {
@@ -581,4 +611,143 @@ input:checked + .slider:before {
 .ic-alert-dismiss:hover {
   background: rgba(120, 53, 15, 0.12);
   color: #78350f;
+}
+
+/* Active Host Banner ---------------------------------------------- */
+.host-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  margin-bottom: 0.4rem;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 100%);
+  border: 1px solid rgba(99, 179, 237, 0.35);
+  border-left: 4px solid #3b82f6;
+  border-radius: 0.35rem;
+  font-size: 0.83rem;
+  color: #cbd5e1;
+  flex-wrap: wrap;
+}
+
+.host-banner-label {
+  color: #64748b;
+  font-style: italic;
+}
+
+.host-banner-form {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.host-name-input {
+  width: 10rem !important;
+}
+
+.host-rating-input {
+  width: 4rem !important;
+}
+
+.host-banner-icon {
+  color: #60a5fa;
+}
+
+.host-banner-name {
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.host-banner-rating {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  background: rgba(99, 179, 237, 0.1);
+  border: 1px solid rgba(99, 179, 237, 0.25);
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.4rem;
+}
+
+.host-banner-ic-count {
+  font-size: 0.78rem;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.4rem;
+  font-weight: 600;
+}
+
+.host-ic-at-cap {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* IC participant row tint ------------------------------------------ */
+.is-ic {
+  border-left: 3px solid rgba(239, 68, 68, 0.6) !important;
+  background: rgba(239, 68, 68, 0.05) !important;
+}
+
+.is-ic-bricked {
+  border-left: 3px solid rgba(107, 114, 128, 0.6) !important;
+  background: rgba(107, 114, 128, 0.08) !important;
+  opacity: 0.75;
+}
+
+/* IC info strip inside participant row ----------------------------- */
+.ic-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  border-top: 1px solid rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.03);
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.ic-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 0.5rem;
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  white-space: nowrap;
+}
+
+.ic-host-rating {
+  color: #6b7280;
+  font-size: 0.72rem;
+}
+
+.ic-matrix-cm {
+  color: #374151;
+  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ic-bricked-badge {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 0.3rem;
+  background: rgba(107, 114, 128, 0.2);
+  color: #6b7280;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  letter-spacing: 0.05em;
+}
+
+.ic-respawn-btn {
+  font-size: 0.68rem !important;
+  padding: 0.05rem 0.35rem !important;
+  line-height: 1.2 !important;
 }

@@ -587,6 +587,36 @@ body.skin-vintage .action-validation-ok {
   color: #1f5c3f;
 }
 
+body.skin-vintage .action-category-toggle:hover,
+body.skin-vintage .action-category-toggle:focus,
+body.skin-vintage .action-category-toggle:active,
+body.skin-vintage .action-category-toggle[aria-expanded="true"] {
+  background-color: #ead1a2;
+  color: #3a2516;
+  outline: none;
+  box-shadow: none;
+}
+
+body.skin-vintage .action-category-matrix-parent:hover,
+body.skin-vintage .action-category-matrix-parent:focus,
+body.skin-vintage .action-category-matrix-parent:active,
+body.skin-vintage .action-category-matrix-parent[aria-expanded="true"] {
+  background: #e0bf89;
+  color: #3a2516;
+  outline: none;
+  box-shadow: none;
+}
+
+body.skin-vintage .action-category-matrix-sub:hover,
+body.skin-vintage .action-category-matrix-sub:focus,
+body.skin-vintage .action-category-matrix-sub:active,
+body.skin-vintage .action-category-matrix-sub[aria-expanded="true"] {
+  background: #f0e0bc;
+  color: #3a2516;
+  outline: none;
+  box-shadow: none;
+}
+
 body.skin-vintage .economy-chip,
 body.skin-vintage .roll-banner {
   border-color: #bf9c63;
@@ -1298,6 +1328,36 @@ body.skin-cyberdeck .action-validation-ok {
   border-color: var(--cd-success);
   background: rgba(55, 240, 169, 0.16);
   color: #c8ffe8;
+}
+
+body.skin-cyberdeck .action-category-toggle:hover,
+body.skin-cyberdeck .action-category-toggle:focus,
+body.skin-cyberdeck .action-category-toggle:active,
+body.skin-cyberdeck .action-category-toggle[aria-expanded="true"] {
+  background-color: var(--cd-bg-panel-soft);
+  color: var(--cd-primary);
+  outline: none;
+  box-shadow: none;
+}
+
+body.skin-cyberdeck .action-category-matrix-parent:hover,
+body.skin-cyberdeck .action-category-matrix-parent:focus,
+body.skin-cyberdeck .action-category-matrix-parent:active,
+body.skin-cyberdeck .action-category-matrix-parent[aria-expanded="true"] {
+  background: rgba(99, 102, 241, 0.2);
+  color: #c4ccff;
+  outline: none;
+  box-shadow: none;
+}
+
+body.skin-cyberdeck .action-category-matrix-sub:hover,
+body.skin-cyberdeck .action-category-matrix-sub:focus,
+body.skin-cyberdeck .action-category-matrix-sub:active,
+body.skin-cyberdeck .action-category-matrix-sub[aria-expanded="true"] {
+  background: var(--cd-bg-panel);
+  color: var(--cd-text);
+  outline: none;
+  box-shadow: none;
 }
 
 body.skin-cyberdeck .economy-chip,

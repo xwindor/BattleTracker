@@ -40,6 +40,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   manualRoll = "";
   pendingDeltaDice = 0;
   manualDeltaRoll = "";
+  pendingFullReroll = 0;
+  manualFullReroll = "";
   connected = false;
   error = "";
   state: SharedCombatState | null = null;
@@ -168,6 +170,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.session.onCommand((command) => {
         if (command.type === "request_rolls") {
           this.promptRoll = true;
+          this.pendingFullReroll = 0; // promptRoll supersedes the pre-combat re-roll banner
+          this.manualFullReroll = "";
           this.triggerRollNudge();
         } else if (command.type === "clear_roll_prompt") {
           this.promptRoll = false;
@@ -263,6 +267,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     });
     this.deckJackedIn = true;
     this.pendingDeltaDice = 0;
+    this.pendingFullReroll = 0;
     this.applyInitiativeRollLogic(this.primaryCharacter.vrMode || "none", this.vrMode);
     this.info = "";
   }
@@ -285,12 +290,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     });
     this.deckJackedIn = true;
     this.pendingDeltaDice = 0;
+    this.pendingFullReroll = 0;
     this.applyInitiativeRollLogic(this.primaryCharacter.vrMode || "none", this.vrMode);
     this.info = "";
   }
 
   jackOut() {
     if (!this.primaryCharacter) return;
+    const oldMode = this.vrMode; // capture before reset
     // Keep deck active (isMatrix stays true) but remove VR mode.
     this.session.sendCommand({
       type: "configure_deck",
@@ -308,7 +315,9 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.vrMode = "AR";
     this.deckJackedIn = false;
     this.pendingDeltaDice = 0;
-    // Server applies lost-dice delta automatically on jack out; no player roll needed.
+    this.pendingFullReroll = 0;
+    // Mid-combat: server auto-applies lost-dice delta. Pre-combat: may prompt a fresh roll.
+    this.applyInitiativeRollLogic(oldMode, "AR");
     this.info = "";
   }
 
@@ -373,27 +382,37 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   /**
-   * Decide whether to: (a) prompt the player to roll delta dice, (b) do a fresh
-   * full roll via autoRollForMode, or (c) do nothing (server handled it).
-   * Call this after sending the configure_deck command.
+   * Decide what initiative roll action the player needs to take after a mode change:
+   *   (a) Mid-combat, already rolled, gained dice → show delta-dice prompt.
+   *   (b) Pre-combat (initiative prep), already rolled, dice count changed → show
+   *       full fresh-reroll prompt (pendingFullReroll).
+   *   (c) Everything else → server updated dices/baseIni; player rolls via normal
+   *       promptRoll mechanism when the GM requests rolls.
+   *
+   * Call this AFTER resetting pendingDeltaDice/pendingFullReroll to 0.
    */
   private applyInitiativeRollLogic(oldMode: string, newMode: string): void {
     const actor = this.primaryCharacter;
     const combatActive = this.state?.started === true;
     const alreadyRolled = actor && !actor.pendingRoll;
+    const oldDices = this.diceCountForVrMode(oldMode);
+    const newDices = this.diceCountForVrMode(newMode);
+    const delta = newDices - oldDices;
+
     if (combatActive && alreadyRolled) {
-      // Already rolled this pass: only handle the dice delta.
-      const oldDices = this.diceCountForVrMode(oldMode);
-      const newDices = this.diceCountForVrMode(newMode);
-      const delta = newDices - oldDices;
+      // Mid-combat: already rolled this pass — only handle the dice delta.
       if (delta > 0) {
-        // Gained dice: show the prompt so the player rolls only the extra dice.
+        // Gained dice: prompt the player to roll only the extra dice.
         this.pendingDeltaDice = delta;
       }
-      // delta <= 0: server applied lost-dice penalty automatically; nothing for the player.
+      // delta <= 0: server applied the lost-dice penalty automatically; nothing for player.
+    } else if (alreadyRolled && delta !== 0) {
+      // Initiative prep (pre-combat): player already rolled but dice count changed.
+      // They need a completely fresh roll for the new dice count.
+      this.pendingFullReroll = newDices;
     }
-    // Not in combat or haven't rolled yet: server already updated dices/baseIni.
-    // The player will roll via the normal promptRoll mechanism — don't auto-roll here.
+    // Haven't rolled yet: server already updated dices/baseIni.
+    // Player will roll via the normal promptRoll banner when GM requests rolls.
   }
 
   /** Submit a manually-entered initiative delta roll. */
@@ -431,6 +450,47 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       payload: { participantId: actor.id, roll: diceSum, diceValues: values, diceSum, isDelta: true }
     });
     this.pendingDeltaDice = 0;
+  }
+
+  /**
+   * Submit a manually-entered initiative full re-roll (pre-combat mode switch).
+   * This is a standard roll_submission (no isDelta) that replaces diceIni entirely.
+   */
+  submitFullReroll() {
+    const actor = this.primaryCharacter;
+    if (!actor || !this.pendingFullReroll) return;
+    const raw = Number(this.manualFullReroll);
+    if (Number.isNaN(raw) || raw < 1) return;
+    const clamped = Math.min(raw, this.pendingFullReroll * 6);
+    this.session.sendCommand({
+      type: "roll_submission",
+      player: this.playerToken,
+      payload: { participantId: actor.id, roll: clamped }
+    });
+    this.pendingFullReroll = 0;
+    this.manualFullReroll = "";
+  }
+
+  /** Auto-roll a fresh full initiative re-roll for a pre-combat mode switch. */
+  submitAutoFullReroll() {
+    const actor = this.primaryCharacter;
+    if (!actor || !this.pendingFullReroll) return;
+    const values = Array.from({ length: this.pendingFullReroll }, () => Math.floor(Math.random() * 6) + 1);
+    const diceSum = values.reduce((s, v) => s + v, 0);
+    const rollerName = this.characterName || this.playerToken;
+    this.ownDiceRoll = { values };
+    this.session.sendCommand({
+      type: "dice_roll",
+      player: this.playerToken,
+      payload: { roller: rollerName, diceCount: values.length, values }
+    });
+    this.session.sendCommand({
+      type: "roll_submission",
+      player: this.playerToken,
+      payload: { participantId: actor.id, roll: diceSum, diceValues: values, diceSum }
+    });
+    this.pendingFullReroll = 0;
+    this.manualFullReroll = "";
   }
 
   claimSelectedCharacter() {
@@ -855,6 +915,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.explicitCombatEndedNotice = false;
       if (this.info === "Combat turn complete. Waiting for GM to start the next combat turn." || this.info === "GM ended combat.") {
         this.info = "";
+      }
+      // Combat is now active; any pending pre-combat full reroll is moot —
+      // the GM will send request_rolls if needed.
+      if (this.pendingFullReroll > 0) {
+        this.pendingFullReroll = 0;
+        this.manualFullReroll = "";
       }
     }
     const isFirstState = this.state === null;

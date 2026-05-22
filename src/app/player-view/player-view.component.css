@@ -122,6 +122,16 @@
   font-weight: 600;
 }
 
+.action-category-toggle:hover,
+.action-category-toggle:focus,
+.action-category-toggle:active,
+.action-category-toggle[aria-expanded="true"] {
+  background-color: #f1f3f5;
+  color: #212529;
+  outline: none;
+  box-shadow: none;
+}
+
 .action-validation {
   font-size: 0.85rem;
   border: 1px solid #166534;

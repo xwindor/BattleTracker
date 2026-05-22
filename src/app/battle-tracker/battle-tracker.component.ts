@@ -17,8 +17,9 @@ import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
-import { MatrixParticipant, VRMode } from "Matrix";
+import { MatrixParticipant, VRMode, ICParticipant, ICType, MatrixHost } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
+import { ICSpawnerComponent } from "app/matrix/ic-spawner/ic-spawner.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
@@ -44,7 +45,8 @@ interface LocalLogEntry {
     DragDropModule,
     ConditionMonitorComponent,
     DiceRollerComponent,
-    MatrixParticipantBadgeComponent
+    MatrixParticipantBadgeComponent,
+    ICSpawnerComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -128,8 +130,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   icAlertMessages: string[] = [];
   convergenceAlertDecker: string | null = null;
   convergenceAlertOs = 0;
+  convergenceIsHostContext = false;
+  convergenceHostName = "";
   private convergenceModalRef: NgbModalRef | null = null;
   private osThresholdSub?: Subscription;
+
+  // -- Active host banner + IC spawner --
+  @ViewChild("spawnICModalTpl") private spawnICModalTpl!: TemplateRef<unknown>;
+  activeHostName = "";
+  activeHostRating = 4;
+  private icSpawnerModalRef: NgbModalRef | null = null;
+
+  /** Expose ICType enum to the template. */
+  readonly ICType = ICType;
 
 
 
@@ -202,6 +215,83 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.convergenceAlertDecker = null;
   }
 
+  // -- Active host banner --
+
+  get activeHost(): MatrixHost | null {
+    return this.matrixState.getCurrentHost();
+  }
+
+  get hasAnyMatrixParticipants(): boolean {
+    return this.combatManager.participants.items.some(p => p instanceof MatrixParticipant);
+  }
+
+  setActiveHostFromBanner(): void {
+    if (!this.activeHostName.trim()) return;
+    UndoHandler.StartActions();
+    const host = this.matrixState.createOrSetHost(this.activeHostName.trim(), Math.max(1, this.activeHostRating));
+    // Pre-fill the name/rating fields from the stored host in case they updated.
+    this.activeHostName = host.name;
+    this.activeHostRating = host.rating;
+  }
+
+  clearActiveHostFromBanner(): void {
+    UndoHandler.StartActions();
+    this.matrixState.clearActiveHost();
+  }
+
+  openSpawnICModal(): void {
+    if (!this.spawnICModalTpl) return;
+    this.icSpawnerModalRef = this.modalService.open(this.spawnICModalTpl, { centered: true });
+    this.icSpawnerModalRef.result.finally(() => { this.icSpawnerModalRef = null; });
+  }
+
+  closeSpawnICModal(): void {
+    this.icSpawnerModalRef?.close();
+  }
+
+  spawnIC(icType: ICType): void {
+    const host = this.activeHost;
+    if (!host) return;
+    if (host.icActive.length >= host.rating) return;
+    if (host.icActive.some(ic => ic.icType === icType)) return;
+
+    UndoHandler.StartActions();
+
+    const ic = new ICParticipant(icType, host.rating);
+    ic.name = `${icType} IC`;
+    ic.linkedHostId = host.id;
+
+    this.participantClaimable.set(ic, false);
+    this.participantEdgeRatings.set(ic, 0);
+    this.participantReactions.set(ic, 0);
+    this.participantIntuitions.set(ic, 0);
+    this.participantTieBreakers.set(ic, Math.random());
+    this.combatManager.addParticipant(ic);
+
+    const id = this.getParticipantId(ic);
+    this.lastKnownDamage.set(id, { physical: 0, stun: 0 });
+
+    this.matrixState.addICToHost(host, ic);
+
+    this.closeSpawnICModal();
+    LogHandler.log(this.currentBTTime, `Spawned ${icType} IC (Rating ${host.rating})`);
+    this.sort();
+  }
+
+  // -- IC type guards --
+
+  isIC(p: IParticipant): p is ICParticipant {
+    return p instanceof ICParticipant;
+  }
+
+  asIC(p: IParticipant): ICParticipant {
+    return p as ICParticipant;
+  }
+
+  onICMatrixDamageChanged(): void {
+    this.syncSharedState();
+  }
+
   // -- Act modal OS accumulation prompt --
 
   /** Illegal OS-generating actions in the current modal selection, with their deltas. */
@@ -238,6 +328,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       } else if (event.alert === "convergence") {
         this.convergenceAlertDecker = event.decker.name;
         this.convergenceAlertOs = event.decker.overwatch;
+        const host = this.matrixState.getCurrentHost();
+        if (host) {
+          this.convergenceIsHostContext = true;
+          this.convergenceHostName = host.name;
+          // Auto-apply 3 marks from host to decker (SR5E: host convergence marks the decker 3×).
+          const deckerId = this.getParticipantId(event.decker);
+          UndoHandler.StartActions();
+          this.matrixState.addMarkToHost(host, deckerId, 3);
+        } else {
+          this.convergenceIsHostContext = false;
+          this.convergenceHostName = "";
+        }
         this.convergenceModalRef = this.modalService.open(this.convergenceModalTpl, { backdrop: "static", centered: true });
         this.changeDetector.detectChanges();
       }
@@ -508,6 +610,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
                    : VRMode.AR;
         const oldDices = mp.dices;
         const wasRolled = mp.diceIni > 0 && this.combatManager.started;
+        const hadRolledPreCombat = mp.diceIni > 0 && !this.combatManager.started;
         this.applyVRMode(mp, mode);
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
         if (wasRolled) {
@@ -518,12 +621,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           }
           // diceDelta > 0: player will submit a delta roll_submission {isDelta:true}.
           // diceDelta === 0: no dice change; base stat shift is automatic via baseIni.
+        } else if (hadRolledPreCombat && mp.dices !== oldDices) {
+          // Pre-combat mode switch with a stale roll: clear diceIni so the participant
+          // shows as pending a roll in the tracker. Player will submit a fresh roll_submission.
+          mp.diceIni = 0;
+          LogHandler.log(this.currentBTTime, `${mp.name} initiative cleared — awaiting re-roll for new mode`);
         }
-        // else: combat not started or no roll yet — player will send a full roll_submission.
+        // else: no prior roll — player will send a full roll_submission when prompted.
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
         const oldDices = mp.dices;
         const wasRolled = payload["jackOut"] === true && mp.diceIni > 0 && this.combatManager.started;
+        const hadRolledPreCombat = payload["jackOut"] === true && mp.diceIni > 0 && !this.combatManager.started;
         mp.vrMode = VRMode.None;
         mp.jackedIn = false;
         mp.blocksPhysicalActions = false;
@@ -532,10 +641,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         mp.baseIni = reaction + intuition;
         mp.dices = 1;
         if (wasRolled) {
-          // Server always handles jack-out dice loss: roll the lost dice, subtract, log.
+          // Mid-combat: server always handles jack-out dice loss: roll the lost dice, subtract, log.
           this.applyAndLogInitiativeDelta(mp, oldDices, 1);
+        } else if (hadRolledPreCombat) {
+          // Pre-combat jack-out with a stale Matrix roll: clear it so the participant
+          // shows as pending a roll in the tracker. Player will submit a fresh 1d6 roll_submission.
+          mp.diceIni = 0;
+          LogHandler.log(this.currentBTTime, `${mp.name} initiative cleared — awaiting re-roll after jack out`);
         }
-        // else: create or combat not started — player will send full roll_submission.
+        // else: create or no prior roll — player will send full roll_submission when prompted.
       }
       // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
@@ -992,7 +1106,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       negativeIni: p.getCurrentInitiative() <= 0 && this.combatManager.started,
       finished: p.status === StatusEnum.Finished,
       edged: p.edge,
-      selected: p === this.selectedActor
+      selected: p === this.selectedActor,
+      "is-ic": this.isIC(p),
+      "is-ic-bricked": this.isIC(p) && this.asIC(p).isBricked
     };
 
     return styles;
@@ -1306,6 +1422,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     LogHandler.log(this.currentBTTime, sender.name + " Delete_Confirm");
     UndoHandler.StartActions();
+    if (this.isIC(sender)) {
+      const host = this.matrixState.state.hosts.find(h => h.id === (sender as ICParticipant).linkedHostId);
+      if (host) this.matrixState.removeICFromHost(host, sender as ICParticipant);
+    }
     this.declaredActionSelections.delete(sender);
     const participantId = this.participantIds.get(sender);
     if (participantId) {
@@ -1799,8 +1919,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // SR5E: mid-combat jack in — base stat delta automatic via baseIni;
       // only roll the extra/lost dice, apply, and log.
       this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
+    } else if (mp.diceIni > 0) {
+      // Pre-combat (initiative prep): participant already rolled for the old mode.
+      // Dice count changed — roll a completely fresh initiative for the new mode.
+      this.rollAndLogInitiative(mp);
     }
-    // No else: initiative is not rolled automatically on jack in outside of combat.
+    // Not yet rolled: server updated dices/baseIni; GM requests rolls as normal.
     const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
     LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
     this.syncSharedState();
@@ -1826,8 +1950,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // SR5E: mid-combat jack out — base stat delta automatic via baseIni;
       // only roll the lost dice, subtract, and log.
       this.applyAndLogInitiativeDelta(mp, oldDices, 1);
+    } else if (mp.diceIni > 0) {
+      // Pre-combat (initiative prep): participant already rolled for the old mode.
+      // Rolling out resets to 1d6 physical initiative — roll a fresh score now.
+      this.rollAndLogInitiative(mp);
     }
-    // No else: initiative is not rolled automatically on jack out outside of combat.
+    // Not yet rolled: server updated dices/baseIni; GM requests rolls as normal.
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();

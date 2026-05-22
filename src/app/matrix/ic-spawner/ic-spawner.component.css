@@ -1,0 +1,36 @@
+.ic-spawner-header {
+  background: linear-gradient(135deg, #1a0a0a 0%, #2d0f0f 100%);
+  color: #ff6b6b;
+  border-bottom: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.host-info {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: rgba(255, 107, 107, 0.75);
+  margin-left: 0.5rem;
+}
+
+.ic-preview {
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 0.375rem;
+  padding: 0.6rem 0.9rem;
+}
+
+.ic-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+}
+
+.ic-preview-label {
+  font-weight: 600;
+  color: #6c757d;
+}
+
+.ic-preview-value {
+  font-weight: 500;
+}

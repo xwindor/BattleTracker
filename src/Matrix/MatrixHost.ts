@@ -37,6 +37,12 @@ export class MatrixHost {
   /** IC participants spawned and currently active in this host. */
   icActive: ICParticipant[];
 
+  /**
+   * Canonical mark count for this host and all IC within it.
+   * marks[deckerId] = count (host-wide propagation per SR5E p.247).
+   */
+  marks: Record<string, number>;
+
   constructor(init?: Partial<MatrixHost>) {
     this.id = init?.id ?? "";
     this.name = init?.name ?? "";
@@ -51,5 +57,6 @@ export class MatrixHost {
     this.accessMethod = init?.accessMethod ?? "none";
     this.deckerInside = init?.deckerInside ?? [];
     this.icActive = init?.icActive ?? [];
+    this.marks = init?.marks ?? {};
   }
 }
