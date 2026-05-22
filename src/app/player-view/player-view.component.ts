@@ -347,13 +347,6 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     const actor = this.primaryCharacter;
     const participantId = overrideId ?? actor?.id;
     if (!participantId) return;
-    // SR5E mid-combat rule: if combat is active and the participant has already rolled
-    // this pass, the server applies only the dice delta — don't overwrite with a fresh roll.
-    const combatActive = this.state?.started === true;
-    const alreadyRolled = actor && !actor.pendingRoll;
-    if (combatActive && alreadyRolled) {
-      return;
-    }
     const diceCount = mode === "hot-sim" ? 4 : mode === "cold-sim" ? 3 : 1;
     const values: number[] = Array.from({ length: diceCount }, () => Math.floor(Math.random() * 6) + 1);
     const diceSum = values.reduce((s, v) => s + v, 0);
@@ -389,18 +382,18 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     const combatActive = this.state?.started === true;
     const alreadyRolled = actor && !actor.pendingRoll;
     if (combatActive && alreadyRolled) {
+      // Already rolled this pass: only handle the dice delta.
       const oldDices = this.diceCountForVrMode(oldMode);
       const newDices = this.diceCountForVrMode(newMode);
       const delta = newDices - oldDices;
       if (delta > 0) {
-        // Gained dice: prompt the player to roll only the delta dice.
+        // Gained dice: show the prompt so the player rolls only the extra dice.
         this.pendingDeltaDice = delta;
       }
-      // delta <= 0: server applied lost-dice penalty; nothing for the player to do.
-    } else {
-      // Not in combat or haven't rolled yet: fresh full roll.
-      this.autoRollForMode(newMode);
+      // delta <= 0: server applied lost-dice penalty automatically; nothing for the player.
     }
+    // Not in combat or haven't rolled yet: server already updated dices/baseIni.
+    // The player will roll via the normal promptRoll mechanism — don't auto-roll here.
   }
 
   /** Submit a manually-entered initiative delta roll. */
