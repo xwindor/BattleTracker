@@ -1,24 +1,24 @@
-<div class="matrix-run-panel" [class.matrix-panel-ic-alert]="hasJackedInDeckers && matrixState.state.noise > 0">
+<div class="matrix-run-panel">
 
-  <!-- Panel header (always visible) -->
+  <!-- ── Header ────────────────────────────────────────────────────────── -->
   <div class="matrix-panel-header" (click)="toggleCollapse()">
     <span class="matrix-panel-title">
       <i class="fas fa-microchip me-2"></i>Matrix
     </span>
 
-    <!-- Noise and grid controls — stop click from collapsing -->
     <div class="matrix-header-controls" (click)="$event.stopPropagation()">
       <div class="noise-control">
         <span class="noise-label">Noise:</span>
-        <button type="button" class="btn btn-xs noise-btn" (click)="onNoiseDec()"
+        <button type="button" class="noise-btn"
+          (click)="onNoiseDec()"
           [disabled]="matrixState.state.noise <= 0">−</button>
         <span class="noise-value" [class.noise-nonzero]="matrixState.state.noise > 0">
           {{ matrixState.state.noise }}
         </span>
-        <button type="button" class="btn btn-xs noise-btn" (click)="onNoiseInc()">+</button>
+        <button type="button" class="noise-btn" (click)="onNoiseInc()">+</button>
       </div>
 
-      <select class="form-select form-select-sm grid-select"
+      <select class="grid-select"
         [ngModel]="matrixState.state.activeGrid"
         (ngModelChange)="onGridChange($event)">
         <option value="public">Public Grid</option>
@@ -32,86 +32,116 @@
        [class.fa-chevron-up]="!collapsed"></i>
   </div>
 
-  <!-- Panel body -->
   @if (!collapsed) {
   <div class="matrix-panel-body">
 
-    <!-- Workflow stepper -->
+    <!-- ── Passive stepper strip ──────────────────────────────────────── -->
     <div class="matrix-stepper">
       @for (step of STEPS; track step.key; let i = $index) {
-      <button type="button"
-        class="stepper-step"
-        [class.stepper-active]="isStepActive(i)"
-        [class.stepper-done]="isStepComplete(i)"
-        (click)="setStep(step.key)"
+      <span class="stepper-step"
+        [class.stepper-lit]="isStepLit(i)"
+        [class.stepper-past]="isStepPast(i)"
         [ngbTooltip]="step.tooltip"
         placement="bottom"
         triggers="hover">
-        @if (isStepComplete(i)) {
+        @if (isStepPast(i)) {
         <i class="fas fa-check stepper-check"></i>
-        } @else {
-        <span class="stepper-num">{{ i + 1 }}</span>
         }
-        <span class="stepper-label">{{ step.label }}</span>
-      </button>
+        {{ step.label }}
+      </span>
       @if (i < STEPS.length - 1) {
-      <span class="stepper-connector" [class.stepper-connector-done]="isStepComplete(i + 1)"></span>
+      <span class="stepper-sep" [class.stepper-sep-past]="isStepPast(i + 1)">›</span>
       }
       }
     </div>
 
-    <!-- Step content -->
-    <div class="matrix-step-content">
-
-      @if (activeStep === 'jack-in' || activeStep === 'jack-out') {
-      <app-jack-in-panel
-        [activeDeckers]="activeDeckers"
+    <!-- ── Decker status cards ────────────────────────────────────────── -->
+    @if (activeDeckers.length > 0) {
+    <div class="decker-cards-row">
+      @for (d of activeDeckers; track d) {
+      <app-decker-card
+        [decker]="d"
         (jackInRequested)="onJackInRequested($event)"
         (jackOutRequested)="onJackOutRequested($event)">
-      </app-jack-in-panel>
+      </app-decker-card>
       }
+    </div>
+    }
 
-      @else if (activeStep === 'public-space') {
-      <div class="matrix-stub-panel">
-        <i class="fas fa-globe me-2 stub-icon"></i>
-        <span class="stub-text">Public Space</span>
-        <span class="stub-coming">Icon generation and public-space scanning — coming in Step 10.</span>
-      </div>
-      }
+    <!-- ── Two-pane layout ────────────────────────────────────────────── -->
+    <div class="matrix-two-pane">
 
-      @else if (activeStep === 'locate-host') {
-      <div class="matrix-stub-panel">
-        <i class="fas fa-server me-2 stub-icon"></i>
-        <span class="stub-text">Locate Host</span>
-        <span class="stub-coming">Host creation and selection form — coming in Step 5.</span>
-      </div>
-      }
+      <!-- Left: hierarchy editor -->
+      <div class="matrix-left-pane">
+        <div class="pane-header">
+          <i class="fas fa-sitemap me-1"></i>Hierarchy
+        </div>
 
-      @else if (activeStep === 'access-host') {
-      <div class="matrix-stub-panel">
-        <i class="fas fa-unlock me-2 stub-icon"></i>
-        <span class="stub-text">Access Host</span>
-        <span class="stub-coming">Hack On The Fly / Brute Force / Direct Connection flows — coming in Step 9.</span>
-      </div>
-      }
+        <!-- Active host -->
+        <div class="hier-section">
+          <div class="hier-section-label">
+            <i class="fas fa-server me-1"></i>Active Host
+          </div>
+          @if (!activeHost) {
+          <div class="hier-empty">No host active. Use the host banner above to set one.</div>
+          } @else {
+          <div class="hier-host-row">
+            <span class="hier-host-name">{{ activeHost.name }}</span>
+            <span class="hier-host-meta">Rating {{ activeHost.rating }}</span>
+            <span class="hier-host-meta">
+              IC {{ activeHost.icActive.length }}/{{ activeHost.rating }}
+            </span>
+          </div>
+          <!-- IC list -->
+          @if (activeHost.icActive.length > 0) {
+          <div class="hier-ic-list">
+            @for (ic of activeHost.icActive; track ic) {
+            <div class="hier-ic-row" [class.hier-ic-bricked]="ic.physicalDamage >= ic.physicalHealth">
+              <i class="fas fa-shield-alt me-1"></i>
+              <span>{{ ic.icType }} IC</span>
+              <span class="hier-ic-cm">{{ ic.physicalDamage }}/{{ ic.physicalHealth }}</span>
+              @if (ic.physicalDamage >= ic.physicalHealth) {
+              <span class="hier-ic-bricked-label">BRICKED</span>
+              }
+            </div>
+            }
+          </div>
+          }
+          }
+        </div>
 
-      @else if (activeStep === 'inside-host') {
-      <div class="matrix-stub-panel">
-        <i class="fas fa-database me-2 stub-icon"></i>
-        <span class="stub-text">Inside Host</span>
-        <span class="stub-coming">Target management, IC dashboard — coming in Step 5.</span>
-      </div>
-      }
+        <!-- Targets (stub) -->
+        <div class="hier-section">
+          <div class="hier-section-label">
+            <i class="fas fa-crosshairs me-1"></i>Targets
+          </div>
+          <div class="hier-stub">Target management — Step 5</div>
+        </div>
 
-      @else if (activeStep === 'target-interaction') {
-      <div class="matrix-stub-panel">
-        <i class="fas fa-crosshairs me-2 stub-icon"></i>
-        <span class="stub-text">Target Interaction</span>
-        <span class="stub-coming">Mark tracking, file edits, device control — coming in Step 6.</span>
+        <!-- Marks (stub) -->
+        <div class="hier-section">
+          <div class="hier-section-label">
+            <i class="fas fa-tag me-1"></i>Marks
+          </div>
+          <div class="hier-stub">Mark tracking — Step 6</div>
+        </div>
+
       </div>
-      }
+
+      <!-- Right: node graph preview stub -->
+      <div class="matrix-right-pane">
+        <div class="pane-header">
+          <i class="fas fa-project-diagram me-1"></i>Matrix Graph
+        </div>
+        <div class="graph-stub">
+          <i class="fas fa-project-diagram graph-stub-icon"></i>
+          <span class="graph-stub-label">Matrix Graph</span>
+          <span class="graph-stub-sub">SVG node graph — Step 9</span>
+        </div>
+      </div>
 
     </div>
   </div>
   }
+
 </div>

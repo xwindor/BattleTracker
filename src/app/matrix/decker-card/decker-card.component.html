@@ -1,0 +1,71 @@
+<div class="decker-card" [class.decker-card-jacked]="decker.jackedIn" [class.decker-card-vr]="decker.blocksPhysicalActions">
+
+  <!-- Row 1: identity + status badges -->
+  <div class="decker-card-top">
+    <span class="decker-name">{{ decker.name || "Unnamed Decker" }}</span>
+
+    <span class="decker-mode-badge" [ngClass]="modeBadgeClass">
+      {{ modeBadgeLabel }}
+    </span>
+
+    @if (decker.blocksPhysicalActions) {
+    <span class="decker-vr-badge">VR CATATONIC</span>
+    }
+
+    @if (decker.jackedIn) {
+    <span class="decker-os" [ngClass]="osTierClass">
+      OS {{ decker.overwatch }}
+      @if (decker.overwatchAlert === 'ic-alert') {
+      <span class="os-threshold-label">IC ALERT</span>
+      } @else if (decker.overwatchAlert === 'convergence') {
+      <span class="os-threshold-label os-threshold-conv">CONV</span>
+      }
+    </span>
+    }
+
+    @if (decker.hostConverged) {
+    <span class="decker-conv-badge">HOST CONV</span>
+    }
+  </div>
+
+  <!-- Row 2: mode selector + actions -->
+  <div class="decker-card-actions">
+    <!-- Mode toggle buttons (always visible) -->
+    <div class="btn-group btn-group-sm mode-group">
+      <button type="button" class="btn btn-xs mode-btn"
+        [class.mode-btn-active]="pendingMode === VRMode.AR"
+        (click)="setPendingMode(VRMode.AR)"
+        title="AR — REA+INT+1d6, no catatonia">
+        AR
+      </button>
+      <button type="button" class="btn btn-xs mode-btn mode-btn-cold"
+        [class.mode-btn-active]="pendingMode === VRMode.ColdSim"
+        (click)="setPendingMode(VRMode.ColdSim)"
+        title="Cold-Sim — DP+INT+3d6">
+        Cold
+      </button>
+      <button type="button" class="btn btn-xs mode-btn mode-btn-hot"
+        [class.mode-btn-active]="pendingMode === VRMode.HotSim"
+        (click)="setPendingMode(VRMode.HotSim)"
+        title="Hot-Sim — DP+INT+4d6, biofeedback risk">
+        Hot
+      </button>
+    </div>
+
+    @if (!decker.jackedIn) {
+    <button type="button" class="btn btn-xs btn-primary card-action-btn" (click)="onJackIn()">
+      Jack In
+    </button>
+    } @else {
+    @if (canSwitchMode) {
+    <button type="button" class="btn btn-xs btn-outline-info card-action-btn" (click)="onSwitchMode()">
+      Switch
+    </button>
+    }
+    <button type="button" class="btn btn-xs btn-warning card-action-btn" (click)="onJackOut()">
+      Jack Out
+    </button>
+    }
+  </div>
+
+</div>

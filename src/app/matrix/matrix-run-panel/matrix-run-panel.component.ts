@@ -2,9 +2,9 @@ import { Component, EventEmitter, Input, Output } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
-import { MatrixParticipant, MatrixStep, VRMode } from "Matrix";
+import { MatrixParticipant, MatrixStep, MatrixHost, VRMode } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
-import { JackInPanelComponent } from "app/matrix/jack-in-panel/jack-in-panel.component";
+import { DeckerCardComponent } from "app/matrix/decker-card/decker-card.component";
 
 interface StepDef {
   key: MatrixStep;
@@ -17,7 +17,7 @@ interface StepDef {
   selector: "app-matrix-run-panel",
   templateUrl: "./matrix-run-panel.component.html",
   styleUrls: ["./matrix-run-panel.component.css"],
-  imports: [CommonModule, FormsModule, NgbTooltipModule, JackInPanelComponent]
+  imports: [CommonModule, FormsModule, NgbTooltipModule, DeckerCardComponent]
 })
 export class MatrixRunPanelComponent {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];
@@ -28,31 +28,39 @@ export class MatrixRunPanelComponent {
   collapsed = false;
 
   readonly STEPS: StepDef[] = [
-    { key: "jack-in",           label: "Jack In",            tooltip: "Connect to the Matrix (AR, Cold-Sim, or Hot-Sim VR). Initiative updates." },
-    { key: "public-space",      label: "Public Space",       tooltip: "Survey public Matrix space. Locate hosts, scan for icons." },
-    { key: "locate-host",       label: "Locate Host",        tooltip: "Find and identify the target host (Matrix Perception + Computer test)." },
-    { key: "access-host",       label: "Access Host",        tooltip: "Enter via Hack On The Fly (+2 OS/mark), Brute Force (marks×4 OS), or Direct Connection (0 OS)." },
-    { key: "inside-host",       label: "Inside Host",        tooltip: "Navigate host contents. Manage targets, IC, and matrix icons." },
-    { key: "target-interaction",label: "Target Interaction", tooltip: "Place marks, edit files, control devices, data spike." },
-    { key: "jack-out",          label: "Jack Out",           tooltip: "Disconnect cleanly. OS resets to 0. If host-converged, demiGOD converges on exit." }
+    { key: "jack-in",            label: "1. Jack In",            tooltip: "Connect to the Matrix. AR (REA+INT+1d6), Cold-Sim (DP+INT+3d6), or Hot-Sim (DP+INT+4d6)." },
+    { key: "public-space",       label: "2. Public Space",       tooltip: "Survey public Matrix space. Locate hosts and scan for icons." },
+    { key: "locate-host",        label: "3. Locate Host",        tooltip: "Identify the target host (Matrix Perception + Computer test)." },
+    { key: "access-host",        label: "4. Access Host",        tooltip: "Hack On The Fly (+2 OS/mark), Brute Force (marks×4 OS), or Direct Connection (0 OS, physical access)." },
+    { key: "inside-host",        label: "5. Inside Host",        tooltip: "Navigate host contents. Targets auto-revealed. Manage IC and marks." },
+    { key: "target-interaction", label: "6. Targets",            tooltip: "Place marks, edit files, control devices, data spike targets." },
+    { key: "jack-out",           label: "7. Jack Out",           tooltip: "Disconnect cleanly. OS resets to 0. If host-converged, demiGOD converges on exit." }
   ];
 
   constructor(public matrixState: MatrixStateService) {}
 
-  get activeStep(): MatrixStep {
-    return this.matrixState.state.workflowStep;
+  /** Derives the current workflow phase from observable state — no user input required. */
+  get inferredStep(): MatrixStep {
+    const anyJackedIn = this.activeDeckers.some(d => d.jackedIn);
+    if (!anyJackedIn) return "jack-in";
+
+    const host = this.matrixState.getCurrentHost();
+    if (!host) return "public-space";
+    if (host.accessMethod === "none") return "access-host";
+    if (host.deckerInside.length === 0) return "inside-host";
+
+    const hasActiveMarks = host.targets.some(
+      t => Object.values(t.marks).some(n => n > 0)
+    );
+    return hasActiveMarks ? "target-interaction" : "inside-host";
   }
 
-  setStep(step: MatrixStep): void {
-    this.matrixState.state.workflowStep = step;
+  isStepLit(index: number): boolean {
+    return this.STEPS[index]?.key === this.inferredStep;
   }
 
-  isStepActive(index: number): boolean {
-    return this.STEPS[index]?.key === this.activeStep;
-  }
-
-  isStepComplete(index: number): boolean {
-    const currentIndex = this.STEPS.findIndex(s => s.key === this.activeStep);
+  isStepPast(index: number): boolean {
+    const currentIndex = this.STEPS.findIndex(s => s.key === this.inferredStep);
     return index < currentIndex;
   }
 
@@ -74,27 +82,13 @@ export class MatrixRunPanelComponent {
 
   onJackInRequested(event: { decker: MatrixParticipant; mode: VRMode }): void {
     this.jackInRequested.emit(event);
-    // Advance workflow to Public Space after jack-in
-    if (this.activeStep === "jack-in") {
-      this.matrixState.state.workflowStep = "public-space";
-    }
   }
 
   onJackOutRequested(decker: MatrixParticipant): void {
     this.jackOutRequested.emit(decker);
-    // Return to Jack In step after jack-out
-    this.matrixState.state.workflowStep = "jack-in";
   }
 
-  get gridLabel(): string {
-    switch (this.matrixState.state.activeGrid) {
-      case "corporate": return "Corp Grid";
-      case "prime":     return "Prime Grid";
-      default:          return "Public Grid";
-    }
-  }
-
-  get hasJackedInDeckers(): boolean {
-    return this.activeDeckers.some(d => d.jackedIn);
+  get activeHost(): MatrixHost | null {
+    return this.matrixState.getCurrentHost();
   }
 }
