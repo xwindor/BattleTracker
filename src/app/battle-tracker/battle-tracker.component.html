@@ -102,6 +102,40 @@
         <button type="button" class="ic-alert-dismiss" (click)="dismissIcAlert($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
+
+      <!-- Active Host Banner -->
+      @if (hasAnyMatrixParticipants) {
+      <div class="host-banner">
+        @if (activeHost === null) {
+        <span class="host-banner-label">No active host</span>
+        <div class="host-banner-form">
+          <input type="text" class="form-control form-control-sm host-name-input" placeholder="Host name"
+            [(ngModel)]="activeHostName">
+          <input type="number" class="form-control form-control-sm host-rating-input" placeholder="Rating"
+            [(ngModel)]="activeHostRating" [min]="1" [max]="12">
+          <button type="button" class="btn btn-sm btn-outline-info" (click)="setActiveHostFromBanner()"
+            [disabled]="!activeHostName.trim()">
+            Set Host
+          </button>
+        </div>
+        } @else {
+        <i class="fas fa-server me-2 host-banner-icon"></i>
+        <span class="host-banner-name">{{ activeHost.name }}</span>
+        <span class="host-banner-rating">Rating {{ activeHost.rating }}</span>
+        <span class="host-banner-ic-count" [class.host-ic-at-cap]="activeHost.icActive.length >= activeHost.rating">
+          IC: {{ activeHost.icActive.length }}/{{ activeHost.rating }}
+        </span>
+        <button type="button" class="btn btn-sm btn-danger ms-auto" (click)="openSpawnICModal()">
+          <i class="fas fa-shield-alt me-1"></i>Spawn IC
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-1" (click)="clearActiveHostFromBanner()"
+          title="Clear active host">
+          <i class="fas fa-times"></i>
+        </button>
+        }
+      </div>
+      }
+
       <div class="row bg-dark text-light">
         <div class="col-4 col-xl-2">
           <span class="h5">
@@ -281,6 +315,25 @@
               {{ getActionLabel(action) }} ({{ action.iniMod }})
             </span>
             }
+          </div>
+          }
+          @if (isIC(p)) {
+          <div class="col-12 ic-info-row">
+            <span class="ic-type-badge">
+              <i class="fas fa-shield-alt me-1"></i>{{ asIC(p).icType }} IC
+            </span>
+            <span class="ic-host-rating">Rating {{ asIC(p).hostRating }}</span>
+            <span class="ic-matrix-cm">
+              Matrix CM: {{ p.physicalDamage }}/{{ p.physicalHealth }}
+              @if (asIC(p).isBricked) {
+              <span class="ic-bricked-badge">BRICKED</span>
+              <button type="button" class="btn btn-xs btn-outline-success ms-1 ic-respawn-btn"
+                title="Reset Matrix CM (use at start of next Combat Turn)"
+                (click)="p.physicalDamage = 0; onICMatrixDamageChanged()">
+                Respawn
+              </button>
+              }
+            </span>
           </div>
           }
         </div>
@@ -696,6 +749,21 @@
 </ng-template>
 
 <ng-template #convergenceModalTpl>
+  @if (convergenceIsHostContext) {
+  <div class="modal-header bg-warning text-dark">
+    <h5 class="modal-title">&#9888; HOST CONVERGENCE</h5>
+  </div>
+  <div class="modal-body">
+    <p class="mb-1">
+      <strong>{{ convergenceHostName }} has traced {{ convergenceAlertDecker }}.</strong>
+    </p>
+    <p class="mb-1">OS reached {{ convergenceAlertOs }}. The host has placed <strong>3 marks</strong> on the decker.</p>
+    <p class="mb-0 text-danger fw-semibold">IC is deploying. Do NOT jack out — demiGOD converges immediately on exit.</p>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-warning" (click)="dismissConvergenceAlert()">Acknowledged</button>
+  </div>
+  } @else {
   <div class="modal-header bg-danger text-white">
     <h5 class="modal-title">&#9760; CONVERGENCE</h5>
   </div>
@@ -706,4 +774,15 @@
   <div class="modal-footer">
     <button type="button" class="btn btn-danger" (click)="dismissConvergenceAlert()">Acknowledged</button>
   </div>
+  }
+</ng-template>
+
+<ng-template #spawnICModalTpl>
+  @if (activeHost) {
+  <app-ic-spawner
+    [host]="activeHost"
+    (spawn)="spawnIC($event)"
+    (cancel)="closeSpawnICModal()">
+  </app-ic-spawner>
+  }
 </ng-template>
