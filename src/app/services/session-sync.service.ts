@@ -19,6 +19,10 @@ export interface SharedParticipantState {
   reaction?: number;
   intuition?: number;
 
+  // Astral-specific (populated when participant instanceof AstralParticipant).
+  isAstral?: boolean;
+  isAstralProjecting?: boolean;
+
   // Matrix-specific (populated when participant instanceof MatrixParticipant).
   isMatrix?: boolean;
   vrMode?: string;          // 'AR' | 'cold-sim' | 'hot-sim'
@@ -46,11 +50,12 @@ export interface SharedMatrixTarget {
   id: string;
   name: string;
   type: string;
-  revealedToPlayers: boolean;
+  /** 'invisible' omitted from broadcast; 'ghost' sanitised (type='unknown', name=''); 'revealed' sent in full. */
   spotted: string;
   marks: Record<string, number>;
   matrixDamage: number;
   matrixHealth: number;
+  directConnection?: boolean;
 }
 
 export interface SharedCombatState {

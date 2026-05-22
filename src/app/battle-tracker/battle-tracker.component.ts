@@ -18,9 +18,11 @@ import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, 
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, ICParticipant, ICType, MatrixHost } from "Matrix";
+import { AstralParticipant } from "Magic";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { ICSpawnerComponent } from "app/matrix/ic-spawner/ic-spawner.component";
 import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
+import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
@@ -48,7 +50,8 @@ interface LocalLogEntry {
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
     ICSpawnerComponent,
-    MatrixRunPanelComponent
+    MatrixRunPanelComponent,
+    AstralBadgeComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -115,6 +118,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
   expandedDeckPanels = new Set<IParticipant>();
+  expandedAstralPanels = new Set<IParticipant>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
@@ -181,6 +185,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
   asMatrix(p: IParticipant): MatrixParticipant {
     return p as MatrixParticipant;
+  }
+
+  isAstral(p: IParticipant): p is AstralParticipant {
+    return p instanceof AstralParticipant;
+  }
+
+  asAstral(p: IParticipant): AstralParticipant {
+    return p as AstralParticipant;
   }
 
   getPhysicalActionCategoriesFor(_p: IParticipant | null) {
@@ -882,6 +894,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           base.deviceRating = p.deviceRating;
         }
 
+        if (this.isAstral(p)) {
+          base.isAstral = true;
+          base.isAstralProjecting = p.astralProjecting;
+        }
+
         return base;
       });
   }
@@ -1257,6 +1274,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return false;
     }
+    if (isPhysicalAct && this.isAstral(sender) && (sender as AstralParticipant).blocksPhysicalActions) {
+      return false;
+    }
     return DeclaredActionEngine.canUseDeclaredAction(this.getDeclaredActionSelection(sender), action);
   }
 
@@ -1298,6 +1318,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     if (isPhysicalAct && this.isMatrix(sender) && (sender as MatrixParticipant).blocksPhysicalActions) {
       return "Cannot take physical actions while in VR.";
+    }
+    if (isPhysicalAct && this.isAstral(sender) && (sender as AstralParticipant).blocksPhysicalActions) {
+      return "Cannot take physical actions while astrally projecting.";
     }
     if (this.isDeclaredActionSelected(sender, action)) {
       const selection = this.getDeclaredActionSelection(sender);
@@ -1839,6 +1862,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.isMatrix(p)) {
       return Math.max(0, p.dataProcessing + intuition);
     }
+    if (this.isAstral(p) && p.astralProjecting) {
+      return Math.max(0, intuition * 2);
+    }
     return Math.max(0, this.getParticipantReaction(p) + intuition);
   }
 
@@ -1911,6 +1937,54 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     this.pendingVrModes.delete(p);
     this.demoteToParticipant(p as MatrixParticipant);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  isAstralPanelExpanded(p: IParticipant): boolean {
+    return this.expandedAstralPanels.has(p);
+  }
+
+  toggleAstralPanel(p: IParticipant): void {
+    if (this.expandedAstralPanels.has(p)) {
+      this.expandedAstralPanels.delete(p);
+    } else {
+      this.expandedAstralPanels.add(p);
+    }
+  }
+
+  enableAstral(p: IParticipant): void {
+    UndoHandler.StartActions();
+    const ap = this.promoteToAstralParticipant(p);
+    this.syncSharedState();
+    this.sort();
+    // Carry the panel expansion to the new instance
+    if (this.expandedAstralPanels.has(p)) {
+      this.expandedAstralPanels.delete(p);
+      this.expandedAstralPanels.add(ap);
+    }
+  }
+
+  disableAstral(p: IParticipant): void {
+    if (!this.isAstral(p)) return;
+    UndoHandler.StartActions();
+    this.expandedAstralPanels.delete(p);
+    this.demoteFromAstralParticipant(p as AstralParticipant);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  toggleAstralProjecting(p: IParticipant): void {
+    if (!this.isAstral(p)) return;
+    UndoHandler.StartActions();
+    const ap = p as AstralParticipant;
+    ap.astralProjecting = !ap.astralProjecting;
+    ap.blocksPhysicalActions = ap.astralProjecting;
+    ap.baseIni = this.getParticipantBaseInitiative(ap);
+    LogHandler.log(
+      this.currentBTTime,
+      `${ap.name} ${ap.astralProjecting ? "entered astral space (INT\xD72 initiative)" : "returned from astral space (REA+INT initiative)"}`
+    );
     this.syncSharedState();
     this.sort();
   }
@@ -2111,6 +2185,105 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
     this.combatManager.removeParticipant(mp);
+    this.combatManager.addParticipant(p);
+    return p;
+  }
+
+  private promoteToAstralParticipant(p: IParticipant): AstralParticipant {
+    const ap = new AstralParticipant();
+    const src = p as unknown as Record<string, unknown>;
+    const dst = ap as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    const existingId = this.participantIds.get(p);
+    if (existingId) this.participantIds.set(ap, existingId);
+    const owner = this.participantOwners.get(p);
+    if (owner) this.participantOwners.set(ap, owner);
+    const claimable = this.participantClaimable.get(p);
+    if (claimable !== undefined) this.participantClaimable.set(ap, claimable);
+    const edge = this.participantEdgeRatings.get(p);
+    if (edge !== undefined) this.participantEdgeRatings.set(ap, edge);
+    const reaction = this.participantReactions.get(p);
+    if (reaction !== undefined) this.participantReactions.set(ap, reaction);
+    const intuition = this.participantIntuitions.get(p);
+    if (intuition !== undefined) this.participantIntuitions.set(ap, intuition);
+    const tb = this.participantTieBreakers.get(p);
+    if (tb !== undefined) this.participantTieBreakers.set(ap, tb);
+    const das = this.declaredActionSelections.get(p);
+    if (das) {
+      this.declaredActionSelections.set(ap, das);
+      this.declaredActionSelections.delete(p);
+    }
+    this.participantIds.delete(p);
+    this.participantOwners.delete(p);
+    this.participantClaimable.delete(p);
+    this.participantEdgeRatings.delete(p);
+    this.participantReactions.delete(p);
+    this.participantIntuitions.delete(p);
+    this.participantTieBreakers.delete(p);
+    if (this.selectedActor === p) this.selectedActor = ap;
+    if (this.actModalParticipant === p) this.actModalParticipant = ap;
+    this.combatManager.removeParticipant(p);
+    this.combatManager.addParticipant(ap);
+    return ap;
+  }
+
+  private demoteFromAstralParticipant(ap: AstralParticipant): Participant {
+    const p = new Participant();
+    const src = ap as unknown as Record<string, unknown>;
+    const dst = p as unknown as Record<string, unknown>;
+    const baseFields = [
+      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
+      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
+      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
+      "_hasPainEditor", "_sortOrder"
+    ];
+    for (const f of baseFields) {
+      dst[f] = src[f];
+    }
+    dst["_actionHistory"] = [];
+    const reaction = this.participantReactions.get(ap) ?? 0;
+    const intuition = this.participantIntuitions.get(ap) ?? 0;
+    p.dices = 1;
+    p.baseIni = reaction + intuition;
+    const existingId = this.participantIds.get(ap);
+    if (existingId) this.participantIds.set(p, existingId);
+    const owner = this.participantOwners.get(ap);
+    if (owner) this.participantOwners.set(p, owner);
+    const claimable = this.participantClaimable.get(ap);
+    if (claimable !== undefined) this.participantClaimable.set(p, claimable);
+    const edge = this.participantEdgeRatings.get(ap);
+    if (edge !== undefined) this.participantEdgeRatings.set(p, edge);
+    const reaction2 = this.participantReactions.get(ap);
+    if (reaction2 !== undefined) this.participantReactions.set(p, reaction2);
+    const intuition2 = this.participantIntuitions.get(ap);
+    if (intuition2 !== undefined) this.participantIntuitions.set(p, intuition2);
+    const tb = this.participantTieBreakers.get(ap);
+    if (tb !== undefined) this.participantTieBreakers.set(p, tb);
+    const das = this.declaredActionSelections.get(ap);
+    if (das) {
+      this.declaredActionSelections.set(p, das);
+      this.declaredActionSelections.delete(ap);
+    }
+    this.participantIds.delete(ap);
+    this.participantOwners.delete(ap);
+    this.participantClaimable.delete(ap);
+    this.participantEdgeRatings.delete(ap);
+    this.participantReactions.delete(ap);
+    this.participantIntuitions.delete(ap);
+    this.participantTieBreakers.delete(ap);
+    this.expandedAstralPanels.delete(ap);
+    if (this.selectedActor === ap) this.selectedActor = p;
+    if (this.actModalParticipant === ap) this.actModalParticipant = p;
+    this.combatManager.removeParticipant(ap);
     this.combatManager.addParticipant(p);
     return p;
   }

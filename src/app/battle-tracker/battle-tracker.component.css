@@ -708,6 +708,22 @@ input:checked + .slider:before {
   flex-wrap: wrap;
 }
 
+.astral-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  border-top: 1px solid rgba(111, 66, 193, 0.2);
+  background: rgba(111, 66, 193, 0.04);
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.astral-panel {
+  background: rgba(111, 66, 193, 0.06);
+  border-top: 1px solid rgba(111, 66, 193, 0.2);
+}
+
 .ic-type-badge {
   display: inline-flex;
   align-items: center;
@@ -722,12 +738,12 @@ input:checked + .slider:before {
 }
 
 .ic-host-rating {
-  color: #6b7280;
+  color: #9ca3af;
   font-size: 0.72rem;
 }
 
 .ic-matrix-cm {
-  color: #374151;
+  color: #d1d5db;
   font-size: 0.78rem;
   display: flex;
   align-items: center;
