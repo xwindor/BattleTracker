@@ -1,0 +1,33 @@
+.astral-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 0.78rem;
+  vertical-align: middle;
+}
+
+.astral-chip {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #fff;
+  line-height: 1.5;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  background-color: #6f42c1;
+  box-shadow: 0 0 4px rgba(111, 66, 193, 0.7);
+}
+
+.projecting-label {
+  background-color: #1f1f1f;
+  color: #a78bfa;
+  border: 1px dashed #a78bfa;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  line-height: 1.5;
+}

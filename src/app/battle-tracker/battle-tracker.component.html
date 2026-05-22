@@ -247,6 +247,14 @@
                 title="Cyberdeck configuration">
                 Deck
               </button>
+              <button type="button" class="btn"
+                [class.btn-outline-warning]="!isAstral(p)"
+                [class.btn-warning]="isAstral(p)"
+                [class.active]="isAstralPanelExpanded(p)"
+                (click)="toggleAstralPanel(p)"
+                title="Awakened — astral projection">
+                Awakened
+              </button>
               <button type="button"
                 class="btn"
                 [class.btn-outline-info]="!isParticipantClaimable(p)"
@@ -281,6 +289,11 @@
               {{ getActionLabel(action) }} ({{ action.iniMod }})
             </span>
             }
+          </div>
+          }
+          @if (isAstral(p) && asAstral(p).astralProjecting) {
+          <div class="col-12 astral-info-row">
+            <app-astral-badge [participant]="asAstral(p)"></app-astral-badge>
           </div>
           }
         </div>
@@ -385,6 +398,36 @@
               </app-matrix-participant-badge>
             </div>
             }
+          </div>
+          }
+        </div>
+        }
+        @if (!isIC(p) && isAstralPanelExpanded(p)) {
+        <div class="row astral-panel py-2 px-3 mb-1">
+          @if (!isAstral(p)) {
+          <div class="col d-flex align-items-center gap-2">
+            <span class="small text-muted">Not configured as Awakened.</span>
+            <button type="button" class="btn btn-sm btn-outline-warning" (click)="enableAstral(p)">
+              Enable Awakened
+            </button>
+          </div>
+          } @else {
+          <div class="col d-flex align-items-center gap-2 flex-wrap">
+            <div class="btn-group btn-group-sm">
+              <button type="button" class="btn"
+                [class.btn-warning]="asAstral(p).astralProjecting"
+                [class.btn-outline-warning]="!asAstral(p).astralProjecting"
+                (click)="toggleAstralProjecting(p)"
+                title="Toggle astral projection — changes initiative to INT×2 + 1d6">
+                {{ asAstral(p).astralProjecting ? "Astral Projecting" : "Physical" }}
+              </button>
+            </div>
+            @if (asAstral(p).astralProjecting) {
+            <app-astral-badge [participant]="asAstral(p)"></app-astral-badge>
+            }
+            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" (click)="disableAstral(p)">
+              Remove Awakened
+            </button>
           </div>
           }
         </div>

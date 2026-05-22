@@ -582,3 +582,19 @@ input:checked + .slider:before {
   background: rgba(120, 53, 15, 0.12);
   color: #78350f;
 }
+
+.astral-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  border-top: 1px solid rgba(111, 66, 193, 0.2);
+  background: rgba(111, 66, 193, 0.04);
+  font-size: 0.78rem;
+  flex-wrap: wrap;
+}
+
+.astral-panel {
+  background: rgba(111, 66, 193, 0.06);
+  border-top: 1px solid rgba(111, 66, 193, 0.2);
+}
