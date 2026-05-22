@@ -1,0 +1,117 @@
+<div class="matrix-run-panel" [class.matrix-panel-ic-alert]="hasJackedInDeckers && matrixState.state.noise > 0">
+
+  <!-- Panel header (always visible) -->
+  <div class="matrix-panel-header" (click)="toggleCollapse()">
+    <span class="matrix-panel-title">
+      <i class="fas fa-microchip me-2"></i>Matrix
+    </span>
+
+    <!-- Noise and grid controls — stop click from collapsing -->
+    <div class="matrix-header-controls" (click)="$event.stopPropagation()">
+      <div class="noise-control">
+        <span class="noise-label">Noise:</span>
+        <button type="button" class="btn btn-xs noise-btn" (click)="onNoiseDec()"
+          [disabled]="matrixState.state.noise <= 0">−</button>
+        <span class="noise-value" [class.noise-nonzero]="matrixState.state.noise > 0">
+          {{ matrixState.state.noise }}
+        </span>
+        <button type="button" class="btn btn-xs noise-btn" (click)="onNoiseInc()">+</button>
+      </div>
+
+      <select class="form-select form-select-sm grid-select"
+        [ngModel]="matrixState.state.activeGrid"
+        (ngModelChange)="onGridChange($event)">
+        <option value="public">Public Grid</option>
+        <option value="corporate">Corp Grid</option>
+        <option value="prime">Prime Grid</option>
+      </select>
+    </div>
+
+    <i class="fas collapse-caret"
+       [class.fa-chevron-down]="collapsed"
+       [class.fa-chevron-up]="!collapsed"></i>
+  </div>
+
+  <!-- Panel body -->
+  @if (!collapsed) {
+  <div class="matrix-panel-body">
+
+    <!-- Workflow stepper -->
+    <div class="matrix-stepper">
+      @for (step of STEPS; track step.key; let i = $index) {
+      <button type="button"
+        class="stepper-step"
+        [class.stepper-active]="isStepActive(i)"
+        [class.stepper-done]="isStepComplete(i)"
+        (click)="setStep(step.key)"
+        [ngbTooltip]="step.tooltip"
+        placement="bottom"
+        triggers="hover">
+        @if (isStepComplete(i)) {
+        <i class="fas fa-check stepper-check"></i>
+        } @else {
+        <span class="stepper-num">{{ i + 1 }}</span>
+        }
+        <span class="stepper-label">{{ step.label }}</span>
+      </button>
+      @if (i < STEPS.length - 1) {
+      <span class="stepper-connector" [class.stepper-connector-done]="isStepComplete(i + 1)"></span>
+      }
+      }
+    </div>
+
+    <!-- Step content -->
+    <div class="matrix-step-content">
+
+      @if (activeStep === 'jack-in' || activeStep === 'jack-out') {
+      <app-jack-in-panel
+        [activeDeckers]="activeDeckers"
+        (jackInRequested)="onJackInRequested($event)"
+        (jackOutRequested)="onJackOutRequested($event)">
+      </app-jack-in-panel>
+      }
+
+      @else if (activeStep === 'public-space') {
+      <div class="matrix-stub-panel">
+        <i class="fas fa-globe me-2 stub-icon"></i>
+        <span class="stub-text">Public Space</span>
+        <span class="stub-coming">Icon generation and public-space scanning — coming in Step 10.</span>
+      </div>
+      }
+
+      @else if (activeStep === 'locate-host') {
+      <div class="matrix-stub-panel">
+        <i class="fas fa-server me-2 stub-icon"></i>
+        <span class="stub-text">Locate Host</span>
+        <span class="stub-coming">Host creation and selection form — coming in Step 5.</span>
+      </div>
+      }
+
+      @else if (activeStep === 'access-host') {
+      <div class="matrix-stub-panel">
+        <i class="fas fa-unlock me-2 stub-icon"></i>
+        <span class="stub-text">Access Host</span>
+        <span class="stub-coming">Hack On The Fly / Brute Force / Direct Connection flows — coming in Step 9.</span>
+      </div>
+      }
+
+      @else if (activeStep === 'inside-host') {
+      <div class="matrix-stub-panel">
+        <i class="fas fa-database me-2 stub-icon"></i>
+        <span class="stub-text">Inside Host</span>
+        <span class="stub-coming">Target management, IC dashboard — coming in Step 5.</span>
+      </div>
+      }
+
+      @else if (activeStep === 'target-interaction') {
+      <div class="matrix-stub-panel">
+        <i class="fas fa-crosshairs me-2 stub-icon"></i>
+        <span class="stub-text">Target Interaction</span>
+        <span class="stub-coming">Mark tracking, file edits, device control — coming in Step 6.</span>
+      </div>
+      }
+
+    </div>
+  </div>
+  }
+</div>

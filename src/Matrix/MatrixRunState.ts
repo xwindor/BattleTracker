@@ -37,11 +37,19 @@ export class MatrixRunState {
   /** Current phase of the hacking workflow. */
   workflowStep: MatrixStep;
 
+  /** Scene-level flat dice penalty on all Matrix tests. GM-adjustable at any time. */
+  noise: number;
+
+  /** Active grid for this scene. Affects connection costs and some dice pools. */
+  activeGrid: "public" | "corporate" | "prime";
+
   constructor(init?: Partial<MatrixRunState>) {
     this.hosts = init?.hosts ?? [];
     this.publicIcons = init?.publicIcons ?? [];
     this.currentHostId = init?.currentHostId ?? null;
     this.deckers = init?.deckers ?? [];
     this.workflowStep = init?.workflowStep ?? "jack-in";
+    this.noise = init?.noise ?? 0;
+    this.activeGrid = init?.activeGrid ?? "public";
   }
 }

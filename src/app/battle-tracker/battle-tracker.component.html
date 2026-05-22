@@ -104,7 +104,6 @@
       }
 
       <!-- Active Host Banner -->
-      @if (hasAnyMatrixParticipants) {
       <div class="host-banner">
         @if (activeHost === null) {
         <span class="host-banner-label">No active host</span>
@@ -134,7 +133,6 @@
         </button>
         }
       </div>
-      }
 
       <div class="row bg-dark text-light">
         <div class="col-4 col-xl-2">
@@ -168,6 +166,7 @@
           </div>
           <div class="col-6 col-xl-3 text-center gm-stats-col">
             <div class="input-group input-group-sm gm-stats-roll-group">
+              @if (!isIC(p)) {
               <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantEdgeRatingValue(p)"
@@ -180,6 +179,7 @@
               <input class="form-control text-center gm-stat-input" type="number"
                 [ngModel]="getParticipantIntuitionValue(p)"
                 (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
+              }
               <span class="input-group-text gm-stat-chip gm-chip-initdice" title="Initiative Dice">D</span>
               <input class="form-control text-center gm-dice-count-input" type="number"
                 [ngModel]="p.dices"
@@ -199,7 +199,7 @@
             </div>
           </div>
           <div class="col-7 col-xl-3 btn-group" role="group">
-            @if (!p.edge
+            @if (!isIC(p) && !p.edge
             && (!combatManager.started || (combatManager.passEnded && p.getCurrentInitiative() > 10)))
             {
             <button type="button" class="btn btn-primary" (click)="btnEdge_Click(p)">
@@ -275,6 +275,7 @@
           </div>
           <div class="col-5 col-xl-3 text-right">
             <div class="btn-group" role="group">
+              @if (!isIC(p)) {
               <button type="button" class="btn btn-outline-secondary"
                 [class.active]="isDeckPanelExpanded(p)"
                 (click)="toggleDeckPanel(p)"
@@ -292,6 +293,7 @@
               <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
                 <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
               </button>
+              }
               @if(p.ooc){
               <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
                 <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
@@ -325,7 +327,7 @@
             <span class="ic-host-rating">Rating {{ asIC(p).hostRating }}</span>
             <span class="ic-matrix-cm">
               Matrix CM: {{ p.physicalDamage }}/{{ p.physicalHealth }}
-              @if (asIC(p).isBricked) {
+              @if (isICBricked(p)) {
               <span class="ic-bricked-badge">BRICKED</span>
               <button type="button" class="btn btn-xs btn-outline-success ms-1 ic-respawn-btn"
                 title="Reset Matrix CM (use at start of next Combat Turn)"
@@ -337,7 +339,7 @@
           </div>
           }
         </div>
-        @if (isDeckPanelExpanded(p)) {
+        @if (!isIC(p) && isDeckPanelExpanded(p)) {
         <div class="row deck-panel py-2 px-3 mb-1">
           @if (!isMatrix(p)) {
           <!-- Phase 0: No deck -->
@@ -465,6 +467,14 @@
         Combat Turn {{ combatManager.combatTurn }}
         }
       </div>
+      @if (hasAnyMatrixParticipants) {
+      <app-matrix-run-panel
+        [activeDeckers]="activeDeckers"
+        (jackInRequested)="onMatrixPanelJackIn($event.decker, $event.mode)"
+        (jackOutRequested)="onMatrixPanelJackOut($event)">
+      </app-matrix-run-panel>
+      }
+
       <div class="card mt-3">
         <div class="card-header">Action Log</div>
         <ul class="list-group list-group-flush gm-log-list" #gmLogListContainer>

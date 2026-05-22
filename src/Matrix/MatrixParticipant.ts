@@ -63,6 +63,12 @@ export class MatrixParticipant extends Participant {
   get marksPlaced(): Map<string, number> { return this._marksPlaced; }
   set marksPlaced(val: Map<string, number>) { this.Set("marksPlaced", val); }
 
+  // True if the decker hit OS 40 inside a host (host convergence path).
+  // Jacking out while this is true triggers an immediate demiGOD convergence.
+  private _hostConverged: boolean;
+  get hostConverged(): boolean { return this._hostConverged; }
+  set hostConverged(val: boolean) { this.Set("hostConverged", val); }
+
   /**
    * Computed Overwatch alert level used by components for CSS styling.
    *  - 'none'        : OS  < 20
@@ -87,6 +93,7 @@ export class MatrixParticipant extends Participant {
     this._jackedIn = false;
     this._blocksPhysicalActions = false;
     this._marksPlaced = new Map<string, number>();
+    this._hostConverged = false;
   }
 
   /**
@@ -150,6 +157,7 @@ export class MatrixParticipant extends Participant {
     clone._jackedIn = this._jackedIn;
     clone._blocksPhysicalActions = this._blocksPhysicalActions;
     clone._marksPlaced = new Map(this._marksPlaced);
+    clone._hostConverged = this._hostConverged;
 
     return clone;
   }

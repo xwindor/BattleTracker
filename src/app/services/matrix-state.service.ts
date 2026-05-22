@@ -205,6 +205,27 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
+  setNoise(n: number): void {
+    const previous = this.state.noise;
+    const next = Math.max(0, Math.round(n));
+    if (next === previous) return;
+    UndoHandler.DoAction(
+      () => { this.state.noise = next; },
+      () => { this.state.noise = previous; }
+    );
+    this.stateChange$.next();
+  }
+
+  setActiveGrid(grid: "public" | "corporate" | "prime"): void {
+    const previous = this.state.activeGrid;
+    if (grid === previous) return;
+    UndoHandler.DoAction(
+      () => { this.state.activeGrid = grid; },
+      () => { this.state.activeGrid = previous; }
+    );
+    this.stateChange$.next();
+  }
+
   private generateId(): string {
     return `h-${Math.random().toString(36).slice(2, 10)}`;
   }

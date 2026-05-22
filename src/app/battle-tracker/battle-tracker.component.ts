@@ -20,6 +20,7 @@ import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, ICParticipant, ICType, MatrixHost } from "Matrix";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { ICSpawnerComponent } from "app/matrix/ic-spawner/ic-spawner.component";
+import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
@@ -46,7 +47,8 @@ interface LocalLogEntry {
     ConditionMonitorComponent,
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
-    ICSpawnerComponent
+    ICSpawnerComponent,
+    MatrixRunPanelComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -225,6 +227,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return this.combatManager.participants.items.some(p => p instanceof MatrixParticipant);
   }
 
+  /** All non-IC MatrixParticipants currently in the tracker. */
+  get activeDeckers(): MatrixParticipant[] {
+    return this.combatManager.participants.items.filter(
+      p => p instanceof MatrixParticipant && !(p instanceof ICParticipant)
+    ) as MatrixParticipant[];
+  }
+
   setActiveHostFromBanner(): void {
     if (!this.activeHostName.trim()) return;
     UndoHandler.StartActions();
@@ -288,6 +297,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return p as ICParticipant;
   }
 
+  isICBricked(p: IParticipant): boolean {
+    return this.isIC(p) && p.physicalDamage >= p.physicalHealth;
+  }
+
   onICMatrixDamageChanged(): void {
     this.syncSharedState();
   }
@@ -336,6 +349,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           const deckerId = this.getParticipantId(event.decker);
           UndoHandler.StartActions();
           this.matrixState.addMarkToHost(host, deckerId, 3);
+          event.decker.hostConverged = true;
         } else {
           this.convergenceIsHostContext = false;
           this.convergenceHostName = "";
@@ -731,7 +745,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const total = target.getCurrentInitiative();
       const intuition = this.getParticipantIntuition(target);
       let baseLabel: string;
-      if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+      if (this.isIC(target)) {
+        baseLabel = `Rating×2(${this.asIC(target).hostRating * 2})`;
+      } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
         baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
       } else {
         baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
@@ -1108,7 +1124,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       edged: p.edge,
       selected: p === this.selectedActor,
       "is-ic": this.isIC(p),
-      "is-ic-bricked": this.isIC(p) && this.asIC(p).isBricked
+      "is-ic-bricked": this.isICBricked(p)
     };
 
     return styles;
@@ -1769,10 +1785,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
     const total = p.getCurrentInitiative();
     const intuition = this.getParticipantIntuition(p);
-    const baseLabel = this.isMatrix(p) && this.asMatrix(p).jackedIn
-      && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
-      ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
-      : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
+    const baseLabel = this.isIC(p)
+      ? `Rating×2(${this.asIC(p).hostRating * 2})`
+      : this.isMatrix(p) && this.asMatrix(p).jackedIn
+        && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
+        ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
+        : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
     const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
     LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
     this.appendSharedLog(p.name || 'Participant', logText);
@@ -1937,14 +1955,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const mp = p as MatrixParticipant;
     const oldDices = mp.dices;
     const wasRolled = mp.diceIni > 0 && this.combatManager.started;
-    // Jack Out: clear VR mode, restore physical initiative.
+    // Jack Out: clear VR mode, restore physical initiative, reset OS.
     mp.vrMode = VRMode.None;
     mp.jackedIn = false;
     mp.blocksPhysicalActions = false;
+    mp.hostConverged = false;
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.getParticipantIntuition(mp);
     mp.baseIni = reaction + intuition;
     mp.dices = 1;
+    this.osTracking.resetOS(mp);
     this.pendingVrModes.set(p, VRMode.AR);
     if (wasRolled) {
       // SR5E: mid-combat jack out — base stat delta automatic via baseIni;
@@ -1959,6 +1979,26 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();
+  }
+
+  /** Called from MatrixRunPanelComponent when the GM confirms a jack-in or mode switch. */
+  onMatrixPanelJackIn(decker: MatrixParticipant, mode: VRMode): void {
+    this.pendingVrModes.set(decker, mode);
+    this.gmJackIn(decker);
+  }
+
+  /** Called from MatrixRunPanelComponent when the GM requests a jack-out. */
+  async onMatrixPanelJackOut(decker: MatrixParticipant): Promise<void> {
+    if (decker.hostConverged) {
+      const confirmed = await this.confirmationDialog.confirm(
+        `${decker.name} has an active host convergence. Jacking out now will trigger an immediate demiGOD Convergence attack. Proceed?`,
+        "demiGOD Convergence Warning",
+        "Jack Out Anyway",
+        "Cancel"
+      );
+      if (!confirmed) return;
+    }
+    this.gmJackOut(decker);
   }
 
   onDeckStatChanged(p: IParticipant, field: 'attack' | 'sleaze' | 'firewall' | 'deviceRating', value: number): void {

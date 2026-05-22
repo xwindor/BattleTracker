@@ -1,0 +1,96 @@
+<div class="jack-in-panel">
+  <div class="d-flex align-items-center gap-3 flex-wrap">
+    <!-- Decker selector -->
+    <div class="d-flex align-items-center gap-2">
+      <label class="jack-in-label">Decker:</label>
+      @if (activeDeckers.length === 0) {
+      <span class="text-muted small">No deckers in tracker.</span>
+      } @else {
+      <select class="form-select form-select-sm jack-in-decker-select"
+        [ngModel]="selectedDecker"
+        (ngModelChange)="selectDecker($event)">
+        <option [ngValue]="null">— select —</option>
+        @for (d of activeDeckers; track d) {
+        <option [ngValue]="d">{{ d.name || "Unnamed Decker" }}</option>
+        }
+      </select>
+      }
+    </div>
+
+    @if (selectedDecker) {
+    <!-- Mode selector (always visible) -->
+    <div class="d-flex align-items-center gap-1">
+      <label class="jack-in-label">Mode:</label>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn"
+          [class.btn-secondary]="selectedMode === VRMode.AR"
+          [class.btn-outline-secondary]="selectedMode !== VRMode.AR"
+          (click)="selectedMode = VRMode.AR"
+          title="AR — REA+INT+1d6, no catatonia">
+          AR
+        </button>
+        <button type="button" class="btn"
+          [class.btn-info]="selectedMode === VRMode.ColdSim"
+          [class.btn-outline-info]="selectedMode !== VRMode.ColdSim"
+          (click)="selectedMode = VRMode.ColdSim"
+          title="Cold-Sim VR — DP+INT+3d6, physically catatonic">
+          Cold Sim
+        </button>
+        <button type="button" class="btn"
+          [class.btn-danger]="selectedMode === VRMode.HotSim"
+          [class.btn-outline-danger]="selectedMode !== VRMode.HotSim"
+          (click)="selectedMode = VRMode.HotSim"
+          title="Hot-Sim VR — DP+INT+4d6, biofeedback risk">
+          Hot Sim
+        </button>
+      </div>
+    </div>
+
+    <!-- Status + actions -->
+    @if (!isJackedIn) {
+    <button type="button" class="btn btn-sm btn-primary" (click)="onJackIn()">
+      <i class="fas fa-plug me-1"></i>Jack In
+    </button>
+    } @else {
+    <span class="jack-in-status">
+      Jacked in: <strong>{{ currentModeLabel }}</strong>
+    </span>
+    @if (canSwitchMode) {
+    <button type="button" class="btn btn-sm btn-outline-primary" (click)="onJackIn()">
+      Switch to {{ selectedMode === VRMode.AR ? 'AR' : selectedMode === VRMode.ColdSim ? 'Cold Sim' : 'Hot Sim' }}
+    </button>
+    }
+    @if (hasHostConvergence) {
+    <span class="jack-out-warning">
+      <i class="fas fa-exclamation-triangle me-1"></i>HOST CONVERGENCE ACTIVE — jack out triggers demiGOD!
+    </span>
+    }
+    <button type="button" class="btn btn-sm btn-warning" (click)="onJackOut()">
+      <i class="fas fa-eject me-1"></i>Jack Out
+    </button>
+    }
+    }
+  </div>
+
+  @if (selectedDecker?.jackedIn) {
+  <div class="jack-in-stats mt-2">
+    <span class="jack-in-stat-chip">
+      DP {{ selectedDecker!.dataProcessing }}
+    </span>
+    <span class="jack-in-stat-chip">
+      OS {{ selectedDecker!.overwatch }}
+      @if (selectedDecker!.overwatchAlert === 'ic-alert') {
+      <span class="os-alert-badge os-alert-ic">IC ALERT</span>
+      } @else if (selectedDecker!.overwatchAlert === 'convergence') {
+      <span class="os-alert-badge os-alert-conv">CONVERGENCE</span>
+      }
+    </span>
+    <span class="jack-in-stat-chip">
+      Base INI {{ selectedDecker!.baseIni }}
+    </span>
+    <span class="jack-in-stat-chip">
+      {{ selectedDecker!.dices }}d6
+    </span>
+  </div>
+  }
+</div>

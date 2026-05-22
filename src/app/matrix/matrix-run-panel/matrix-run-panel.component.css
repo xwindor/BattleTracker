@@ -1,0 +1,231 @@
+/* ── Panel shell ─────────────────────────────────────────────────────────── */
+
+.matrix-run-panel {
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 4px;
+  background: var(--matrix-bg, #040d04);
+  color: var(--matrix-text, #00ff9f);
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--matrix-font, "Courier New", monospace);
+  transition: border-color 0.3s;
+}
+
+.matrix-run-panel.matrix-panel-ic-alert {
+  border-color: #856404;
+  box-shadow: 0 0 6px rgba(133, 100, 4, 0.4);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.matrix-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  background: var(--matrix-bg-mid, #0a1a0a);
+  border-radius: 3px 3px 0 0;
+  user-select: none;
+}
+
+.matrix-panel-header:hover {
+  background: var(--matrix-bg-hover, #0d200d);
+}
+
+.matrix-panel-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--matrix-text, #00ff9f);
+  flex: 0 0 auto;
+}
+
+.matrix-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+}
+
+.collapse-caret {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+/* ── Noise control ───────────────────────────────────────────────────────── */
+
+.noise-control {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.noise-label {
+  font-size: 0.75rem;
+  color: var(--matrix-text-dim, #7ab87a);
+  white-space: nowrap;
+}
+
+.noise-btn {
+  padding: 0 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: transparent;
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  color: var(--matrix-text-dim, #7ab87a);
+  border-radius: 3px;
+  min-width: 1.4rem;
+}
+
+.noise-btn:hover:not(:disabled) {
+  background: var(--matrix-bg-mid, #0a1a0a);
+  color: var(--matrix-text, #00ff9f);
+}
+
+.noise-value {
+  font-size: 0.8rem;
+  min-width: 1.4rem;
+  text-align: center;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.noise-value.noise-nonzero {
+  color: #ffc107;
+  font-weight: 700;
+}
+
+/* ── Grid select ─────────────────────────────────────────────────────────── */
+
+.grid-select {
+  font-size: 0.75rem;
+  padding: 0.15rem 1.6rem 0.15rem 0.4rem;
+  width: auto;
+  background-color: var(--matrix-bg-mid, #0a1a0a);
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: var(--matrix-border, #1a4a1a);
+}
+
+/* ── Panel body ──────────────────────────────────────────────────────────── */
+
+.matrix-panel-body {
+  padding: 0.5rem 0.75rem 0.65rem;
+}
+
+/* ── Stepper ─────────────────────────────────────────────────────────────── */
+
+.matrix-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--matrix-border, #1a4a1a);
+  scrollbar-width: thin;
+  scrollbar-color: var(--matrix-border, #1a4a1a) transparent;
+}
+
+.stepper-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.3rem 0.55rem;
+  background: transparent;
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  color: var(--matrix-text-dim, #7ab87a);
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 4.8rem;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.stepper-step:hover {
+  background: var(--matrix-bg-mid, #0a1a0a);
+  color: var(--matrix-text, #00ff9f);
+  border-color: var(--matrix-text-dim, #4a8a4a);
+}
+
+.stepper-step.stepper-active {
+  background: var(--matrix-bg-mid, #0a1a0a);
+  border-color: var(--matrix-text, #00ff9f);
+  color: var(--matrix-text, #00ff9f);
+  box-shadow: 0 0 6px rgba(0, 255, 159, 0.25);
+}
+
+.stepper-step.stepper-done {
+  border-color: #4a8a4a;
+  color: #4a8a4a;
+}
+
+.stepper-step.stepper-done:hover {
+  color: var(--matrix-text, #00ff9f);
+}
+
+.stepper-num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.stepper-check {
+  font-size: 0.65rem;
+  color: #4a8a4a;
+  line-height: 1;
+}
+
+.stepper-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+}
+
+.stepper-connector {
+  flex: 1 1 8px;
+  height: 1px;
+  background: var(--matrix-border, #1a4a1a);
+  min-width: 4px;
+  max-width: 20px;
+  flex-shrink: 1;
+}
+
+.stepper-connector.stepper-connector-done {
+  background: #4a8a4a;
+}
+
+/* ── Step content ────────────────────────────────────────────────────────── */
+
+.matrix-step-content {
+  padding-top: 0.25rem;
+}
+
+.matrix-stub-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  color: var(--matrix-text-dim, #7ab87a);
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.stub-icon {
+  color: var(--matrix-text-dim, #4a8a4a);
+}
+
+.stub-text {
+  font-weight: 600;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.stub-coming {
+  font-style: italic;
+  color: #4a6a4a;
+  font-size: 0.75rem;
+}

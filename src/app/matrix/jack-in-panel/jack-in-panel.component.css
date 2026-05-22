@@ -1,0 +1,69 @@
+.jack-in-panel {
+  padding: 0.5rem 0;
+}
+
+.jack-in-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--matrix-text, #00ff9f);
+  white-space: nowrap;
+  margin-bottom: 0;
+}
+
+.jack-in-decker-select {
+  min-width: 160px;
+  background-color: var(--matrix-bg-mid, #0a1a0a);
+  color: var(--matrix-text, #00ff9f);
+  border-color: var(--matrix-border, #1a4a1a);
+}
+
+.jack-in-status {
+  font-size: 0.8rem;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.jack-in-stats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.jack-in-stat-chip {
+  font-size: 0.75rem;
+  background: var(--matrix-bg-mid, #0d1f0d);
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  color: var(--matrix-text, #00ff9f);
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+}
+
+.jack-out-warning {
+  font-size: 0.75rem;
+  color: #ff6b35;
+  font-weight: 600;
+  animation: pulse-warning 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-warning {
+  from { opacity: 0.7; }
+  to   { opacity: 1; }
+}
+
+.os-alert-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}
+
+.os-alert-ic {
+  background: #856404;
+  color: #fff3cd;
+}
+
+.os-alert-conv {
+  background: #842029;
+  color: #f8d7da;
+}
