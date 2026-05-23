@@ -76,56 +76,7 @@
         <div class="pane-header">
           <i class="fas fa-sitemap me-1"></i>Hierarchy
         </div>
-
-        <!-- Active host -->
-        <div class="hier-section">
-          <div class="hier-section-label">
-            <i class="fas fa-server me-1"></i>Active Host
-          </div>
-          @if (!activeHost) {
-          <div class="hier-empty">No host active. Use the host banner above to set one.</div>
-          } @else {
-          <div class="hier-host-row">
-            <span class="hier-host-name">{{ activeHost.name }}</span>
-            <span class="hier-host-meta">Rating {{ activeHost.rating }}</span>
-            <span class="hier-host-meta">
-              IC {{ activeHost.icActive.length }}/{{ activeHost.rating }}
-            </span>
-          </div>
-          <!-- IC list -->
-          @if (activeHost.icActive.length > 0) {
-          <div class="hier-ic-list">
-            @for (ic of activeHost.icActive; track ic) {
-            <div class="hier-ic-row" [class.hier-ic-bricked]="ic.physicalDamage >= ic.physicalHealth">
-              <i class="fas fa-shield-alt me-1"></i>
-              <span>{{ ic.icType }} IC</span>
-              <span class="hier-ic-cm">{{ ic.physicalDamage }}/{{ ic.physicalHealth }}</span>
-              @if (ic.physicalDamage >= ic.physicalHealth) {
-              <span class="hier-ic-bricked-label">BRICKED</span>
-              }
-            </div>
-            }
-          </div>
-          }
-          }
-        </div>
-
-        <!-- Targets (stub) -->
-        <div class="hier-section">
-          <div class="hier-section-label">
-            <i class="fas fa-crosshairs me-1"></i>Targets
-          </div>
-          <div class="hier-stub">Target management — Step 5</div>
-        </div>
-
-        <!-- Marks (stub) -->
-        <div class="hier-section">
-          <div class="hier-section-label">
-            <i class="fas fa-tag me-1"></i>Marks
-          </div>
-          <div class="hier-stub">Mark tracking — Step 6</div>
-        </div>
-
+        <app-hierarchy-editor [activeDeckers]="activeDeckers"></app-hierarchy-editor>
       </div>
 
       <!-- Right: node graph preview stub -->

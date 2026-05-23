@@ -4,6 +4,8 @@ import { UndoHandler } from "Common";
 import {
   MatrixRunState,
   MatrixHost,
+  MatrixTarget,
+  MatrixTargetSpotted,
   MatrixParticipant,
   ICParticipant,
   VRMode
@@ -226,7 +228,106 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
+  /** Adds a MatrixTarget to a host's target list or to public space (host = null). */
+  addTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    UndoHandler.DoAction(
+      () => {
+        if (host) {
+          host.targets.push(target);
+        } else {
+          this.state.publicTargets.push(target);
+        }
+      },
+      () => {
+        const list = host ? host.targets : this.state.publicTargets;
+        const idx = list.indexOf(target);
+        if (idx >= 0) list.splice(idx, 1);
+      }
+    );
+    this.stateChange$.next();
+  }
+
+  /** Removes a MatrixTarget from a host or public space. */
+  removeTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    const list = host ? host.targets : this.state.publicTargets;
+    const idx = list.indexOf(target);
+    if (idx < 0) return;
+    UndoHandler.DoAction(
+      () => {
+        const i = list.indexOf(target);
+        if (i >= 0) list.splice(i, 1);
+      },
+      () => { list.splice(idx, 0, target); }
+    );
+    this.stateChange$.next();
+  }
+
+  /** Updates the spotted state on a MatrixTarget. */
+  setTargetSpotted(target: MatrixTarget, spotted: MatrixTargetSpotted): void {
+    const prev = target.spotted;
+    if (prev === spotted) return;
+    UndoHandler.DoAction(
+      () => { target.spotted = spotted; },
+      () => { target.spotted = prev; }
+    );
+    this.stateChange$.next();
+  }
+
+  /** Applies a partial field update to a MatrixTarget (name, type, rating, etc.). */
+  updateTarget(target: MatrixTarget, fields: Partial<MatrixTarget>): void {
+    const prev: Partial<MatrixTarget> = {};
+    for (const k of Object.keys(fields) as Array<keyof MatrixTarget>) {
+      (prev as Record<string, unknown>)[k] = target[k];
+    }
+    UndoHandler.DoAction(
+      () => { Object.assign(target, fields); },
+      () => { Object.assign(target, prev); }
+    );
+    this.stateChange$.next();
+  }
+
+  /**
+   * Updates editable host fields (name, rating, ASDF, matrixHealth).
+   * Pass only the keys you want to change.
+   */
+  updateHost(
+    host: MatrixHost,
+    fields: Partial<Pick<MatrixHost, "name" | "rating" | "attack" | "sleaze" | "dataProcessing" | "firewall" | "matrixHealth">>
+  ): void {
+    const prev: typeof fields = {};
+    for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
+      (prev as Record<string, unknown>)[k] = host[k];
+    }
+    UndoHandler.DoAction(
+      () => { Object.assign(host, fields); },
+      () => { Object.assign(host, prev); }
+    );
+    this.stateChange$.next();
+  }
+
+  /** Removes a host from the hosts list. Clears currentHostId if it matched. */
+  removeHost(host: MatrixHost): void {
+    const idx = this.state.hosts.indexOf(host);
+    if (idx < 0) return;
+    const wasActive = this.state.currentHostId === host.id;
+    UndoHandler.DoAction(
+      () => {
+        this.state.hosts.splice(this.state.hosts.indexOf(host), 1);
+        if (wasActive) this.state.currentHostId = null;
+      },
+      () => {
+        this.state.hosts.splice(idx, 0, host);
+        if (wasActive) this.state.currentHostId = host.id;
+      }
+    );
+    this.stateChange$.next();
+  }
+
   private generateId(): string {
     return `h-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  generateTargetId(): string {
+    return `t-${Math.random().toString(36).slice(2, 10)}`;
   }
 }

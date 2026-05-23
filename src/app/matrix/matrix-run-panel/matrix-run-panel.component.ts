@@ -5,6 +5,7 @@ import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
 import { MatrixParticipant, MatrixStep, MatrixHost, VRMode } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { DeckerCardComponent } from "app/matrix/decker-card/decker-card.component";
+import { HierarchyEditorComponent } from "app/matrix/hierarchy-editor/hierarchy-editor.component";
 
 interface StepDef {
   key: MatrixStep;
@@ -17,7 +18,7 @@ interface StepDef {
   selector: "app-matrix-run-panel",
   templateUrl: "./matrix-run-panel.component.html",
   styleUrls: ["./matrix-run-panel.component.css"],
-  imports: [CommonModule, FormsModule, NgbTooltipModule, DeckerCardComponent]
+  imports: [CommonModule, FormsModule, NgbTooltipModule, DeckerCardComponent, HierarchyEditorComponent]
 })
 export class MatrixRunPanelComponent {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];

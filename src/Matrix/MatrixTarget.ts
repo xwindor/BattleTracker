@@ -7,7 +7,7 @@
  * works for Matrix actions.
  */
 export type MatrixTargetType = "device" | "file" | "persona" | "host" | "ic";
-export type MatrixTargetSpotted = "hidden" | "running-silent" | "spotted";
+export type MatrixTargetSpotted = "invisible" | "ghost" | "revealed";
 export type MatrixTargetContext = "public" | "host";
 
 export class MatrixTarget {
@@ -27,8 +27,17 @@ export class MatrixTarget {
   dataProcessing: number;
   firewall: number;
 
-  /** General rating / Device Rating */
+  /** General rating (used for CM calc on non-device targets). */
   rating: number;
+
+  /** Device Rating (device type only, 1–12). Used for CM and direct-connection tests. */
+  deviceRating: number;
+
+  /** When true: mark via direct connection routes to the host, not this device. */
+  directConnection: boolean;
+
+  /** Running silent: target imposes −2 to all its Matrix actions; starts invisible. */
+  runningSilent: boolean;
 
   /** Current Matrix CM damage */
   matrixDamage: number;
@@ -36,8 +45,8 @@ export class MatrixTarget {
   /** Max Matrix CM boxes */
   matrixHealth: number;
 
+  /** Three-state visibility. 'invisible' = not shown to players; 'ghost' = pulsing unknown icon; 'revealed' = full display. */
   spotted: MatrixTargetSpotted;
-  revealedToPlayers: boolean;
 
   /** Marks placed by each decker, keyed by deckerId. Max 3 per decker. */
   marks: Record<string, number>;
@@ -59,10 +68,12 @@ export class MatrixTarget {
     this.dataProcessing = init?.dataProcessing ?? 0;
     this.firewall = init?.firewall ?? 0;
     this.rating = init?.rating ?? 1;
+    this.deviceRating = init?.deviceRating ?? 4;
+    this.directConnection = init?.directConnection ?? false;
+    this.runningSilent = init?.runningSilent ?? false;
     this.matrixDamage = init?.matrixDamage ?? 0;
     this.matrixHealth = init?.matrixHealth ?? 8;
-    this.spotted = init?.spotted ?? "hidden";
-    this.revealedToPlayers = init?.revealedToPlayers ?? false;
+    this.spotted = init?.spotted ?? "invisible";
     this.marks = init?.marks ?? {};
     this.linkedHostId = init?.linkedHostId;
     this.linkedParticipantId = init?.linkedParticipantId;
