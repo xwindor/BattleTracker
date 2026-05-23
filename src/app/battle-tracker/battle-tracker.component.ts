@@ -787,6 +787,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       let baseLabel: string;
       if (this.isIC(target)) {
         baseLabel = `Rating×2(${this.asIC(target).hostRating * 2})`;
+      } else if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
+        baseLabel = `INT×2(${intuition * 2})`;
       } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
         baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
       } else {
@@ -1838,10 +1840,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const intuition = this.getParticipantIntuition(p);
     const baseLabel = this.isIC(p)
       ? `Rating×2(${this.asIC(p).hostRating * 2})`
-      : this.isMatrix(p) && this.asMatrix(p).jackedIn
-        && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
-        ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
-        : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
+      : this.isAstral(p) && this.asAstral(p).astralProjecting
+        ? `INT×2(${intuition * 2})`
+        : this.isMatrix(p) && this.asMatrix(p).jackedIn
+          && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
+          ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
+          : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
     const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
     LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
     this.appendSharedLog(p.name || 'Participant', logText);

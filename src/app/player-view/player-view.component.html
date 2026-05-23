@@ -237,8 +237,8 @@
         @if (primaryCharacter && deckConfigExpanded) {
         <button type="button" class="btn btn-sm btn-outline-danger"
           (click)="removeDeckConfig()"
-          [title]="primaryCharacter.isMatrix ? 'Remove cyberdeck' : 'Cancel'">
-          {{ primaryCharacter.isMatrix ? 'Remove Deck' : 'Cancel' }}
+          [title]="primaryCharacter.isMatrix ? 'Remove cyberdeck' : 'Cancel deck panel'">
+          {{ primaryCharacter.isMatrix ? 'Remove Deck' : 'Cancel Deck' }}
         </button>
         }
         @if (primaryCharacter && !astralConfigExpanded) {
@@ -253,8 +253,8 @@
         @if (primaryCharacter && astralConfigExpanded) {
         <button type="button" class="btn btn-sm btn-outline-danger"
           (click)="primaryCharacter.isAstral ? removeAstral() : (astralConfigExpanded = false)"
-          [title]="primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel'">
-          {{ primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel' }}
+          [title]="primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel awakened panel'">
+          {{ primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel Awakened' }}
         </button>
         }
       </div>

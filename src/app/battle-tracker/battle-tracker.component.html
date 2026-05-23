@@ -157,14 +157,14 @@
         @for(p of combatManager.participants.items; track $index; let i = $index; let last = $last) {
         <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
           (click)="selectActor(p)" [class]="getParticipantStyles(p)" cdkDrag>
-          <div class="col-4 col-xl-2">
+          <div class="col-4 col-xl-2 d-flex align-items-center">
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
           </div>
-          <div class="col-2 col-xl text-center">
+          <div class="col-2 col-xl text-center d-flex align-items-center justify-content-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
           </div>
-          <div class="col-6 col-xl-3 text-center gm-stats-col">
+          <div class="col-6 col-xl-3 text-center gm-stats-col d-flex align-items-center">
             <div class="input-group input-group-sm gm-stats-roll-group">
               @if (!isIC(p)) {
               <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
@@ -274,48 +274,54 @@
             }
           </div>
           <div class="col-5 col-xl-3 text-right">
-            <div class="btn-group" role="group">
+            <div class="d-flex flex-column gap-1 align-items-end">
               @if (!isIC(p)) {
-              <button type="button" class="btn"
-                [class.btn-secondary]="isDeckPanelExpanded(p)"
-                [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
-                (click)="toggleDeckPanel(p)"
-                title="Cyberdeck configuration">
-                Deck
-              </button>
-              <button type="button" class="btn"
-                [class.btn-warning]="isAstralPanelExpanded(p)"
-                [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
-                [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
-                (click)="toggleAstralPanel(p)"
-                title="Awakened — astral projection">
-                Awakened
-              </button>
-              <button type="button"
-                class="btn"
-                [class.btn-outline-info]="!isParticipantClaimable(p)"
-                [class.btn-info]="isParticipantClaimable(p)"
-                [attr.title]="isParticipantClaimable(p) ? 'Character can be claimed by players' : 'Character cannot be claimed by players'"
-                (click)="btnToggleClaimable_Click(p)">
-                {{ isParticipantClaimable(p) ? "Claimable" : "Private" }}
-              </button>
-              <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
-                <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
-              </button>
+              <div class="d-flex gap-1">
+                <button type="button" class="btn"
+                  [class.btn-secondary]="isDeckPanelExpanded(p)"
+                  [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
+                  (click)="toggleDeckPanel(p)"
+                  title="Cyberdeck configuration">
+                  Deck
+                </button>
+                <button type="button" class="btn"
+                  [class.btn-warning]="isAstralPanelExpanded(p)"
+                  [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
+                  [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
+                  (click)="toggleAstralPanel(p)"
+                  title="Awakened — astral projection">
+                  Awakened
+                </button>
+                <button type="button"
+                  class="btn"
+                  [class.btn-outline-info]="!isParticipantClaimable(p)"
+                  [class.btn-info]="isParticipantClaimable(p)"
+                  [attr.title]="isParticipantClaimable(p) ? 'Character can be claimed by players' : 'Character cannot be claimed by players'"
+                  (click)="btnToggleClaimable_Click(p)">
+                  {{ isParticipantClaimable(p) ? "Claimable" : "Private" }}
+                </button>
+              </div>
               }
-              @if(p.ooc){
-              <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
-                <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
-              </button>
-              }
-              @else {
-              <button type="button" class="btn btn-warning" (click)="btnLeaveCombat_Click(p)">
-                <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
-              </button>
-              }
-              <button type="button" class="btn btn-danger" (click)="btnDelete_Click(p)">
-                <i class="fa fa-trash fa-lg"></i>
-              </button>
+              <div class="d-flex gap-1">
+                @if (!isIC(p)) {
+                <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
+                  <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
+                </button>
+                }
+                @if(p.ooc){
+                <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
+                  <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
+                </button>
+                }
+                @else {
+                <button type="button" class="btn btn-warning" (click)="btnLeaveCombat_Click(p)">
+                  <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
+                </button>
+                }
+                <button type="button" class="btn btn-danger" (click)="btnDelete_Click(p)">
+                  <i class="fa fa-trash fa-lg"></i>
+                </button>
+              </div>
             </div>
           </div>
           @if (p.actionHistory.length > 0) {
