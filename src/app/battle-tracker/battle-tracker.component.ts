@@ -657,7 +657,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const total = target.getCurrentInitiative();
       const intuition = this.getParticipantIntuition(target);
       let baseLabel: string;
-      if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+      if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
+        baseLabel = `INT×2(${intuition * 2})`;
+      } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
         baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
       } else {
         baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
@@ -1700,10 +1702,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
     const total = p.getCurrentInitiative();
     const intuition = this.getParticipantIntuition(p);
-    const baseLabel = this.isMatrix(p) && this.asMatrix(p).jackedIn
-      && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
-      ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
-      : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
+    const baseLabel = this.isAstral(p) && this.asAstral(p).astralProjecting
+      ? `INT×2(${intuition * 2})`
+      : this.isMatrix(p) && this.asMatrix(p).jackedIn
+          && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
+          ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
+          : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
     const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
     LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
     this.appendSharedLog(p.name || 'Participant', logText);
