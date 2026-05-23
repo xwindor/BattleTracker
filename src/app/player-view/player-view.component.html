@@ -214,20 +214,38 @@
   <div class="card mt-3">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>Your Character</span>
-      @if (primaryCharacter && !deckConfigExpanded) {
-      <button type="button" class="btn btn-sm btn-outline-secondary"
-        (click)="openDeckPanel()"
-        title="Enable Cyberdeck">
-        Cyberdeck
-      </button>
-      }
-      @if (primaryCharacter && deckConfigExpanded) {
-      <button type="button" class="btn btn-sm btn-outline-danger"
-        (click)="removeDeckConfig()"
-        [title]="primaryCharacter.isMatrix ? 'Remove cyberdeck' : 'Cancel'">
-        {{ primaryCharacter.isMatrix ? 'Remove Deck' : 'Cancel' }}
-      </button>
-      }
+      <div class="d-flex gap-2">
+        @if (primaryCharacter && !deckConfigExpanded) {
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+          (click)="openDeckPanel()"
+          title="Enable Cyberdeck">
+          Cyberdeck
+        </button>
+        }
+        @if (primaryCharacter && deckConfigExpanded) {
+        <button type="button" class="btn btn-sm btn-outline-danger"
+          (click)="removeDeckConfig()"
+          [title]="primaryCharacter.isMatrix ? 'Remove cyberdeck' : 'Cancel'">
+          {{ primaryCharacter.isMatrix ? 'Remove Deck' : 'Cancel' }}
+        </button>
+        }
+        @if (primaryCharacter && !astralConfigExpanded) {
+        <button type="button" class="btn btn-sm"
+          [class.btn-outline-warning]="primaryCharacter.isAstral"
+          [class.btn-outline-secondary]="!primaryCharacter.isAstral"
+          (click)="astralConfigExpanded = true"
+          title="Awakened — astral projection">
+          Awakened
+        </button>
+        }
+        @if (primaryCharacter && astralConfigExpanded) {
+        <button type="button" class="btn btn-sm btn-outline-danger"
+          (click)="primaryCharacter.isAstral ? removeAstral() : (astralConfigExpanded = false)"
+          [title]="primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel'">
+          {{ primaryCharacter.isAstral ? 'Remove Awakened' : 'Cancel' }}
+        </button>
+        }
+      </div>
     </div>
     <div class="card-body">
       @if (primaryCharacter) {
@@ -243,6 +261,32 @@
         }
         }
       </div>
+      @if (astralConfigExpanded) {
+      <div class="mt-3 astral-config-panel">
+        @if (!primaryCharacter.isAstral) {
+        <div class="d-flex align-items-center gap-2">
+          <span class="small text-muted">Not yet configured as Awakened.</span>
+          <button type="button" class="btn btn-sm btn-outline-warning" (click)="enableAstral()">
+            Enable Awakened
+          </button>
+        </div>
+        } @else {
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <button type="button" class="btn btn-sm"
+            [class.btn-warning]="primaryCharacter.isAstralProjecting"
+            [class.btn-outline-warning]="!primaryCharacter.isAstralProjecting"
+            (click)="sendAstralProject(!primaryCharacter.isAstralProjecting)"
+            title="Toggle astral projection — changes initiative to INT×2 + 1d6">
+            {{ primaryCharacter.isAstralProjecting ? "Return to Body" : "Astral Project" }}
+          </button>
+          @if (primaryCharacter.isAstralProjecting) {
+          <span class="badge ms-1" style="background-color:#6f42c1">ASTRAL</span>
+          <span class="small" style="color:#a78bfa">PROJECTING — INT×2 initiative</span>
+          }
+        </div>
+        }
+      </div>
+      }
       @if (deckConfigExpanded) {
       <div class="mt-3 deck-config-panel">
 

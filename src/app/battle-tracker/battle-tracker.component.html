@@ -241,16 +241,17 @@
           </div>
           <div class="col-5 col-xl-3 text-right">
             <div class="btn-group" role="group">
-              <button type="button" class="btn btn-outline-secondary"
-                [class.active]="isDeckPanelExpanded(p)"
+              <button type="button" class="btn"
+                [class.btn-secondary]="isDeckPanelExpanded(p)"
+                [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
                 (click)="toggleDeckPanel(p)"
                 title="Cyberdeck configuration">
                 Deck
               </button>
               <button type="button" class="btn"
-                [class.btn-outline-warning]="!isAstral(p)"
-                [class.btn-warning]="isAstral(p)"
-                [class.active]="isAstralPanelExpanded(p)"
+                [class.btn-warning]="isAstralPanelExpanded(p)"
+                [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
+                [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
                 (click)="toggleAstralPanel(p)"
                 title="Awakened — astral projection">
                 Awakened
@@ -419,7 +420,7 @@
                 [class.btn-outline-warning]="!asAstral(p).astralProjecting"
                 (click)="toggleAstralProjecting(p)"
                 title="Toggle astral projection — changes initiative to INT×2 + 1d6">
-                {{ asAstral(p).astralProjecting ? "Astral Projecting" : "Physical" }}
+                {{ asAstral(p).astralProjecting ? "Return to Body" : "Astral Project" }}
               </button>
             </div>
             @if (asAstral(p).astralProjecting) {
