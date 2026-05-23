@@ -681,6 +681,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.sort();
       return;
     }
+    if (command.type === "configure_astral") {
+      const payload = command.payload || {};
+      const playerName = command.player || "";
+      if (!playerName) return;
+      const target = this.combatManager.participants.items.find(
+        p => this.participantOwners.get(p) === playerName
+      );
+      if (!target) return;
+      if (payload["isAstral"] === false) {
+        if (this.isAstral(target)) {
+          this.disableAstral(target);
+          LogHandler.log(this.currentBTTime, `${target.name} removed Awakened status`);
+        }
+        return;
+      }
+      if (payload["isAstral"] === true && !this.isAstral(target)) {
+        this.enableAstral(target);
+        LogHandler.log(this.currentBTTime, `${target.name} is now Awakened`);
+        return;
+      }
+      if (payload["project"] !== undefined && this.isAstral(target)) {
+        const wantProject = payload["project"] === true;
+        if (this.asAstral(target).astralProjecting !== wantProject) {
+          this.toggleAstralProjecting(target);
+        }
+      }
+      return;
+    }
     if (command.type === "claim_character") {
       const playerName = command.player || "";
       const participantId = String(command.payload?.["participantId"] || "");

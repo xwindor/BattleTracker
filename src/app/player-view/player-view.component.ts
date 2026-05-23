@@ -31,6 +31,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   stunHealth = 10;
   deckConfigExpanded = false;
   deckJackedIn = false;
+  astralConfigExpanded = false;
   dataProcessing = 6;
   attack = 0;
   sleaze = 0;
@@ -333,6 +334,32 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.deckConfigExpanded = false;
     this.deckJackedIn = false;
     this.info = "";
+  }
+
+  enableAstral() {
+    this.session.sendCommand({
+      type: "configure_astral",
+      player: this.playerToken,
+      payload: { isAstral: true }
+    });
+  }
+
+  removeAstral() {
+    this.session.sendCommand({
+      type: "configure_astral",
+      player: this.playerToken,
+      payload: { isAstral: false }
+    });
+    this.astralConfigExpanded = false;
+    this.info = "";
+  }
+
+  sendAstralProject(project: boolean) {
+    this.session.sendCommand({
+      type: "configure_astral",
+      player: this.playerToken,
+      payload: { project }
+    });
   }
 
   onDeckStatChange() {
@@ -942,6 +969,9 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         // Show Phase 2 if truly jacked in (VR modes), Phase 1 (Jack In prompt) otherwise.
         this.deckJackedIn = pc.jackedIn === true;
       }
+    }
+    if (pc?.isAstral && isFirstState) {
+      this.astralConfigExpanded = true;
     }
   }
 }
