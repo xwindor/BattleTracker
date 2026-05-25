@@ -323,6 +323,81 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
+  /**
+   * Places one mark from `deckerId` on `target` (max 3).
+   * If target is inside a host, also increments host.marks and propagates to
+   * all active IC in the host (SR5E p.247 host-wide mark propagation).
+   * Caller must call UndoHandler.StartActions() first.
+   */
+  addMark(target: MatrixTarget, deckerId: string): void {
+    const prev = target.marks[deckerId] ?? 0;
+    if (prev >= 3) return;
+    const next = prev + 1;
+    const host = target.linkedHostId
+      ? (this.state.hosts.find(h => h.id === target.linkedHostId) ?? null)
+      : null;
+    const prevHostMark = host ? (host.marks[deckerId] ?? 0) : 0;
+    const nextHostMark = host ? Math.min(3, prevHostMark + 1) : 0;
+    UndoHandler.DoAction(
+      () => {
+        target.marks[deckerId] = next;
+        if (host) {
+          host.marks[deckerId] = nextHostMark;
+          for (const ic of host.icActive) {
+            ic.marksPlaced.set(deckerId, nextHostMark);
+          }
+        }
+      },
+      () => {
+        if (prev === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = prev; }
+        if (host) {
+          if (prevHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = prevHostMark; }
+          for (const ic of host.icActive) {
+            ic.marksPlaced.set(deckerId, prevHostMark);
+          }
+        }
+      }
+    );
+    this.stateChange$.next();
+  }
+
+  /**
+   * Removes one mark from `deckerId` on `target`.
+   * Mirrors the decrement to host.marks and active IC in the host.
+   * Caller must call UndoHandler.StartActions() first.
+   */
+  removeMark(target: MatrixTarget, deckerId: string): void {
+    const prev = target.marks[deckerId] ?? 0;
+    if (prev <= 0) return;
+    const next = prev - 1;
+    const host = target.linkedHostId
+      ? (this.state.hosts.find(h => h.id === target.linkedHostId) ?? null)
+      : null;
+    const prevHostMark = host ? (host.marks[deckerId] ?? 0) : 0;
+    const nextHostMark = host ? Math.max(0, prevHostMark - 1) : 0;
+    UndoHandler.DoAction(
+      () => {
+        if (next === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = next; }
+        if (host) {
+          if (nextHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = nextHostMark; }
+          for (const ic of host.icActive) {
+            ic.marksPlaced.set(deckerId, nextHostMark);
+          }
+        }
+      },
+      () => {
+        target.marks[deckerId] = prev;
+        if (host) {
+          host.marks[deckerId] = prevHostMark;
+          for (const ic of host.icActive) {
+            ic.marksPlaced.set(deckerId, prevHostMark);
+          }
+        }
+      }
+    );
+    this.stateChange$.next();
+  }
+
   private generateId(): string {
     return `h-${Math.random().toString(36).slice(2, 10)}`;
   }

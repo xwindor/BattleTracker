@@ -1,0 +1,224 @@
+/* ── Wrapper ──────────────────────────────────────────────────────────────── */
+
+.tc-wrap {
+  font-family: var(--matrix-font, "Courier New", monospace);
+  font-size: 0.72rem;
+  color: var(--matrix-text-dim, #7ab87a);
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+
+.tc-wrap:hover .tc-info-row {
+  background: #0a1a0a;
+}
+
+.tc-wrap.tc-editing {
+  background: #0d200d;
+  border-top-color: #2a5a2a;
+  border-bottom-color: #2a5a2a;
+}
+
+/* ── Main info row ───────────────────────────────────────────────────────── */
+
+.tc-info-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.55rem;
+}
+
+.tc-type-icon {
+  font-size: 0.68rem;
+  color: #4a7a4a;
+  flex-shrink: 0;
+  width: 0.85rem;
+  text-align: center;
+}
+
+.tc-name {
+  flex: 1 1 auto;
+  color: var(--matrix-text-dim, #7ab87a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.tc-dr {
+  font-size: 0.6rem;
+  color: #3a5a3a;
+  flex-shrink: 0;
+}
+
+.tc-icon-sm {
+  font-size: 0.65rem;
+  color: #6ab87a;
+  flex-shrink: 0;
+}
+
+/* ── Spotted badge ───────────────────────────────────────────────────────── */
+
+.tc-spotted-btn {
+  display: inline-block;
+  font-size: 0.58rem;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  cursor: pointer;
+  border: 1px solid;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.tc-spotted-btn:hover { opacity: 0.8; }
+
+.spotted-invisible { background: #1a1a1a; color: #4a4a4a; border-color: #2a2a2a; }
+.spotted-ghost     { background: #1a1a2a; color: #8888aa; border-color: #3a3a5a; }
+.spotted-revealed  { background: #0a1f0a; color: var(--matrix-text, #00ff9f); border-color: #1a4a1a; }
+
+/* ── Action buttons ──────────────────────────────────────────────────────── */
+
+.tc-actions {
+  display: flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tc-icon-btn {
+  padding: 0.05rem 0.3rem;
+  font-size: 0.62rem;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.tc-icon-btn:hover {
+  background: #0d200d;
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #1a4a1a;
+}
+
+.tc-del-btn:hover {
+  color: #cc4444;
+  border-color: #441414;
+  background: #1a0a0a;
+}
+
+/* ── Marks row ───────────────────────────────────────────────────────────── */
+
+.tc-marks-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.08rem 0.55rem 0.15rem 1.8rem;
+  font-size: 0.62rem;
+  color: #4a7a4a;
+}
+
+.tc-mark-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a3a1a;
+  border-radius: 2px;
+  padding: 0.02rem 0.25rem;
+}
+
+.tc-decker-name {
+  color: #5a8a5a;
+  max-width: 5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-dots {
+  letter-spacing: 0.04em;
+  color: var(--matrix-text, #00ff9f);
+  font-size: 0.68rem;
+}
+
+.tc-mark-rm {
+  background: transparent;
+  border: none;
+  color: #5a4a4a;
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.tc-mark-rm:hover { color: #cc4444; }
+
+/* ── Add-mark controls ───────────────────────────────────────────────────── */
+
+.tc-add-mark-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.tc-add-mark-btn {
+  font-size: 0.6rem;
+  font-family: inherit;
+  padding: 0.05rem 0.3rem;
+  background: transparent;
+  border: 1px solid #1a3a1a;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.tc-add-mark-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #2a5a2a;
+  background: #080f08;
+}
+
+.tc-decker-select {
+  font-size: 0.62rem;
+  font-family: inherit;
+  padding: 0.05rem 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  max-width: 7rem;
+  appearance: auto;
+}
+
+.tc-confirm-btn,
+.tc-cancel-btn {
+  font-size: 0.62rem;
+  font-family: inherit;
+  padding: 0.03rem 0.25rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.tc-confirm-btn {
+  background: #0a2a0a;
+  border: 1px solid #2a7a2a;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.tc-confirm-btn:hover { background: #0d350d; }
+
+.tc-cancel-btn {
+  background: transparent;
+  border: 1px solid #2a3a2a;
+  color: #4a5a4a;
+}
+
+.tc-cancel-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #3a5a3a;
+}

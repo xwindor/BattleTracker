@@ -10,6 +10,7 @@ import {
   MatrixTargetSpotted
 } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
+import { TargetCardComponent } from "app/matrix/target-card/target-card.component";
 
 interface HostFormState {
   active: boolean;
@@ -65,7 +66,7 @@ function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, rating: 
   selector: "app-hierarchy-editor",
   templateUrl: "./hierarchy-editor.component.html",
   styleUrls: ["./hierarchy-editor.component.css"],
-  imports: [CommonModule, FormsModule, NgbTooltipModule]
+  imports: [CommonModule, FormsModule, NgbTooltipModule, TargetCardComponent]
 })
 export class HierarchyEditorComponent {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];

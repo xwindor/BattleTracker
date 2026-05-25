@@ -24,33 +24,15 @@
       <div class="hier-empty">No loose devices. Click "+ Loose Device" to add one.</div>
       }
       @for (t of state.publicTargets; track t.id) {
-      <div class="hier-target-row" [class.hier-target-editing]="isEditingTarget(t)">
-        <i class="hier-type-icon" [class]="typeIcon(t.type)"
-          [ngbTooltip]="typeLabel(t.type)" placement="right"></i>
-        <span class="hier-target-name">{{ t.name }}</span>
-        @if (t.type === 'device') {
-        <span class="hier-device-rating">DR{{ t.deviceRating }}</span>
-        }
-        @if (t.directConnection) {
-        <i class="fas fa-plug hier-direct-conn-icon" ngbTooltip="Direct Connection" placement="top"></i>
-        }
-        @if (t.runningSilent) {
-        <i class="fas fa-low-vision hier-silent-icon" ngbTooltip="Running Silent (−2 dice)" placement="top"></i>
-        }
-        <button type="button" class="hier-spotted-btn" [class]="spottedClass(t.spotted)"
-          (click)="cycleSpotted(null, t)"
-          [ngbTooltip]="'Visibility: ' + spottedLabel(t.spotted) + ' — click to cycle'" placement="top">
-          {{ spottedLabel(t.spotted) }}
-        </button>
-        <div class="hier-row-actions">
-          <button type="button" class="hier-icon-btn" (click)="openEditTarget(null, t)" title="Edit">
-            <i class="fas fa-pencil-alt"></i>
-          </button>
-          <button type="button" class="hier-icon-btn hier-icon-btn-del" (click)="deleteTarget(null, t)" title="Remove">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-      </div>
+      <app-target-card
+        [target]="t"
+        [host]="null"
+        [activeDeckers]="activeDeckers"
+        [editing]="isEditingTarget(t)"
+        (editTarget)="openEditTarget(null, t)"
+        (deleteTarget)="deleteTarget(null, t)"
+        (cycleSpottedTarget)="cycleSpotted(null, t)">
+      </app-target-card>
       }
 
       <!-- Target form: public space -->
@@ -238,35 +220,15 @@
         <div class="hier-empty">No targets. Use the buttons above to add one.</div>
         }
         @for (t of host.targets; track t.id) {
-        <div class="hier-target-row" [class.hier-target-editing]="isEditingTarget(t)">
-          <i class="hier-type-icon" [class]="typeIcon(t.type)"
-            [ngbTooltip]="typeLabel(t.type)" placement="right"></i>
-          <span class="hier-target-name">{{ t.name }}</span>
-          @if (t.type === 'device') {
-          <span class="hier-device-rating">DR{{ t.deviceRating }}</span>
-          }
-          @if (t.directConnection) {
-          <i class="fas fa-plug hier-direct-conn-icon"
-            ngbTooltip="Direct Connection — mark routes to host" placement="top"></i>
-          }
-          @if (t.runningSilent) {
-          <i class="fas fa-low-vision hier-silent-icon"
-            ngbTooltip="Running Silent (−2 dice)" placement="top"></i>
-          }
-          <button type="button" class="hier-spotted-btn" [class]="spottedClass(t.spotted)"
-            (click)="cycleSpotted(host, t)"
-            [ngbTooltip]="'Visibility: ' + spottedLabel(t.spotted) + ' — click to cycle'" placement="top">
-            {{ spottedLabel(t.spotted) }}
-          </button>
-          <div class="hier-row-actions">
-            <button type="button" class="hier-icon-btn" (click)="openEditTarget(host, t)" title="Edit">
-              <i class="fas fa-pencil-alt"></i>
-            </button>
-            <button type="button" class="hier-icon-btn hier-icon-btn-del" (click)="deleteTarget(host, t)" title="Remove">
-              <i class="fas fa-times"></i>
-            </button>
-          </div>
-        </div>
+        <app-target-card
+          [target]="t"
+          [host]="host"
+          [activeDeckers]="activeDeckers"
+          [editing]="isEditingTarget(t)"
+          (editTarget)="openEditTarget(host, t)"
+          (deleteTarget)="deleteTarget(host, t)"
+          (cycleSpottedTarget)="cycleSpotted(host, t)">
+        </app-target-card>
         }
 
         <!-- Target form: inside host -->
