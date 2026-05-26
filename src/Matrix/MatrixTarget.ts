@@ -7,7 +7,18 @@
  * works for Matrix actions.
  */
 export type MatrixTargetType = "device" | "file" | "persona" | "host" | "ic";
-export type MatrixTargetSpotted = "invisible" | "ghost" | "revealed";
+
+/**
+ * Visibility of a target. Three-state cycle that replaces the old
+ * `spotted` + `runningSilent` pair:
+ *
+ *   hidden          : GM prep — not on the Matrix yet. Players see nothing.
+ *   running-silent  : Broadcasting silently. Players need a Matrix Perception
+ *                     test to spot it; once spotted it appears as an unknown
+ *                     icon. (SR5E p.224)
+ *   active          : Broadcasting normally. Players see full detail.
+ */
+export type MatrixTargetVisibility = "hidden" | "running-silent" | "active";
 export type MatrixTargetContext = "public" | "host";
 
 export class MatrixTarget {
@@ -33,20 +44,17 @@ export class MatrixTarget {
   /** Device Rating (device type only, 1–12). Used for CM and direct-connection tests. */
   deviceRating: number;
 
-  /** When true: mark via direct connection routes to the host, not this device. */
-  directConnection: boolean;
-
-  /** Running silent: target imposes −2 to all its Matrix actions; starts invisible. */
-  runningSilent: boolean;
-
   /** Current Matrix CM damage */
   matrixDamage: number;
 
   /** Max Matrix CM boxes */
   matrixHealth: number;
 
-  /** Three-state visibility. 'invisible' = not shown to players; 'ghost' = pulsing unknown icon; 'revealed' = full display. */
-  spotted: MatrixTargetSpotted;
+  /**
+   * Three-state visibility. Subsumes old `spotted` + `runningSilent`.
+   * Cycles: hidden → running-silent → active → hidden.
+   */
+  visibility: MatrixTargetVisibility;
 
   /** Marks placed by each decker, keyed by deckerId. Max 3 per decker. */
   marks: Record<string, number>;
@@ -69,11 +77,9 @@ export class MatrixTarget {
     this.firewall = init?.firewall ?? 0;
     this.rating = init?.rating ?? 1;
     this.deviceRating = init?.deviceRating ?? 4;
-    this.directConnection = init?.directConnection ?? false;
-    this.runningSilent = init?.runningSilent ?? false;
     this.matrixDamage = init?.matrixDamage ?? 0;
     this.matrixHealth = init?.matrixHealth ?? 8;
-    this.spotted = init?.spotted ?? "invisible";
+    this.visibility = init?.visibility ?? "hidden";
     this.marks = init?.marks ?? {};
     this.linkedHostId = init?.linkedHostId;
     this.linkedParticipantId = init?.linkedParticipantId;

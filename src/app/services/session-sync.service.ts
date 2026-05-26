@@ -47,7 +47,7 @@ export interface SharedMatrixTarget {
   name: string;
   type: string;
   revealedToPlayers: boolean;
-  spotted: string;
+  visibility: string;
   marks: Record<string, number>;
   matrixDamage: number;
   matrixHealth: number;

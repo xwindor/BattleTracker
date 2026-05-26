@@ -5,7 +5,7 @@ import {
   MatrixRunState,
   MatrixHost,
   MatrixTarget,
-  MatrixTargetSpotted,
+  MatrixTargetVisibility,
   MatrixParticipant,
   ICParticipant,
   VRMode
@@ -207,27 +207,6 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
-  setNoise(n: number): void {
-    const previous = this.state.noise;
-    const next = Math.max(0, Math.round(n));
-    if (next === previous) return;
-    UndoHandler.DoAction(
-      () => { this.state.noise = next; },
-      () => { this.state.noise = previous; }
-    );
-    this.stateChange$.next();
-  }
-
-  setActiveGrid(grid: "public" | "corporate" | "prime"): void {
-    const previous = this.state.activeGrid;
-    if (grid === previous) return;
-    UndoHandler.DoAction(
-      () => { this.state.activeGrid = grid; },
-      () => { this.state.activeGrid = previous; }
-    );
-    this.stateChange$.next();
-  }
-
   /** Adds a MatrixTarget to a host's target list or to public space (host = null). */
   addTarget(host: MatrixHost | null, target: MatrixTarget): void {
     UndoHandler.DoAction(
@@ -262,13 +241,13 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
-  /** Updates the spotted state on a MatrixTarget. */
-  setTargetSpotted(target: MatrixTarget, spotted: MatrixTargetSpotted): void {
-    const prev = target.spotted;
-    if (prev === spotted) return;
+  /** Updates the visibility state on a MatrixTarget. */
+  setTargetVisibility(target: MatrixTarget, visibility: MatrixTargetVisibility): void {
+    const prev = target.visibility;
+    if (prev === visibility) return;
     UndoHandler.DoAction(
-      () => { target.spotted = spotted; },
-      () => { target.spotted = prev; }
+      () => { target.visibility = visibility; },
+      () => { target.visibility = prev; }
     );
     this.stateChange$.next();
   }

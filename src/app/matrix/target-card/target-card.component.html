@@ -8,19 +8,15 @@
     @if (target.type === 'device') {
     <span class="tc-dr">DR{{ target.deviceRating }}</span>
     }
-    @if (target.directConnection) {
-    <i class="fas fa-plug tc-icon-sm"
-      ngbTooltip="Direct Connection — mark routes to host" placement="top"></i>
-    }
-    @if (target.runningSilent) {
+    @if (target.visibility === 'running-silent') {
     <i class="fas fa-low-vision tc-icon-sm"
-      ngbTooltip="Running Silent (−2 dice)" placement="top"></i>
+      ngbTooltip="Running Silent — Matrix Perception required" placement="top"></i>
     }
-    <button type="button" class="tc-spotted-btn" [class]="spottedClass(target.spotted)"
-      (click)="cycleSpottedTarget.emit()"
-      [ngbTooltip]="'Visibility: ' + spottedLabel(target.spotted) + ' — click to cycle'"
+    <button type="button" class="tc-spotted-btn" [class]="visibilityClass(target.visibility)"
+      (click)="cycleVisibilityRequested.emit()"
+      [ngbTooltip]="'Visibility: ' + visibilityLabel(target.visibility) + ' — click to cycle'"
       placement="top">
-      {{ spottedLabel(target.spotted) }}
+      {{ visibilityLabel(target.visibility) }}
     </button>
     <div class="tc-actions">
       <button type="button" class="tc-icon-btn" (click)="editTarget.emit()" title="Edit">

@@ -3,7 +3,7 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
 import {
-  MatrixTarget, MatrixTargetType, MatrixTargetSpotted,
+  MatrixTarget, MatrixTargetType, MatrixTargetVisibility,
   MatrixHost, MatrixParticipant
 } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
@@ -25,7 +25,7 @@ export class TargetCardComponent {
 
   @Output() readonly editTarget = new EventEmitter<void>();
   @Output() readonly deleteTarget = new EventEmitter<void>();
-  @Output() readonly cycleSpottedTarget = new EventEmitter<void>();
+  @Output() readonly cycleVisibilityRequested = new EventEmitter<void>();
 
   addMarkOpen = false;
   selectedDeckerId = "";
@@ -93,19 +93,19 @@ export class TargetCardComponent {
     }
   }
 
-  spottedLabel(spotted: MatrixTargetSpotted): string {
-    switch (spotted) {
-      case "invisible": return "INVISIBLE";
-      case "ghost":     return "GHOST";
-      case "revealed":  return "REVEALED";
+  visibilityLabel(v: MatrixTargetVisibility): string {
+    switch (v) {
+      case "hidden":         return "HIDDEN";
+      case "running-silent": return "RUNNING SILENT";
+      case "active":         return "ACTIVE";
     }
   }
 
-  spottedClass(spotted: MatrixTargetSpotted): string {
-    switch (spotted) {
-      case "invisible": return "spotted-invisible";
-      case "ghost":     return "spotted-ghost";
-      case "revealed":  return "spotted-revealed";
+  visibilityClass(v: MatrixTargetVisibility): string {
+    switch (v) {
+      case "hidden":         return "spotted-invisible";
+      case "running-silent": return "spotted-ghost";
+      case "active":         return "spotted-revealed";
     }
   }
 }

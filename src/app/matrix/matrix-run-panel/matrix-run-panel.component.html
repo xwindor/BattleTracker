@@ -6,54 +6,13 @@
       <i class="fas fa-microchip me-2"></i>Matrix
     </span>
 
-    <div class="matrix-header-controls" (click)="$event.stopPropagation()">
-      <div class="noise-control">
-        <span class="noise-label">Noise:</span>
-        <button type="button" class="noise-btn"
-          (click)="onNoiseDec()"
-          [disabled]="matrixState.state.noise <= 0">−</button>
-        <span class="noise-value" [class.noise-nonzero]="matrixState.state.noise > 0">
-          {{ matrixState.state.noise }}
-        </span>
-        <button type="button" class="noise-btn" (click)="onNoiseInc()">+</button>
-      </div>
-
-      <select class="grid-select"
-        [ngModel]="matrixState.state.activeGrid"
-        (ngModelChange)="onGridChange($event)">
-        <option value="public">Public Grid</option>
-        <option value="corporate">Corp Grid</option>
-        <option value="prime">Prime Grid</option>
-      </select>
-    </div>
-
-    <i class="fas collapse-caret"
+    <i class="fas collapse-caret ms-auto"
        [class.fa-chevron-down]="collapsed"
        [class.fa-chevron-up]="!collapsed"></i>
   </div>
 
   @if (!collapsed) {
   <div class="matrix-panel-body">
-
-    <!-- ── Passive stepper strip ──────────────────────────────────────── -->
-    <div class="matrix-stepper">
-      @for (step of STEPS; track step.key; let i = $index) {
-      <span class="stepper-step"
-        [class.stepper-lit]="isStepLit(i)"
-        [class.stepper-past]="isStepPast(i)"
-        [ngbTooltip]="step.tooltip"
-        placement="bottom"
-        triggers="hover">
-        @if (isStepPast(i)) {
-        <i class="fas fa-check stepper-check"></i>
-        }
-        {{ step.label }}
-      </span>
-      @if (i < STEPS.length - 1) {
-      <span class="stepper-sep" [class.stepper-sep-past]="isStepPast(i + 1)">›</span>
-      }
-      }
-    </div>
 
     <!-- ── Decker status cards ────────────────────────────────────────── -->
     @if (activeDeckers.length > 0) {

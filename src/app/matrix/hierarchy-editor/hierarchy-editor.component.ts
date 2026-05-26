@@ -7,7 +7,7 @@ import {
   MatrixHost,
   MatrixTarget,
   MatrixTargetType,
-  MatrixTargetSpotted
+  MatrixTargetVisibility
 } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { TargetCardComponent } from "app/matrix/target-card/target-card.component";
@@ -33,10 +33,8 @@ interface TargetFormState {
   hostId: string | null;
   name: string;
   type: MatrixTargetType;
-  spotted: MatrixTargetSpotted;
-  runningSilent: boolean;
+  visibility: MatrixTargetVisibility;
   deviceRating: number;
-  directConnection: boolean;
   linkedParticipantId: string;
 }
 
@@ -48,9 +46,8 @@ const BLANK_HOST_FORM: HostFormState = {
 
 const BLANK_TARGET_FORM: TargetFormState = {
   active: false, isEditing: false, target: null, hostId: null,
-  name: "", type: "device", spotted: "invisible",
-  runningSilent: false, deviceRating: 4, directConnection: false,
-  linkedParticipantId: ""
+  name: "", type: "device", visibility: "hidden",
+  deviceRating: 4, linkedParticipantId: ""
 };
 
 function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, rating: number): number {
@@ -180,7 +177,7 @@ export class HierarchyEditorComponent {
       active: true,
       hostId: host?.id ?? null,
       type,
-      spotted: "invisible"
+      visibility: "hidden"
     };
     this.hostForm = { ...BLANK_HOST_FORM };
     if (host) this.expandedHosts.add(host.id);
@@ -192,10 +189,8 @@ export class HierarchyEditorComponent {
       hostId: host?.id ?? null,
       name: target.name,
       type: target.type,
-      spotted: target.spotted,
-      runningSilent: target.runningSilent,
+      visibility: target.visibility,
       deviceRating: target.deviceRating,
-      directConnection: target.directConnection,
       linkedParticipantId: target.linkedParticipantId ?? ""
     };
     this.hostForm = { ...BLANK_HOST_FORM };
@@ -203,18 +198,6 @@ export class HierarchyEditorComponent {
 
   closeTargetForm(): void {
     this.targetForm = { ...BLANK_TARGET_FORM };
-  }
-
-  onTargetTypeChange(): void {
-    // Persona and IC targets default to invisible; devices/files same
-    const t = this.targetForm;
-    if (t.runningSilent) t.spotted = "invisible";
-  }
-
-  onRunningSilentChange(): void {
-    if (this.targetForm.runningSilent) {
-      this.targetForm.spotted = "invisible";
-    }
   }
 
   saveTargetForm(): void {
@@ -228,10 +211,8 @@ export class HierarchyEditorComponent {
       this.matrixState.updateTarget(f.target, {
         name: f.name.trim(),
         type: f.type,
-        spotted: f.spotted,
-        runningSilent: f.runningSilent,
+        visibility: f.visibility,
         deviceRating: Math.max(1, Math.min(12, f.deviceRating)),
-        directConnection: f.directConnection,
         linkedParticipantId: f.linkedParticipantId || undefined,
         matrixHealth: health
       });
@@ -241,10 +222,8 @@ export class HierarchyEditorComponent {
         name: f.name.trim(),
         type: f.type,
         context: host ? "host" : "public",
-        spotted: f.spotted,
-        runningSilent: f.runningSilent,
+        visibility: f.visibility,
         deviceRating: Math.max(1, Math.min(12, f.deviceRating)),
-        directConnection: f.type === "device" ? f.directConnection : false,
         linkedParticipantId: f.linkedParticipantId || undefined,
         linkedHostId: f.hostId ?? undefined,
         matrixHealth: health
@@ -259,12 +238,12 @@ export class HierarchyEditorComponent {
     if (this.targetForm.target === target) this.targetForm = { ...BLANK_TARGET_FORM };
   }
 
-  // ── Spotted cycling ──────────────────────────────────────────────────────
+  // ── Visibility cycling ──────────────────────────────────────────────────
 
-  cycleSpotted(host: MatrixHost | null, target: MatrixTarget): void {
-    const order: MatrixTargetSpotted[] = ["invisible", "ghost", "revealed"];
-    const next = order[(order.indexOf(target.spotted) + 1) % order.length];
-    this.matrixState.setTargetSpotted(target, next);
+  cycleVisibility(host: MatrixHost | null, target: MatrixTarget): void {
+    const order: MatrixTargetVisibility[] = ["hidden", "running-silent", "active"];
+    const next = order[(order.indexOf(target.visibility) + 1) % order.length];
+    this.matrixState.setTargetVisibility(target, next);
   }
 
   // ── Tree expand/collapse ─────────────────────────────────────────────────
@@ -305,19 +284,20 @@ export class HierarchyEditorComponent {
     }
   }
 
-  spottedLabel(spotted: MatrixTargetSpotted): string {
-    switch (spotted) {
-      case "invisible": return "INVISIBLE";
-      case "ghost":     return "GHOST";
-      case "revealed":  return "REVEALED";
+  visibilityLabel(v: MatrixTargetVisibility): string {
+    switch (v) {
+      case "hidden":         return "HIDDEN";
+      case "running-silent": return "RUNNING SILENT";
+      case "active":         return "ACTIVE";
     }
   }
 
-  spottedClass(spotted: MatrixTargetSpotted): string {
-    switch (spotted) {
-      case "invisible": return "spotted-invisible";
-      case "ghost":     return "spotted-ghost";
-      case "revealed":  return "spotted-revealed";
+  visibilityClass(v: MatrixTargetVisibility): string {
+    // CSS classes are reused from the old spotted-* classes for now.
+    switch (v) {
+      case "hidden":         return "spotted-invisible";
+      case "running-silent": return "spotted-ghost";
+      case "active":         return "spotted-revealed";
     }
   }
 

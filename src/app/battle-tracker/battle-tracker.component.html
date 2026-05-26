@@ -430,7 +430,7 @@
               <button type="button" class="btn btn-sm btn-primary"
                 (click)="gmJackIn(p)"
                 [disabled]="getPendingVrMode(p) === asMatrix(p).vrMode">Switch Mode</button>
-              <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(p)">Jack Out</button>
+              <button type="button" class="btn btn-sm btn-warning" (click)="onMatrixPanelJackOut(asMatrix(p))">Jack Out</button>
             </div>
             <div class="mt-1">
               <app-matrix-participant-badge
@@ -767,8 +767,9 @@
     <p class="mb-1">
       <strong>{{ convergenceHostName }} has traced {{ convergenceAlertDecker }}.</strong>
     </p>
-    <p class="mb-1">OS reached {{ convergenceAlertOs }}. The host has placed <strong>3 marks</strong> on the decker.</p>
-    <p class="mb-0 text-danger fw-semibold">IC is deploying. Do NOT jack out — demiGOD converges immediately on exit.</p>
+    <p class="mb-1">OS reached {{ convergenceAlertOs }}. The host has placed <strong>3 marks</strong> on the decker and is deploying IC.</p>
+    <p class="mb-1 text-success fw-semibold">&#10003; Safe exit: Jack Out from inside the host — no demiGOD penalty.</p>
+    <p class="mb-0 text-danger fw-semibold">&#9888; Danger: Leaving the host to public space triggers immediate demiGOD convergence (12 DV, forced dump, location reported).</p>
   </div>
   <div class="modal-footer">
     <button type="button" class="btn btn-warning" (click)="dismissConvergenceAlert()">Acknowledged</button>

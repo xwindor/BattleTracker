@@ -31,7 +31,7 @@
         [editing]="isEditingTarget(t)"
         (editTarget)="openEditTarget(null, t)"
         (deleteTarget)="deleteTarget(null, t)"
-        (cycleSpottedTarget)="cycleSpotted(null, t)">
+        (cycleVisibilityRequested)="cycleVisibility(null, t)">
       </app-target-card>
       }
 
@@ -227,7 +227,7 @@
           [editing]="isEditingTarget(t)"
           (editTarget)="openEditTarget(host, t)"
           (deleteTarget)="deleteTarget(host, t)"
-          (cycleSpottedTarget)="cycleSpotted(host, t)">
+          (cycleVisibilityRequested)="cycleVisibility(host, t)">
         </app-target-card>
         }
 
@@ -259,12 +259,13 @@
 
   <div class="hier-form-row">
     <label class="hier-form-label">Type</label>
-    <select class="hier-form-select" [(ngModel)]="targetForm.type"
-      (ngModelChange)="onTargetTypeChange()">
+    <select class="hier-form-select" [(ngModel)]="targetForm.type">
       <option value="device">Device</option>
       <option value="file">File</option>
       <option value="persona">Persona</option>
+      @if (targetForm.hostId !== null) {
       <option value="ic">IC Target</option>
+      }
     </select>
   </div>
 
@@ -273,13 +274,6 @@
     <label class="hier-form-label">Device Rating</label>
     <input type="number" class="hier-form-input hier-form-input-narrow"
       [(ngModel)]="targetForm.deviceRating" [min]="1" [max]="12">
-  </div>
-  <div class="hier-form-row">
-    <label class="hier-form-label hier-form-check-label"
-      ngbTooltip="Physical access — mark action routes to host (0 OS, 1 free mark on host). Only valid when decker is jacked in." placement="top">
-      <input type="checkbox" [(ngModel)]="targetForm.directConnection">
-      Direct Connection
-    </label>
   </div>
   }
 
@@ -297,20 +291,11 @@
 
   <div class="hier-form-row">
     <label class="hier-form-label">Visibility</label>
-    <select class="hier-form-select" [(ngModel)]="targetForm.spotted">
-      <option value="invisible">INVISIBLE — hidden from players</option>
-      <option value="ghost">GHOST — pulsing unknown icon</option>
-      <option value="revealed">REVEALED — fully shown</option>
+    <select class="hier-form-select" [(ngModel)]="targetForm.visibility">
+      <option value="hidden">HIDDEN — GM prep, not on the Matrix yet</option>
+      <option value="running-silent">RUNNING SILENT — broadcasting covertly; needs Matrix Perception to spot</option>
+      <option value="active">ACTIVE — broadcasting normally; player sees full detail</option>
     </select>
-  </div>
-
-  <div class="hier-form-row">
-    <label class="hier-form-label hier-form-check-label"
-      ngbTooltip="Running silent imposes −2 to all of this target's Matrix actions. Target starts as INVISIBLE and requires the two-step spotting process." placement="top">
-      <input type="checkbox" [(ngModel)]="targetForm.runningSilent"
-        (ngModelChange)="onRunningSilentChange()">
-      Running Silent
-    </label>
   </div>
 
   <div class="hier-form-actions">

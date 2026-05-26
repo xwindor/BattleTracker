@@ -1987,17 +1987,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.gmJackIn(decker);
   }
 
-  /** Called from MatrixRunPanelComponent when the GM requests a jack-out. */
-  async onMatrixPanelJackOut(decker: MatrixParticipant): Promise<void> {
-    if (decker.hostConverged) {
-      const confirmed = await this.confirmationDialog.confirm(
-        `${decker.name} has an active host convergence. Jacking out now will trigger an immediate demiGOD Convergence attack. Proceed?`,
-        "demiGOD Convergence Warning",
-        "Jack Out Anyway",
-        "Cancel"
-      );
-      if (!confirmed) return;
-    }
+  /** Called from MatrixRunPanelComponent (or row button) when the GM requests a jack-out. */
+  onMatrixPanelJackOut(decker: MatrixParticipant): void {
+    // Per SR5E p.247: jacking out from inside a host is always safe, even after
+    // host convergence. The demiGOD only converges if the decker leaves the host
+    // to public space while their OS is at 40+. No warning needed here.
     this.gmJackOut(decker);
   }
 
