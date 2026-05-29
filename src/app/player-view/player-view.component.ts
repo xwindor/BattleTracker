@@ -6,6 +6,7 @@ import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
+import { MatrixPlayerViewComponent } from "app/matrix/matrix-player-view/matrix-player-view.component";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
@@ -13,7 +14,7 @@ import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "ap
 @Component({
   standalone: true,
   selector: "app-player-view",
-  imports: [ CommonModule, FormsModule, NgbModalModule, NgbTooltip, DiceRollerComponent ],
+  imports: [ CommonModule, FormsModule, NgbModalModule, NgbTooltip, DiceRollerComponent, MatrixPlayerViewComponent ],
   templateUrl: "./player-view.component.html",
   styleUrls: [ "./player-view.component.css" ]
 })

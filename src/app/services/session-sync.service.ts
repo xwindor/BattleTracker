@@ -44,13 +44,18 @@ export interface SharedMatrixParticipantState extends SharedParticipantState {
 
 export interface SharedMatrixTarget {
   id: string;
+  /** "Unknown Icon" when visibility === 'running-silent'. Full name when 'active'. */
   name: string;
+  /** Sanitised to 'unknown' when running-silent. */
   type: string;
-  revealedToPlayers: boolean;
+  /** 'running-silent' | 'active' — hidden targets are never broadcast. */
   visibility: string;
+  /** Per-decker mark counts. Key = decker name. */
   marks: Record<string, number>;
   matrixDamage: number;
   matrixHealth: number;
+  /** Which host this target lives in, if any. */
+  hostName?: string;
 }
 
 export interface SharedCombatState {

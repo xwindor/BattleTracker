@@ -14,7 +14,7 @@ import ActionHandler from "Combat/ActionHandler";
 import { ConditionMonitorComponent } from "app/condition-monitor/condition-monitor.component";
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
-import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
+import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedMatrixTarget, SharedParticipantState } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, ICParticipant, ICType, MatrixHost } from "Matrix";
@@ -136,6 +136,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   convergenceHostName = "";
   private convergenceModalRef: NgbModalRef | null = null;
   private osThresholdSub?: Subscription;
+  private matrixStateSub?: Subscription;
 
   // -- Active host banner + IC spawner --
   @ViewChild("spawnICModalTpl") private spawnICModalTpl!: TemplateRef<unknown>;
@@ -334,6 +335,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.Initialize();
     UndoHandler.StartActions();
     this.observedLocalLogCount = this.logHandler.logbook.length;
+    this.matrixStateSub = this.matrixState.stateChange$.subscribe(() => {
+      this.syncSharedState();
+    });
     this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
       if (event.alert === "ic-alert") {
         this.icAlertMessages.push(`${event.decker.name} — OS: ${event.decker.overwatch}`);
@@ -373,6 +377,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
     this.osThresholdSub?.unsubscribe();
+    this.matrixStateSub?.unsubscribe();
   }
 
   ngAfterViewChecked() {
@@ -834,13 +839,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     this.recordDamageChanges();
+    const matrixTargets = this.getSharedMatrixTargets();
     const sharedState: SharedCombatState = {
       round: this.combatManager.combatTurn,
       pass: this.combatManager.initiativePass,
       started: this.combatManager.started,
       passEnded: this.combatManager.passEnded,
       currentInitiative: this.combatManager.currentInitiative,
-      participants: this.getSharedParticipants()
+      participants: this.getSharedParticipants(),
+      matrixTargets: matrixTargets.length ? matrixTargets : undefined,
+      currentHostName: this.matrixState.getCurrentHostName()
     };
     this.sessionSync.broadcastState(sharedState);
   }
@@ -884,6 +892,62 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
         return base;
       });
+  }
+
+
+  /**
+   * Builds the sanitised list of Matrix targets for broadcasting to players.
+   * - 'hidden' targets are omitted entirely.
+   * - 'running-silent' targets are stripped of name/type (shown as unknown icon).
+   * - 'active' targets are broadcast in full.
+   */
+  private getSharedMatrixTargets(): SharedMatrixTarget[] {
+    const ms = this.matrixState.state;
+    const result: SharedMatrixTarget[] = [];
+
+    const hostNameFor = (linkedHostId: string | undefined): string | undefined => {
+      if (!linkedHostId) return undefined;
+      return ms.hosts.find(h => h.id === linkedHostId)?.name;
+    };
+
+    const toShared = (t: import("Matrix").MatrixTarget): SharedMatrixTarget | null => {
+      if (t.visibility === "hidden") return null;
+      if (t.visibility === "running-silent") {
+        return {
+          id: t.id,
+          name: "Unknown Icon",
+          type: "unknown",
+          visibility: "running-silent",
+          marks: { ...t.marks },
+          matrixDamage: t.matrixDamage,
+          matrixHealth: t.matrixHealth,
+          hostName: hostNameFor(t.linkedHostId)
+        };
+      }
+      // active
+      return {
+        id: t.id,
+        name: t.name,
+        type: t.type,
+        visibility: "active",
+        marks: { ...t.marks },
+        matrixDamage: t.matrixDamage,
+        matrixHealth: t.matrixHealth,
+        hostName: hostNameFor(t.linkedHostId)
+      };
+    };
+
+    for (const t of ms.publicTargets) {
+      const s = toShared(t);
+      if (s) result.push(s);
+    }
+    for (const host of ms.hosts) {
+      for (const t of host.targets) {
+        const s = toShared(t);
+        if (s) result.push(s);
+      }
+    }
+    return result;
   }
 
   private appendSharedLog(actor: string, text: string) {

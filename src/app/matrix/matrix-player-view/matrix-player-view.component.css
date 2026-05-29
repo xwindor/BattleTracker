@@ -1,0 +1,136 @@
+.mpv-wrap {
+  font-size: 0.875rem;
+}
+
+.mpv-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.mpv-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--bs-body-color);
+}
+
+.mpv-host-badge {
+  font-size: 0.75rem;
+  background: rgba(13, 202, 240, 0.15);
+  color: var(--bs-info);
+  border: 1px solid rgba(13, 202, 240, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.mpv-empty {
+  color: var(--bs-secondary-color);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.mpv-group {
+  margin-bottom: 0.75rem;
+}
+
+.mpv-group-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bs-secondary-color);
+  margin-bottom: 0.3rem;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.mpv-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-bottom: 3px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  transition: background 0.15s;
+}
+
+.mpv-row-silent {
+  border-color: var(--bs-secondary-color);
+  opacity: 0.7;
+  animation: mpv-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes mpv-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 0.4; }
+}
+
+.mpv-icon {
+  width: 14px;
+  text-align: center;
+  color: var(--bs-info);
+  flex-shrink: 0;
+}
+
+.mpv-icon-silent {
+  color: var(--bs-secondary-color);
+}
+
+.mpv-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpv-name-silent {
+  color: var(--bs-secondary-color);
+  font-style: italic;
+}
+
+.mpv-type-badge {
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(13, 202, 240, 0.12);
+  color: var(--bs-info);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-type-silent {
+  background: rgba(108, 117, 125, 0.15);
+  color: var(--bs-secondary-color);
+}
+
+.mpv-cm {
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-cm-dmg {
+  color: var(--bs-danger);
+  font-weight: 600;
+}
+
+.mpv-cm-sep {
+  margin: 0 1px;
+}
+
+.mpv-marks {
+  font-family: monospace;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  color: var(--bs-warning);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-marks-none {
+  color: var(--bs-secondary-color);
+  opacity: 0.5;
+}

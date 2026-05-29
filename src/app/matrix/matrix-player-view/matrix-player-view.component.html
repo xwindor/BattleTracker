@@ -1,0 +1,58 @@
+<div class="mpv-wrap">
+
+  <!-- Header with optional host context -->
+  <div class="mpv-header">
+    <span class="mpv-title">Matrix Icons</span>
+    @if (currentHostName) {
+    <span class="mpv-host-badge">
+      <i class="fas fa-server me-1"></i>{{ currentHostName }}
+    </span>
+    }
+  </div>
+
+  @if (targets.length === 0) {
+  <div class="mpv-empty">No icons detected.</div>
+  } @else {
+  @for (group of groupedTargets; track group.label) {
+  <div class="mpv-group">
+    <div class="mpv-group-label">{{ group.label }}</div>
+    @for (target of group.targets; track target.id) {
+    <div class="mpv-row" [class.mpv-row-silent]="target.visibility === 'running-silent'">
+
+      @if (target.visibility === 'running-silent') {
+      <!-- Unknown / running-silent icon -->
+      <i class="fas fa-question-circle mpv-icon mpv-icon-silent"
+        ngbTooltip="Unknown icon — running silent" placement="right"></i>
+      <span class="mpv-name mpv-name-silent">Unknown Icon</span>
+      <span class="mpv-type-badge mpv-type-silent">?</span>
+
+      } @else {
+      <!-- Active / fully revealed icon -->
+      <i class="mpv-icon" [class]="typeIcon(target.type)"
+        [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
+      <span class="mpv-name">{{ target.name }}</span>
+      <span class="mpv-type-badge">{{ typeLabel(target.type) }}</span>
+      }
+
+      <!-- CM bar -->
+      <span class="mpv-cm" [ngbTooltip]="'Matrix CM: ' + target.matrixDamage + '/' + target.matrixHealth" placement="top">
+        @if (target.matrixDamage > 0) {
+        <span class="mpv-cm-dmg">{{ target.matrixDamage }}</span>
+        <span class="mpv-cm-sep">/</span>
+        }
+        <span class="mpv-cm-max">{{ target.matrixHealth }}</span>
+      </span>
+
+      <!-- My marks on this target -->
+      <span class="mpv-marks" [class.mpv-marks-none]="myMarks(target) === 0"
+        [ngbTooltip]="'Your marks: ' + myMarks(target) + '/3'" placement="top">
+        {{ dots(myMarks(target)) }}
+      </span>
+
+    </div>
+    }
+  </div>
+  }
+  }
+
+</div>
