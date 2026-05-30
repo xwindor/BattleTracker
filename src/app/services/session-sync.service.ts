@@ -56,6 +56,8 @@ export interface SharedMatrixTarget {
   matrixHealth: number;
   /** Which host this target lives in, if any. */
   hostName?: string;
+  /** Devices with a physical cable connection — show plug/wire icon in player view. */
+  directConnection?: boolean;
 }
 
 export interface SharedCombatState {

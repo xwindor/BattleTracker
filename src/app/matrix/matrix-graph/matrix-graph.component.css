@@ -1,0 +1,206 @@
+/* ── Container ───────────────────────────────────────────────────────── */
+
+.mgn-container {
+  display: flex;
+  flex-direction: column;
+  background: #050c12;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: background-color 0.7s ease;
+  min-height: 300px;
+}
+
+.mgn-container.mgn-in-host {
+  background: #06080f;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+
+.mgn-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: #0a1220;
+  border-bottom: 1px solid #1a2d3d;
+  font-size: 0.75rem;
+}
+
+.mgn-location-badge {
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+}
+
+.mgn-public-space {
+  background: #0a2a1a;
+  color: #00c8a0;
+  border: 1px solid #0a4a30;
+}
+
+.mgn-inside-host {
+  background: #1a1a2a;
+  color: #8080ff;
+  border: 1px solid #3030aa;
+}
+
+.mgn-gm-badge {
+  margin-left: auto;
+  background: #2a1a00;
+  color: #e0a030;
+  border: 1px solid #6a4000;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+
+.mgn-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  min-height: 200px;
+  color: #2a4050;
+  font-size: 0.82rem;
+}
+
+.mgn-empty-icon {
+  font-size: 2rem;
+  opacity: 0.3;
+}
+
+/* ── SVG canvas ──────────────────────────────────────────────────────── */
+
+.mgn-svg {
+  width: 100%;
+  flex: 1;
+  display: block;
+}
+
+/* Canvas host label (inside-host header) */
+.mgn-canvas-host-label {
+  font-size: 11px;
+  fill: #4040aa;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+/* ── Nodes ───────────────────────────────────────────────────────────── */
+
+.mgn-node-body {
+  fill: #0d1825;
+  stroke: #2a4060;
+  stroke-width: 1.5;
+  transition: fill 0.2s, stroke 0.2s;
+}
+
+/* Kind-based colors */
+.mgn-host         .mgn-node-body { fill: #0d1a30; stroke: #2060a0; stroke-width: 2; }
+.mgn-device       .mgn-node-body { fill: #0d1825; stroke: #206070; }
+.mgn-file         .mgn-node-body { fill: #12160d; stroke: #405020; }
+.mgn-persona-me   .mgn-node-body { fill: #001a1a; stroke: #00c8a0; stroke-width: 2.5; }
+.mgn-persona-other .mgn-node-body { fill: #1a1a1a; stroke: #606060; }
+.mgn-ic           .mgn-node-body { fill: #200d0d; stroke: #b03030; stroke-width: 2; }
+.mgn-unknown      .mgn-node-body { fill: #101010; stroke: #303030; stroke-dasharray: 4 2; }
+
+/* Visibility-based overrides */
+.mgn-vis-hidden .mgn-node-body {
+  fill: #05080c;
+  stroke: #1a2030;
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+}
+
+.mgn-vis-running-silent .mgn-node-body {
+  animation: mgn-pulse 2s ease-in-out infinite;
+  stroke: #404040;
+}
+
+@keyframes mgn-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 1;    }
+}
+
+/* ── Node text ───────────────────────────────────────────────────────── */
+
+.mgn-node-symbol {
+  font-size: 14px;
+  fill: #5a8aaa;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mgn-host         .mgn-node-symbol { fill: #3070c0; font-size: 17px; }
+.mgn-device       .mgn-node-symbol { fill: #207080; }
+.mgn-file         .mgn-node-symbol { fill: #508030; }
+.mgn-persona-me   .mgn-node-symbol { fill: #00c8a0; font-size: 16px; }
+.mgn-persona-other .mgn-node-symbol { fill: #808080; }
+.mgn-ic           .mgn-node-symbol { fill: #cc4444; }
+.mgn-unknown      .mgn-node-symbol { fill: #404040; }
+
+.mgn-vis-hidden   .mgn-node-symbol { fill: #2a3a4a; }
+.mgn-vis-running-silent .mgn-node-symbol { fill: #505050; }
+
+.mgn-node-label {
+  font-size: 9px;
+  fill: #8aacbf;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mgn-label-ghost {
+  fill: #505050;
+}
+
+.mgn-node-sublabel {
+  font-size: 7.5px;
+  fill: #3a5568;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mgn-mark-dots {
+  font-size: 8px;
+  fill: #c07030;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mgn-vis-badge {
+  fill: #7aacbf;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mgn-dc-overlay {
+  fill: #e0c040;
+  pointer-events: none;
+}
+
+/* ── Legend ──────────────────────────────────────────────────────────── */
+
+.mgn-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 4px 10px;
+  background: #080e16;
+  border-top: 1px solid #111e2a;
+  font-size: 0.68rem;
+  color: #3a5568;
+}
+
+.mgn-leg { white-space: nowrap; }
+.mgn-leg-persona-me   { color: #00c8a0; }
+.mgn-leg-host         { color: #3070c0; }
+.mgn-leg-device       { color: #207080; }
+.mgn-leg-file         { color: #508030; }
+.mgn-leg-ic           { color: #cc4444; }
+.mgn-leg-unknown      { color: #505050; }

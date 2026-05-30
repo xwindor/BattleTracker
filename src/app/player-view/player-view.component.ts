@@ -7,6 +7,7 @@ import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, 
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { MatrixPlayerViewComponent } from "app/matrix/matrix-player-view/matrix-player-view.component";
+import { MatrixGraphComponent } from "app/matrix/matrix-graph/matrix-graph.component";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
@@ -14,7 +15,7 @@ import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "ap
 @Component({
   standalone: true,
   selector: "app-player-view",
-  imports: [ CommonModule, FormsModule, NgbModalModule, NgbTooltip, DiceRollerComponent, MatrixPlayerViewComponent ],
+  imports: [ CommonModule, FormsModule, NgbModalModule, NgbTooltip, DiceRollerComponent, MatrixPlayerViewComponent, MatrixGraphComponent ],
   templateUrl: "./player-view.component.html",
   styleUrls: [ "./player-view.component.css" ]
 })

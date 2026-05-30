@@ -235,6 +235,13 @@
         [currentHostName]="state!.currentHostName">
       </app-matrix-player-view>
     </div>
+    <app-matrix-graph
+      [targets]="state!.matrixTargets ?? []"
+      [currentHostName]="state!.currentHostName"
+      [myDeckerName]="primaryCharacter!.name"
+      [myVrMode]="primaryCharacter!.vrMode ?? 'AR'"
+      [gmMode]="false">
+    </app-matrix-graph>
   </div>
   }
 

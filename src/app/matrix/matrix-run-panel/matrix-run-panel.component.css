@@ -305,6 +305,12 @@
   border-radius: 2px;
 }
 
+.pane-header-access {
+  margin-top: 0;
+  border-top: 1px solid var(--matrix-border, #1a4a1a);
+  border-bottom-color: var(--matrix-border, #1a4a1a);
+}
+
 /* ── Right pane: graph stub ──────────────────────────────────────────────── */
 
 .graph-stub {

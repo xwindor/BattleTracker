@@ -351,6 +351,17 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
+  /** Sets the access method on a host (hack-on-fly, brute-force, direct-connection, or none). */
+  setHostAccessMethod(host: MatrixHost, method: import("Matrix").HostAccessMethod): void {
+    const prev = host.accessMethod;
+    if (prev === method) return;
+    UndoHandler.DoAction(
+      () => { host.accessMethod = method; },
+      () => { host.accessMethod = prev; }
+    );
+    this.stateChange$.next();
+  }
+
   private generateId(): string {
     return `h-${Math.random().toString(36).slice(2, 10)}`;
   }

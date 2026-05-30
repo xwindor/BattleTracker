@@ -1,0 +1,162 @@
+<div class="ahp-panel">
+
+  @if (!host) {
+  <div class="ahp-no-host">No active host selected. Set a host in the Hierarchy editor first.</div>
+  } @else {
+
+  <!-- ── Host summary ─────────────────────────────────────────────── -->
+  <div class="ahp-host-summary">
+    <span class="ahp-host-name"><i class="fas fa-server me-1"></i>{{ host.name }}</span>
+    <span class="ahp-host-rating">R{{ host.rating }}</span>
+    <span class="ahp-asdf">{{ host.attack }}/{{ host.sleaze }}/{{ host.dataProcessing }}/{{ host.firewall }}</span>
+    <span class="ahp-method-badge" [class]="accessMethodClass(host.accessMethod)">
+      {{ accessMethodLabel(host.accessMethod) }}
+    </span>
+  </div>
+
+  <!-- ── No active flow: show method buttons ──────────────────────── -->
+  @if (flow === 'none' && !showDirectPanel) {
+  <div class="ahp-method-buttons">
+    <button type="button" class="ahp-btn-method ahp-btn-hotf"
+      (click)="startFlow('hack-on-fly')"
+      [disabled]="activeDeckers.length === 0"
+      ngbTooltip="Cracking + Logic [DP] vs Firewall + Data Processing. OS +2 per mark." placement="top">
+      <i class="fas fa-bolt me-1"></i>Hack on the Fly
+    </button>
+    <button type="button" class="ahp-btn-method ahp-btn-bf"
+      (click)="startFlow('brute-force')"
+      [disabled]="activeDeckers.length === 0"
+      ngbTooltip="Cracking + Logic [ATK] vs Firewall + Intuition. OS marks × 4." placement="top">
+      <i class="fas fa-hammer me-1"></i>Brute Force
+    </button>
+    <button type="button" class="ahp-btn-method ahp-btn-dc"
+      (click)="toggleDirectPanel()"
+      [disabled]="activeDeckers.length === 0"
+      ngbTooltip="Physical access — 1 mark on host, 0 OS." placement="top">
+      <i class="fas fa-plug me-1"></i>Direct Connection
+    </button>
+  </div>
+  }
+
+  <!-- ── Direct Connection panel ──────────────────────────────────── -->
+  @if (showDirectPanel) {
+  <div class="ahp-flow-panel ahp-flow-dc">
+    <div class="ahp-flow-title"><i class="fas fa-plug me-1"></i>Direct Connection</div>
+    <div class="ahp-flow-hint">
+      Physical access to a device on the host network. Grants 1 mark on the host automatically.
+      <br>No test needed. 0 OS.
+    </div>
+
+    @if (activeDeckers.length > 1) {
+    <div class="ahp-field-row">
+      <label class="ahp-field-label">Decker</label>
+      <select class="ahp-select" [(ngModel)]="directDeckerId">
+        @for (d of activeDeckers; track d.name) {
+        <option [value]="d.name">{{ d.name }}</option>
+        }
+      </select>
+    </div>
+    }
+
+    <div class="ahp-flow-actions">
+      <button type="button" class="ahp-btn-apply" (click)="applyDirectConnection()">
+        <i class="fas fa-check me-1"></i>Apply (1 Mark, 0 OS)
+      </button>
+      <button type="button" class="ahp-btn-cancel" (click)="toggleDirectPanel()">Cancel</button>
+    </div>
+  </div>
+  }
+
+  <!-- ── Confirmation message (direct connection) ──────────────────── -->
+  @if (directConfirmMsg) {
+  <div class="ahp-confirm-msg">
+    <i class="fas fa-check-circle me-1"></i>{{ directConfirmMsg }}
+  </div>
+  }
+
+  <!-- ── Hack on the Fly / Brute Force flow ───────────────────────── -->
+  @if (flow === 'hack-on-fly' || flow === 'brute-force') {
+  <div class="ahp-flow-panel" [class.ahp-flow-hotf]="flow === 'hack-on-fly'" [class.ahp-flow-bf]="flow === 'brute-force'">
+
+    <div class="ahp-flow-title">
+      @if (flow === 'hack-on-fly') {
+      <i class="fas fa-bolt me-1"></i>Hack on the Fly
+      } @else {
+      <i class="fas fa-hammer me-1"></i>Brute Force
+      }
+    </div>
+
+    <div class="ahp-flow-hint">
+      @if (flow === 'hack-on-fly') {
+      Roll: <strong>Cracking + Logic [DP]</strong> vs <strong>Firewall + Data Processing</strong>
+      } @else {
+      Roll: <strong>Cracking + Logic [ATK]</strong> vs <strong>Firewall + Intuition</strong>
+      }
+      @if (matrixState.state.noise > 0) {
+      <span class="ahp-noise-warn"> — Noise penalty: −{{ matrixState.state.noise }}</span>
+      }
+    </div>
+
+    <!-- Decker selector -->
+    @if (activeDeckers.length > 1) {
+    <div class="ahp-field-row">
+      <label class="ahp-field-label">Decker</label>
+      <select class="ahp-select" [(ngModel)]="selectedDeckerId">
+        @for (d of activeDeckers; track d.name) {
+        <option [value]="d.name">{{ d.name }}</option>
+        }
+      </select>
+    </div>
+    }
+
+    <!-- Dice roller -->
+    <div class="ahp-dice-area">
+      <app-dice-roller (rolledEvent)="onRolled($event)"></app-dice-roller>
+    </div>
+
+    <!-- Post-roll: marks and OS -->
+    @if (rolled) {
+    <div class="ahp-post-roll">
+      <div class="ahp-hits-summary">
+        Hits: <strong>{{ hitCount }}</strong> / {{ lastRollValues.length }} dice
+      </div>
+
+      <div class="ahp-field-row ahp-marks-row">
+        <label class="ahp-field-label">Marks gained</label>
+        <div class="ahp-marks-btns">
+          @for (n of [0, 1, 2, 3]; track n) {
+          <button type="button" class="ahp-mark-btn" [class.selected]="marksGained === n"
+            (click)="marksGained = n">{{ n }}</button>
+          }
+        </div>
+      </div>
+
+      <div class="ahp-os-preview">
+        @if (flow === 'hack-on-fly') {
+        Suggested OS: <strong class="text-danger">+{{ suggestedOS }}</strong>
+        ({{ marksGained }} mark{{ marksGained !== 1 ? 's' : '' }} × 2)
+        } @else {
+        Suggested OS: <strong class="text-danger">+{{ suggestedOS }}</strong>
+        ({{ marksGained }} mark{{ marksGained !== 1 ? 's' : '' }} × 4)
+        }
+      </div>
+
+      <div class="ahp-flow-actions">
+        <button type="button" class="ahp-btn-apply" (click)="confirmAccess()">
+          Apply OS &amp; Set Access
+        </button>
+        <button type="button" class="ahp-btn-cancel" (click)="cancelFlow()">Cancel</button>
+      </div>
+    </div>
+    } @else {
+    <div class="ahp-roll-prompt">Roll above, then set marks gained below.</div>
+    <div class="ahp-flow-actions">
+      <button type="button" class="ahp-btn-cancel" (click)="cancelFlow()">Cancel</button>
+    </div>
+    }
+
+  </div>
+  }
+
+  }
+</div>
