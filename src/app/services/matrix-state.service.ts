@@ -194,12 +194,10 @@ export class MatrixStateService {
       () => {
         host.marks[deckerId] = next;
         for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
-        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = next; } }
       },
       () => {
         host.marks[deckerId] = prev;
         for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prev); }
-        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prev; } }
       }
     );
     this.stateChange$.next();
@@ -207,7 +205,6 @@ export class MatrixStateService {
 
   /**
    * Removes one mark placed directly on the host (GM-applied via host mark UI).
-   * Mirrors the decrement to all active IC and IC-type MatrixTargets.
    * Caller must call UndoHandler.StartActions() first.
    */
   removeMarkFromHost(host: MatrixHost, deckerId: string): void {
@@ -218,16 +215,10 @@ export class MatrixStateService {
       () => {
         if (next === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = next; }
         for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
-        for (const t of host.targets) {
-          if (t.type === "ic") {
-            if (next === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = next; }
-          }
-        }
       },
       () => {
         host.marks[deckerId] = prev;
         for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prev); }
-        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prev; } }
       }
     );
     this.stateChange$.next();
@@ -235,13 +226,6 @@ export class MatrixStateService {
 
   /** Adds a MatrixTarget to a host's target list or to public space (host = null). */
   addTarget(host: MatrixHost | null, target: MatrixTarget): void {
-    // IC-type targets inside a host inherit the host's existing mark counts so
-    // the card displays correctly even when added after marks were placed.
-    if (host && target.type === "ic") {
-      for (const [deckerId, count] of Object.entries(host.marks)) {
-        if (count > 0) target.marks[deckerId] = count;
-      }
-    }
     UndoHandler.DoAction(
       () => {
         if (host) {
@@ -337,79 +321,32 @@ export class MatrixStateService {
 
   /**
    * Places one mark from `deckerId` on `target` (max 3).
-   * If target is inside a host, also increments host.marks and propagates to
-   * all active IC in the host (SR5E p.247 host-wide mark propagation).
-   * Caller must call UndoHandler.StartActions() first.
+   * Only updates target.marks — host marks are tracked independently via
+   * addMarkToHost(). Caller must call UndoHandler.StartActions() first.
    */
   addMark(target: MatrixTarget, deckerId: string): void {
     const prev = target.marks[deckerId] ?? 0;
     if (prev >= 3) return;
     const next = prev + 1;
-    const host = target.linkedHostId
-      ? (this.state.hosts.find(h => h.id === target.linkedHostId) ?? null)
-      : null;
-    const prevHostMark = host ? (host.marks[deckerId] ?? 0) : 0;
-    const nextHostMark = host ? Math.min(3, prevHostMark + 1) : 0;
     UndoHandler.DoAction(
-      () => {
-        target.marks[deckerId] = next;
-        if (host) {
-          host.marks[deckerId] = nextHostMark;
-          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, nextHostMark); }
-          for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = nextHostMark; } }
-        }
-      },
-      () => {
-        if (prev === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = prev; }
-        if (host) {
-          if (prevHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = prevHostMark; }
-          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prevHostMark); }
-          for (const t of host.targets) {
-            if (t.type === "ic") {
-              if (prevHostMark === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = prevHostMark; }
-            }
-          }
-        }
-      }
+      () => { target.marks[deckerId] = next; },
+      () => { if (prev === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = prev; } }
     );
     this.stateChange$.next();
   }
 
   /**
    * Removes one mark from `deckerId` on `target`.
-   * Mirrors the decrement to host.marks, active IC, and IC-type MatrixTargets.
-   * Caller must call UndoHandler.StartActions() first.
+   * Only updates target.marks — host marks are tracked independently via
+   * removeMarkFromHost(). Caller must call UndoHandler.StartActions() first.
    */
   removeMark(target: MatrixTarget, deckerId: string): void {
     const prev = target.marks[deckerId] ?? 0;
     if (prev <= 0) return;
     const next = prev - 1;
-    const host = target.linkedHostId
-      ? (this.state.hosts.find(h => h.id === target.linkedHostId) ?? null)
-      : null;
-    const prevHostMark = host ? (host.marks[deckerId] ?? 0) : 0;
-    const nextHostMark = host ? Math.max(0, prevHostMark - 1) : 0;
     UndoHandler.DoAction(
-      () => {
-        if (next === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = next; }
-        if (host) {
-          if (nextHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = nextHostMark; }
-          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, nextHostMark); }
-          for (const t of host.targets) {
-            if (t.type === "ic") {
-              if (nextHostMark === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = nextHostMark; }
-            }
-          }
-        }
-      },
-      () => {
-        target.marks[deckerId] = prev;
-        if (host) {
-          host.marks[deckerId] = prevHostMark;
-          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prevHostMark); }
-          for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prevHostMark; } }
-        }
-      }
+      () => { if (next === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = next; } },
+      () => { target.marks[deckerId] = prev; }
     );
     this.stateChange$.next();
   }
