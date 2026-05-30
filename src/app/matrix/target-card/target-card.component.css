@@ -2,7 +2,7 @@
 
 .tc-wrap {
   font-family: var(--matrix-font, "Courier New", monospace);
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   color: var(--matrix-text-dim, #7ab87a);
   border-top: 1px solid transparent;
   border-bottom: 1px solid transparent;
@@ -28,7 +28,7 @@
 }
 
 .tc-type-icon {
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   color: #4a7a4a;
   flex-shrink: 0;
   width: 0.85rem;
@@ -45,13 +45,13 @@
 }
 
 .tc-dr {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   color: #3a5a3a;
   flex-shrink: 0;
 }
 
 .tc-icon-sm {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   color: #6ab87a;
   flex-shrink: 0;
 }
@@ -60,7 +60,7 @@
 
 .tc-spotted-btn {
   display: inline-block;
-  font-size: 0.58rem;
+  font-size: 0.66rem;
   font-family: inherit;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -90,7 +90,7 @@
 
 .tc-icon-btn {
   padding: 0.05rem 0.3rem;
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   background: transparent;
   border: 1px solid transparent;
   color: #3a5a3a;
@@ -118,7 +118,7 @@
   flex-wrap: wrap;
   gap: 0.3rem;
   padding: 0.08rem 0.55rem 0.15rem 1.8rem;
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   color: #4a7a4a;
 }
 
@@ -143,7 +143,7 @@
 .tc-dots {
   letter-spacing: 0.04em;
   color: var(--matrix-text, #00ff9f);
-  font-size: 0.68rem;
+  font-size: 0.77rem;
 }
 
 .tc-mark-rm {
@@ -151,7 +151,7 @@
   border: none;
   color: #5a4a4a;
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   padding: 0;
   line-height: 1;
 }
@@ -167,7 +167,7 @@
 }
 
 .tc-add-mark-btn {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-family: inherit;
   padding: 0.05rem 0.3rem;
   background: transparent;
@@ -184,7 +184,7 @@
 }
 
 .tc-decker-select {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   font-family: inherit;
   padding: 0.05rem 0.2rem;
   background: #0a1a0a;
@@ -197,7 +197,7 @@
 
 .tc-confirm-btn,
 .tc-cancel-btn {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   font-family: inherit;
   padding: 0.03rem 0.25rem;
   border-radius: 2px;

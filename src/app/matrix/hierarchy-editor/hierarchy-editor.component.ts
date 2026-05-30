@@ -11,6 +11,7 @@ import {
 } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { TargetCardComponent } from "app/matrix/target-card/target-card.component";
+import { UndoHandler } from "Common";
 
 interface HostFormState {
   active: boolean;
@@ -323,5 +324,53 @@ export class HierarchyEditorComponent {
 
   isEditingHost(host: MatrixHost): boolean {
     return this.hostForm.active && this.hostForm.isEditing && this.hostForm.host === host;
+  }
+
+  // ── Host mark management ─────────────────────────────────────────────────
+
+  private hostMarkState = new Map<string, { open: boolean; selectedDeckerId: string }>();
+
+  getHostMarkState(hostId: string): { open: boolean; selectedDeckerId: string } {
+    if (!this.hostMarkState.has(hostId)) {
+      this.hostMarkState.set(hostId, { open: false, selectedDeckerId: "" });
+    }
+    return this.hostMarkState.get(hostId)!;
+  }
+
+  hostMarkEntries(host: MatrixHost): { deckerId: string; count: number }[] {
+    return Object.entries(host.marks)
+      .filter(([, c]) => c > 0)
+      .map(([id, count]) => ({ deckerId: id, count }));
+  }
+
+  /** Deckers that can still receive another mark on this host (count < 3). */
+  hostAvailableDeckers(host: MatrixHost): MatrixParticipant[] {
+    return this.activeDeckers.filter(d => (host.marks[d.name] ?? 0) < 3);
+  }
+
+  dots(count: number): string {
+    return "●".repeat(count) + "○".repeat(3 - count);
+  }
+
+  openHostAddMark(host: MatrixHost): void {
+    const s = this.getHostMarkState(host.id);
+    s.open = true;
+    if (!s.selectedDeckerId && this.hostAvailableDeckers(host).length > 0) {
+      s.selectedDeckerId = this.hostAvailableDeckers(host)[0].name;
+    }
+  }
+
+  confirmHostAddMark(host: MatrixHost): void {
+    const s = this.getHostMarkState(host.id);
+    if (!s.selectedDeckerId) return;
+    if ((host.marks[s.selectedDeckerId] ?? 0) >= 3) return;
+    UndoHandler.StartActions();
+    this.matrixState.addMarkToHost(host, s.selectedDeckerId, 1);
+    s.open = false;
+  }
+
+  removeHostMark(host: MatrixHost, deckerId: string): void {
+    UndoHandler.StartActions();
+    this.matrixState.removeMarkFromHost(host, deckerId);
   }
 }

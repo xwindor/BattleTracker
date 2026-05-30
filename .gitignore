@@ -48,3 +48,6 @@ obj/Debug/
 .angular/cache/*
 .vscode/settings.json
 src/assets/version.txt
+
+# Claude Code internals
+.claude/

@@ -467,13 +467,11 @@
         Combat Turn {{ combatManager.combatTurn }}
         }
       </div>
-      @if (hasAnyMatrixParticipants) {
       <app-matrix-run-panel
         [activeDeckers]="activeDeckers"
         (jackInRequested)="onMatrixPanelJackIn($event.decker, $event.mode)"
         (jackOutRequested)="onMatrixPanelJackOut($event)">
       </app-matrix-run-panel>
-      }
 
       <div class="card mt-3">
         <div class="card-header">Action Log</div>

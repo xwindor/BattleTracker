@@ -5,10 +5,10 @@
   flex-direction: column;
   gap: 0;
   font-family: var(--matrix-font, "Courier New", monospace);
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   color: var(--matrix-text-dim, #7ab87a);
   overflow-y: auto;
-  max-height: 420px;
+  max-height: 500px;
 }
 
 /* ── Section shells ──────────────────────────────────────────────────────── */
@@ -50,7 +50,7 @@
 }
 
 .hier-section-title {
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -58,7 +58,7 @@
 }
 
 .hier-count {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   color: #3a5a3a;
   background: #0d1f0d;
   padding: 0 0.3rem;
@@ -78,7 +78,7 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.1rem 0.45rem;
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   font-family: inherit;
   background: transparent;
   border: 1px solid #1a4a1a;
@@ -101,7 +101,7 @@
 }
 
 .hier-empty {
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   color: #3a5a3a;
   font-style: italic;
   padding: 0.25rem 0.7rem;
@@ -129,7 +129,7 @@
 }
 
 .hier-type-icon {
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   color: #4a7a4a;
   flex-shrink: 0;
   width: 0.85rem;
@@ -146,19 +146,19 @@
 }
 
 .hier-device-rating {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   color: #3a5a3a;
   flex-shrink: 0;
 }
 
 .hier-direct-conn-icon {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   color: #6ab87a;
   flex-shrink: 0;
 }
 
 .hier-silent-icon {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   color: #7a7a4a;
   flex-shrink: 0;
 }
@@ -167,7 +167,7 @@
 
 .hier-spotted-btn {
   display: inline-block;
-  font-size: 0.58rem;
+  font-size: 0.66rem;
   font-family: inherit;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -213,7 +213,7 @@
 
 .hier-icon-btn {
   padding: 0.05rem 0.3rem;
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   background: transparent;
   border: 1px solid transparent;
   color: #3a5a3a;
@@ -264,7 +264,7 @@
 }
 
 .hier-active-badge {
-  font-size: 0.58rem;
+  font-size: 0.66rem;
   font-weight: 700;
   padding: 0.05rem 0.3rem;
   background: #0a2a0a;
@@ -282,7 +282,7 @@
 }
 
 .hier-host-name {
-  font-size: 0.77rem;
+  font-size: 0.87rem;
   font-weight: 600;
   color: var(--matrix-text, #00ff9f);
   flex: 1 1 auto;
@@ -293,13 +293,13 @@
 }
 
 .hier-host-rating {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   color: var(--matrix-text-dim, #7ab87a);
   flex-shrink: 0;
 }
 
 .hier-host-asdf {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   color: #3a5a3a;
   flex-shrink: 0;
   letter-spacing: 0.02em;
@@ -307,7 +307,7 @@
 
 .hier-set-active-btn,
 .hier-clear-active-btn {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   font-family: inherit;
   padding: 0.05rem 0.35rem;
   border-radius: 2px;
@@ -358,7 +358,7 @@
 }
 
 .hier-subsection-label {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   font-weight: 700;
   color: #3a5a3a;
   text-transform: uppercase;
@@ -381,7 +381,7 @@
   align-items: center;
   gap: 0.2rem;
   padding: 0.05rem 0.3rem;
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-family: inherit;
   background: transparent;
   border: 1px solid #1a3a1a;
@@ -403,7 +403,7 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   color: #e07050;
   padding: 0.1rem 0;
 }
@@ -414,13 +414,13 @@
 }
 
 .hier-ic-cm {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   color: #5a5a5a;
   margin-left: auto;
 }
 
 .hier-ic-bricked-label {
-  font-size: 0.58rem;
+  font-size: 0.66rem;
   font-weight: 700;
   color: #5a5a5a;
   background: #1a1a1a;
@@ -448,7 +448,7 @@
 }
 
 .hier-form-title {
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -469,7 +469,7 @@
 }
 
 .hier-form-label {
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   color: #4a7a4a;
   min-width: 5rem;
   flex-shrink: 0;
@@ -489,7 +489,7 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.15rem 0.35rem;
-  font-size: 0.7rem;
+  font-size: 0.79rem;
   font-family: inherit;
   background: #0a1a0a;
   border: 1px solid #1a4a1a;
@@ -518,7 +518,7 @@
   flex: 1 1 auto;
   min-width: 0;
   padding: 0.15rem 0.35rem;
-  font-size: 0.7rem;
+  font-size: 0.79rem;
   font-family: inherit;
   background: #0a1a0a;
   border: 1px solid #1a4a1a;
@@ -533,7 +533,7 @@
 }
 
 .hier-suggest-btn {
-  font-size: 0.62rem;
+  font-size: 0.71rem;
   font-family: inherit;
   padding: 0.1rem 0.4rem;
   background: transparent;
@@ -559,7 +559,7 @@
 
 .hier-btn-save {
   padding: 0.15rem 0.65rem;
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   font-family: inherit;
   background: #0a2a0a;
   border: 1px solid #2a7a2a;
@@ -580,7 +580,7 @@
 
 .hier-btn-cancel {
   padding: 0.15rem 0.65rem;
-  font-size: 0.68rem;
+  font-size: 0.77rem;
   font-family: inherit;
   background: transparent;
   border: 1px solid #2a3a2a;
@@ -604,4 +604,126 @@ input[type="checkbox"] {
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   opacity: 0.4;
+}
+
+/* ── Host marks section ──────────────────────────────────────────────────── */
+
+.hier-host-marks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.1rem 0.55rem 0.15rem;
+  font-size: 0.71rem;
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-marks-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #3a5a3a;
+  margin-right: 0.15rem;
+  flex-shrink: 0;
+}
+
+.hier-mark-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a3a1a;
+  border-radius: 2px;
+  padding: 0.02rem 0.25rem;
+}
+
+.hier-mark-decker {
+  font-size: 0.66rem;
+  color: #5a8a5a;
+  max-width: 5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hier-mark-dots {
+  font-size: 0.71rem;
+  letter-spacing: 0.04em;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-mark-rm {
+  background: transparent;
+  border: none;
+  color: #5a4a4a;
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.hier-mark-rm:hover { color: #cc4444; }
+
+.hier-add-mark-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.hier-add-mark-btn {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.05rem 0.3rem;
+  background: transparent;
+  border: 1px solid #1a3a1a;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.hier-add-mark-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #2a5a2a;
+  background: #080f08;
+}
+
+.hier-mark-select {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.05rem 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  max-width: 7rem;
+  appearance: auto;
+}
+
+.hier-mark-confirm,
+.hier-mark-cancel {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.03rem 0.25rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.hier-mark-confirm {
+  background: #0a2a0a;
+  border: 1px solid #2a7a2a;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-mark-confirm:hover { background: #0d350d; }
+
+.hier-mark-cancel {
+  background: transparent;
+  border: 1px solid #2a3a2a;
+  color: #4a5a4a;
+}
+
+.hier-mark-cancel:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #3a5a3a;
 }

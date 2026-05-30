@@ -142,6 +142,37 @@
     @if (isHostExpanded(host.id)) {
     <div class="hier-host-body">
 
+      <!-- Host marks -->
+      @if (activeDeckers.length > 0 || hostMarkEntries(host).length > 0) {
+      <div class="hier-host-marks">
+        <span class="hier-marks-label">Host Marks</span>
+        @for (entry of hostMarkEntries(host); track entry.deckerId) {
+        <span class="hier-mark-entry">
+          <span class="hier-mark-decker">{{ entry.deckerId }}</span>
+          <span class="hier-mark-dots">{{ dots(entry.count) }}</span>
+          <button type="button" class="hier-mark-rm"
+            (click)="removeHostMark(host, entry.deckerId)"
+            title="Remove 1 mark from host">×</button>
+        </span>
+        }
+        @if (hostAvailableDeckers(host).length > 0) {
+        <span class="hier-add-mark-group">
+          @if (!getHostMarkState(host.id).open) {
+          <button type="button" class="hier-add-mark-btn" (click)="openHostAddMark(host)">+Mark</button>
+          } @else {
+          <select class="hier-mark-select" [(ngModel)]="getHostMarkState(host.id).selectedDeckerId">
+            @for (d of hostAvailableDeckers(host); track d.name) {
+            <option [value]="d.name">{{ d.name }}</option>
+            }
+          </select>
+          <button type="button" class="hier-mark-confirm" (click)="confirmHostAddMark(host)">✓</button>
+          <button type="button" class="hier-mark-cancel" (click)="getHostMarkState(host.id).open = false">✕</button>
+          }
+        </span>
+        }
+      </div>
+      }
+
       <!-- Edit-host form (inline inside node) -->
       @if (isEditingHost(host)) {
       <div class="hier-form hier-form-inset">

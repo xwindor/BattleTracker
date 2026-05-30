@@ -193,15 +193,41 @@ export class MatrixStateService {
     UndoHandler.DoAction(
       () => {
         host.marks[deckerId] = next;
-        for (const ic of host.icActive) {
-          ic.marksPlaced.set(deckerId, next);
+        for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
+        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = next; } }
+      },
+      () => {
+        host.marks[deckerId] = prev;
+        for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prev); }
+        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prev; } }
+      }
+    );
+    this.stateChange$.next();
+  }
+
+  /**
+   * Removes one mark placed directly on the host (GM-applied via host mark UI).
+   * Mirrors the decrement to all active IC and IC-type MatrixTargets.
+   * Caller must call UndoHandler.StartActions() first.
+   */
+  removeMarkFromHost(host: MatrixHost, deckerId: string): void {
+    const prev = host.marks[deckerId] ?? 0;
+    if (prev <= 0) return;
+    const next = prev - 1;
+    UndoHandler.DoAction(
+      () => {
+        if (next === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = next; }
+        for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
+        for (const t of host.targets) {
+          if (t.type === "ic") {
+            if (next === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = next; }
+          }
         }
       },
       () => {
         host.marks[deckerId] = prev;
-        for (const ic of host.icActive) {
-          ic.marksPlaced.set(deckerId, prev);
-        }
+        for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prev); }
+        for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prev; } }
       }
     );
     this.stateChange$.next();
@@ -322,17 +348,19 @@ export class MatrixStateService {
         target.marks[deckerId] = next;
         if (host) {
           host.marks[deckerId] = nextHostMark;
-          for (const ic of host.icActive) {
-            ic.marksPlaced.set(deckerId, nextHostMark);
-          }
+          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, nextHostMark); }
+          for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = nextHostMark; } }
         }
       },
       () => {
         if (prev === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = prev; }
         if (host) {
           if (prevHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = prevHostMark; }
-          for (const ic of host.icActive) {
-            ic.marksPlaced.set(deckerId, prevHostMark);
+          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prevHostMark); }
+          for (const t of host.targets) {
+            if (t.type === "ic") {
+              if (prevHostMark === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = prevHostMark; }
+            }
           }
         }
       }
@@ -342,7 +370,7 @@ export class MatrixStateService {
 
   /**
    * Removes one mark from `deckerId` on `target`.
-   * Mirrors the decrement to host.marks and active IC in the host.
+   * Mirrors the decrement to host.marks, active IC, and IC-type MatrixTargets.
    * Caller must call UndoHandler.StartActions() first.
    */
   removeMark(target: MatrixTarget, deckerId: string): void {
@@ -359,8 +387,11 @@ export class MatrixStateService {
         if (next === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = next; }
         if (host) {
           if (nextHostMark === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = nextHostMark; }
-          for (const ic of host.icActive) {
-            ic.marksPlaced.set(deckerId, nextHostMark);
+          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, nextHostMark); }
+          for (const t of host.targets) {
+            if (t.type === "ic") {
+              if (nextHostMark === 0) { delete t.marks[deckerId]; } else { t.marks[deckerId] = nextHostMark; }
+            }
           }
         }
       },
@@ -368,9 +399,8 @@ export class MatrixStateService {
         target.marks[deckerId] = prev;
         if (host) {
           host.marks[deckerId] = prevHostMark;
-          for (const ic of host.icActive) {
-            ic.marksPlaced.set(deckerId, prevHostMark);
-          }
+          for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, prevHostMark); }
+          for (const t of host.targets) { if (t.type === "ic") { t.marks[deckerId] = prevHostMark; } }
         }
       }
     );
