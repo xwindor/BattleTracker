@@ -21,6 +21,7 @@ import { MatrixParticipant, VRMode, ICParticipant, ICType, MatrixHost } from "Ma
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { ICSpawnerComponent } from "app/matrix/ic-spawner/ic-spawner.component";
 import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
+import { OsPromptComponent } from "app/matrix/os-prompt/os-prompt.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
@@ -48,7 +49,8 @@ interface LocalLogEntry {
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
     ICSpawnerComponent,
-    MatrixRunPanelComponent
+    MatrixRunPanelComponent,
+    OsPromptComponent
   ]
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
@@ -1255,20 +1257,41 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return sel.free === null && sel.simple.length === 0 && sel.complex === null;
   }
 
-  submitActModal() {
+  async submitActModal(): Promise<void> {
     if (!this.actModalParticipant || !this.isDeclaredActionSelectionValid(this.actModalParticipant)) {
       return;
     }
     const actor = this.actModalParticipant;
     const illegalActions = this.actModalIllegalOsActions;
-    this.performAct(actor, this.buildDeclaredActionLog(actor));
-    if (illegalActions.length > 0) {
-      const names = illegalActions.map(a => a.name).join(", ");
-      this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
-    }
+    const actionLog = this.buildDeclaredActionLog(actor);
+
     this.clearDeclaredActionSelection(actor);
     if (this.actModalRef) {
       this.actModalRef.close();
+    }
+
+    // performAct calls UndoHandler.StartActions() — opens the undo chapter.
+    this.performAct(actor, actionLog);
+
+    if (illegalActions.length > 0 && this.isMatrix(actor)) {
+      const suggestedDelta = illegalActions.reduce((sum, a) => sum + a.delta, 0);
+      const promptRef = this.modalService.open(OsPromptComponent, { centered: true, backdrop: 'static' });
+      promptRef.componentInstance.actionEntries = illegalActions;
+      promptRef.componentInstance.suggestedDelta = suggestedDelta;
+      promptRef.componentInstance.deckerName = actor.name || 'Decker';
+      try {
+        // Modal result is the confirmed delta (number). DoAction runs inside the
+        // same UndoHandler chapter opened by performAct() above, so Undo reverses
+        // both the act and the OS addition together.
+        const delta: number = await promptRef.result;
+        if (delta > 0) {
+          this.osTracking.addOS(this.asMatrix(actor), delta, illegalActions.map(a => a.name).join(', '));
+          this.syncSharedState();
+          this.changeDetector.detectChanges();
+        }
+      } catch {
+        // User cancelled — no OS change.
+      }
     }
   }
 
