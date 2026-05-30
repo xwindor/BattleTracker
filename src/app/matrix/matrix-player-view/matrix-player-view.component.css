@@ -2,6 +2,75 @@
   font-size: 0.875rem;
 }
 
+/* ── Decker status row ────────────────────────────────────────────────── */
+.mpv-decker-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(0,0,0,0.08);
+  border: 1px solid var(--bs-border-color);
+}
+
+.mpv-vr-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-vr-ar   { background: rgba(108,117,125,0.2); color: var(--bs-secondary); border: 1px solid var(--bs-secondary); }
+.mpv-vr-cold { background: rgba(13,202,240,0.15); color: var(--bs-info);      border: 1px solid rgba(13,202,240,0.4); }
+.mpv-vr-hot  { background: rgba(255,193,7,0.15);  color: var(--bs-warning);   border: 1px solid rgba(255,193,7,0.4); }
+
+.mpv-os-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.mpv-os-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--bs-secondary-color);
+  flex-shrink: 0;
+}
+
+.mpv-os-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bs-border-color);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.mpv-os-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.mpv-os-bar-green { background: var(--bs-success); color: var(--bs-success); }
+.mpv-os-bar-amber { background: var(--bs-warning); color: var(--bs-warning); }
+.mpv-os-bar-red   { background: var(--bs-danger);  color: var(--bs-danger);  }
+
+.mpv-os-value {
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  min-width: 1.6rem;
+  text-align: right;
+}
+
 .mpv-header {
   display: flex;
   align-items: center;

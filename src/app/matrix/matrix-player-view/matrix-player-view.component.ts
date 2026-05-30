@@ -23,6 +23,40 @@ export class MatrixPlayerViewComponent {
   /** Active host name, if any (from SharedCombatState.currentHostName). */
   @Input() currentHostName: string | undefined = undefined;
 
+  /** Decker's current Overwatch Score (OS). */
+  @Input() myOverwatch: number = 0;
+
+  /** Decker's current VR mode ('AR' | 'cold-sim' | 'hot-sim'). */
+  @Input() myVrMode: string = "AR";
+
+  /** CSS class for the OS bar fill based on OS thresholds. */
+  osBarClass(): string {
+    if (this.myOverwatch >= 40) return "mpv-os-bar-red";
+    if (this.myOverwatch >= 20) return "mpv-os-bar-amber";
+    return "mpv-os-bar-green";
+  }
+
+  /** Bar fill width as a percentage of the 40-OS convergence threshold. */
+  osBarWidth(): string {
+    return Math.min(100, Math.round((this.myOverwatch / 40) * 100)) + "%";
+  }
+
+  vrModeLabel(): string {
+    switch (this.myVrMode) {
+      case "hot-sim":   return "HOT SIM";
+      case "cold-sim":  return "COLD SIM";
+      default:          return "AR";
+    }
+  }
+
+  vrModeClass(): string {
+    switch (this.myVrMode) {
+      case "hot-sim":  return "mpv-vr-hot";
+      case "cold-sim": return "mpv-vr-cold";
+      default:         return "mpv-vr-ar";
+    }
+  }
+
   /** Returns the mark count this decker has placed on a target. */
   myMarks(target: SharedMatrixTarget): number {
     if (!this.myName) return 0;

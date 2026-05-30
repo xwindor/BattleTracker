@@ -1,5 +1,17 @@
 <div class="mpv-wrap">
 
+  <!-- Decker status: VR mode + OS bar -->
+  <div class="mpv-decker-status">
+    <span class="mpv-vr-chip" [class]="vrModeClass()">{{ vrModeLabel() }}</span>
+    <div class="mpv-os-wrap">
+      <span class="mpv-os-label">OS</span>
+      <div class="mpv-os-track">
+        <div class="mpv-os-fill" [class]="osBarClass()" [style.width]="osBarWidth()"></div>
+      </div>
+      <span class="mpv-os-value" [class]="osBarClass()">{{ myOverwatch }}</span>
+    </div>
+  </div>
+
   <!-- Header with optional host context -->
   <div class="mpv-header">
     <span class="mpv-title">Matrix Icons</span>

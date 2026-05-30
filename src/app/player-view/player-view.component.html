@@ -223,13 +223,15 @@
     </ul>
   </div>
 
-  @if (primaryCharacter?.isMatrix && primaryCharacter?.jackedIn && state && state.matrixTargets?.length) {
+  @if (primaryCharacter?.isMatrix && primaryCharacter?.jackedIn && state) {
   <div class="card mt-3">
     <div class="card-header">Matrix View</div>
     <div class="card-body py-2">
       <app-matrix-player-view
-        [targets]="state!.matrixTargets!"
+        [targets]="state!.matrixTargets ?? []"
         [myName]="primaryCharacter!.name"
+        [myOverwatch]="primaryCharacter!.overwatch ?? 0"
+        [myVrMode]="primaryCharacter!.vrMode ?? 'AR'"
         [currentHostName]="state!.currentHostName">
       </app-matrix-player-view>
     </div>
