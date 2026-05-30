@@ -5,6 +5,8 @@
 The Matrix module adds Shadowrun 5e hacking support to the existing Angular 19 initiative tracker.
 **Branch:** `feat/matrix-module`
 
+**Full design document:** `SR5E_Matrix_Module_Plan_v2.md` — read this before writing any Matrix code. It contains the full architecture, data models, UndoHandler patterns, component specs, and SR5E rules reference. CLAUDE.md is the condensed step checklist; v2 is the source of truth for *how* to build each piece.
+
 Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 - `src/Matrix/` — all domain classes (MatrixParticipant, ICParticipant, MatrixHost, MatrixTarget, MatrixRunState, VRMode, ICType, MatrixIcon)
 - `src/app/services/matrix-state.service.ts` — jackIn/jackOut/addHost skeleton
@@ -15,7 +17,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 1 — Add Decker to the initiative tracker ✅ NEXT
+## Step 1 — Add Decker to the initiative tracker ✅ DONE
 
 **Goal:** GM can add a decker, enter ASDF stats + intuition + VR mode, and see them appear in the initiative list with the correct Matrix initiative and badge. No workflow panel yet.
 
@@ -35,7 +37,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 2 — OS counter inline editor
+## Step 2 — OS counter inline editor ✅ DONE
 
 **Goal:** Clicking the OS chip in the badge opens ± controls inline. Threshold alerts fire at OS 20 (amber banner) and OS 40 (red modal). Reset on jack-out.
 
@@ -57,7 +59,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 3 — IC as initiative participants
+## Step 3 — IC as initiative participants ✅ DONE
 
 **Goal:** GM can spawn IC from a host rating. IC enters the tracker as a full participant (rolls initiative, takes turns). No host/target model needed yet — IC is standalone.
 
@@ -78,29 +80,28 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 4 — Hacking workflow shell (jack-in/out panel + stepper)
+## Step 4 — Hacking workflow shell (two-pane layout + decker status cards) ✅ DONE
 
-**Goal:** A collapsible Matrix panel appears in the GM view. It shows the workflow stepper (Jack In → Public Space → Locate Host → Access Host → Inside Host → Target Interaction → Jack Out) and a Jack In / Mode Switch form. OS reset on jack-out.
+**Goal:** A collapsible Matrix panel appears in the GM view using a **two-pane layout**. `DeckerStatusCardComponent` is the primary jack-in UX. `WorkflowStepperComponent` is a passive 7-step indicator strip only — no navigation. Right pane is a graph stub until Step 9.
 
-**Files to create/modify:**
-- `src/app/matrix/matrix-run-panel/matrix-run-panel.component.{ts,html,css}` — outer container with stepper + step panels; `@Input activeDeckers`
-- `src/app/matrix/jack-in-panel/jack-in-panel.component.{ts,html,css}` — decker dropdown, mode selector (AR/Cold/Hot), Confirm Jack In, Jack Out buttons
-- `src/app/battle-tracker/battle-tracker.component.html` — import and render `<app-matrix-run-panel>` (collapsible section below the participant list)
-- `src/app/battle-tracker/battle-tracker.component.ts` — pass `activeDeckers` getter to the panel; handle jackOut event → `matrixState.jackOut()` + `osTracking.resetOS()`
+**Layout (see v2 plan §4.1 for full spec):**
+- **Top strip:** One `DeckerStatusCardComponent` per `MatrixParticipant` — name, jack-in status badge, VR CATATONIC indicator, OS counter, Jack In / Jack Out button with inline mode selector
+- **Header controls:** Noise ± control, Grid selector (Public / Corporate / Prime), Active Host banner
+- **Left pane:** Hierarchy editor (`HierarchyEditorComponent`)
+- **Right pane:** Graph stub `<div class="graph-stub">Matrix Graph — coming in Step 9</div>` — do NOT build `MatrixGraphComponent` before Step 9
+- **Reference strip:** Passive `WorkflowStepperComponent` — auto-highlights phase from `MatrixRunState`; no click navigation
 
-**Acceptance criteria:**
-1. A "Matrix" collapsible section appears in the GM view (collapsed by default).
-2. Expanding it shows the 7-step stepper; active step is highlighted.
-3. Jack In form shows all MatrixParticipants from the tracker as a dropdown.
-4. Selecting a decker and clicking "Jack In (Hot-Sim)" calls `matrixState.jackIn()`, updates the tracker badge, and marks Step 1 complete on the stepper.
-5. "Jack Out" button resets OS to 0 (with confirmation) and reverts the badge to AR.
-6. Noise is explicitly NOT a field here — plan doc says it's a per-roll modifier (Step 9).
+**Key design decisions (from v2 plan update):**
+- `JackInPanelComponent` is **demoted — not rendered as a panel**. Jack-in logic lives in `MatrixStateService.jackIn()` / `jackOut()`.
+- `WorkflowStepperComponent` (formerly MatrixWorkflowComponent) is **passive only** — no panel switching tied to it.
+- Host convergence: do NOT dump the decker at OS 40 inside a host. Auto-apply 3 marks from host, show demiGOD modal, set `hostConverged = true` on participant. Jack-out while `hostConverged = true` → show warning before completing.
+- Noise is a scene-level GM parameter in the panel header — not per-decker, not in the jack-in form.
 
-**Unlocks:** Step 5 (the Host step panel plugs into the existing stepper slot).
+**Unlocks:** Step 5 (host and target creation plugs into the hierarchy editor).
 
 ---
 
-## Step 5 — Host + target creation
+## Step 5 — Host + target creation ✅ DONE
 
 **Goal:** GM can create a host (name, rating, ASDF) and add device/file targets inside it. Targets are visible to the GM in the InsideHost panel. No marks or reveals yet.
 
@@ -121,7 +122,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 6 — Mark tracking
+## Step 6 — Mark tracking ✅ DONE
 
 **Goal:** GM can place / remove marks on targets, recording which decker placed each mark (max 3 per decker per target). Marks are visible on target cards as filled dots.
 
@@ -141,7 +142,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 7 — Reveal mechanic + player view
+## Step 7 — Reveal mechanic + player view ✅ DONE
 
 **Goal:** GM can reveal targets to players. Players with a decker character see revealed targets (read-only). Running-silent targets appear as "Unknown Icon ■" in player view.
 
@@ -163,7 +164,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 8 — OS automation (illegal action prompts)
+## Step 8 — OS automation (illegal action prompts) ✅ DONE
 
 **Goal:** When a MatrixParticipant takes a Matrix action tagged as illegal (Hack on the Fly, Brute Force, Data Spike), a modal prompts the GM with the RAW OS delta. GM can accept, adjust, or cancel.
 
@@ -184,9 +185,9 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
-## Step 9 — Full hacking workflow (access methods + direct connection)
+## Step 9 — Full hacking workflow (access methods + direct connection) ← NEXT
 
-**Goal:** The AccessHost step panel has working Hack on the Fly, Brute Force, and Direct Connection flows with dice-roll prompts and OS tracking.
+**Goal:** The AccessHost step panel has working Hack on the Fly, Brute Force, and Direct Connection flows with dice-roll prompts and OS tracking. Also builds `MatrixGraphComponent` as the primary player-facing Matrix UI (node graph replacing the flat target list). See v2 plan §4.17 for full graph spec.
 
 **Files to create/modify:**
 - `src/app/matrix/access-host-panel/access-host-panel.component.{ts,html,css}` — three entry methods with confirm buttons; wires to dice-roll prompt and OsPromptComponent
@@ -241,7 +242,3 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 - **No changes to IParticipant or Participant** — MatrixParticipant/ICParticipant extend Participant and satisfy IParticipant via inheritance.
 - **All mutations go through UndoHandler.DoAction** — same as the existing engine.
-- **Side-data Maps in BattleTrackerComponent** — `participantReactions`, `participantIntuitions`, `participantEdgeRatings`, etc. still need entries for every participant (including Matrix). The `getParticipantBaseInitiative()` method must branch on `isMatrix(p)` to use `DP + INT` instead of `REA + INT`.
-- **No server changes needed** — `server.js` treats `SharedCombatState` as an opaque JSON blob; Matrix state additions to the interface are transparently relayed.
-- **Components go in `src/app/matrix/`** — one folder per component; all standalone.
-- **No i18n** — codebase already removed @ngx-translate; all strings hardcoded English.
