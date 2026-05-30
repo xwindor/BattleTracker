@@ -235,6 +235,13 @@ export class MatrixStateService {
 
   /** Adds a MatrixTarget to a host's target list or to public space (host = null). */
   addTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    // IC-type targets inside a host inherit the host's existing mark counts so
+    // the card displays correctly even when added after marks were placed.
+    if (host && target.type === "ic") {
+      for (const [deckerId, count] of Object.entries(host.marks)) {
+        if (count > 0) target.marks[deckerId] = count;
+      }
+    }
     UndoHandler.DoAction(
       () => {
         if (host) {

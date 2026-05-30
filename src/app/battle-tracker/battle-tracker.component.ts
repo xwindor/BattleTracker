@@ -270,6 +270,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const ic = new ICParticipant(icType, host.rating);
     ic.name = `${icType} IC`;
     ic.linkedHostId = host.id;
+    // Inherit existing host marks so late-spawned IC start with the correct count.
+    for (const [deckerId, count] of Object.entries(host.marks)) {
+      if (count > 0) ic.marksPlaced.set(deckerId, count);
+    }
 
     this.participantClaimable.set(ic, false);
     this.participantEdgeRatings.set(ic, 0);
