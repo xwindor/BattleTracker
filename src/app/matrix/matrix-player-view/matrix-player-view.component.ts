@@ -23,23 +23,8 @@ export class MatrixPlayerViewComponent {
   /** Active host name, if any (from SharedCombatState.currentHostName). */
   @Input() currentHostName: string | undefined = undefined;
 
-  /** Decker's current Overwatch Score (OS). */
-  @Input() myOverwatch: number = 0;
-
   /** Decker's current VR mode ('AR' | 'cold-sim' | 'hot-sim'). */
   @Input() myVrMode: string = "AR";
-
-  /** CSS class for the OS bar fill based on OS thresholds. */
-  osBarClass(): string {
-    if (this.myOverwatch >= 40) return "mpv-os-bar-red";
-    if (this.myOverwatch >= 20) return "mpv-os-bar-amber";
-    return "mpv-os-bar-green";
-  }
-
-  /** Bar fill width as a percentage of the 40-OS convergence threshold. */
-  osBarWidth(): string {
-    return Math.min(100, Math.round((this.myOverwatch / 40) * 100)) + "%";
-  }
 
   vrModeLabel(): string {
     switch (this.myVrMode) {
@@ -55,12 +40,6 @@ export class MatrixPlayerViewComponent {
       case "cold-sim": return "mpv-vr-cold";
       default:         return "mpv-vr-ar";
     }
-  }
-
-  /** Returns the mark count this decker has placed on a target. */
-  myMarks(target: SharedMatrixTarget): number {
-    if (!this.myName) return 0;
-    return target.marks[this.myName] ?? 0;
   }
 
   /** Dot string for up to 3 marks. */
@@ -91,22 +70,41 @@ export class MatrixPlayerViewComponent {
     }
   }
 
-  /** Group targets by host for display. Returns [{hostName, targets},...]. */
-  get groupedTargets(): { label: string; targets: SharedMatrixTarget[] }[] {
-    const publicTargets = this.targets.filter(t => !t.hostName);
-    const hostMap = new Map<string, SharedMatrixTarget[]>();
+  /**
+   * Returns only the targets that are visible in the decker's current context:
+   * - Inside a host  → only that host's targets
+   * - Public space   → only targets with no host
+   *
+   * This mirrors how the Matrix actually works: you can't see inside a host
+   * from public space and vice versa.
+   */
+  get contextTargets(): SharedMatrixTarget[] {
+    if (this.currentHostName) {
+      return this.targets.filter(t => t.hostName === this.currentHostName);
+    }
+    return this.targets.filter(t => !t.hostName);
+  }
+
+  /** Label for the current context (used as section header). */
+  get contextLabel(): string {
+    return this.currentHostName ?? "Public Space";
+  }
+
+  /**
+   * Returns this decker's mark count on the current host.
+   * In SR5E marks are placed on the host, not on individual icons inside it;
+   * the per-target mark values all reflect the same host-level mark count.
+   * We take the highest value across all targets in the host so a freshly
+   * placed mark is visible even if other targets haven't been updated yet.
+   */
+  hostMarks(): number {
+    if (!this.myName || !this.currentHostName) return 0;
+    let max = 0;
     for (const t of this.targets) {
-      if (!t.hostName) continue;
-      if (!hostMap.has(t.hostName)) hostMap.set(t.hostName, []);
-      hostMap.get(t.hostName)!.push(t);
+      if (t.hostName !== this.currentHostName) continue;
+      const m = t.marks[this.myName] ?? 0;
+      if (m > max) max = m;
     }
-    const groups: { label: string; targets: SharedMatrixTarget[] }[] = [];
-    if (publicTargets.length) {
-      groups.push({ label: "Public Space", targets: publicTargets });
-    }
-    for (const [name, ts] of hostMap.entries()) {
-      groups.push({ label: name, targets: ts });
-    }
-    return groups;
+    return max;
   }
 }

@@ -97,7 +97,7 @@ export class TargetCardComponent {
     switch (v) {
       case "hidden":         return "HIDDEN";
       case "running-silent": return "RUNNING SILENT";
-      case "active":         return "REVEALED";
+      case "active":         return "NORMAL";
     }
   }
 

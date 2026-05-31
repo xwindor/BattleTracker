@@ -1,68 +1,57 @@
 <div class="mpv-wrap">
 
-  <!-- Decker status: VR mode + OS bar -->
+  <!-- Decker status: VR mode chip only (OS requires Baby Monitor program — out of scope) -->
   <div class="mpv-decker-status">
     <span class="mpv-vr-chip" [class]="vrModeClass()">{{ vrModeLabel() }}</span>
-    <div class="mpv-os-wrap">
-      <span class="mpv-os-label">OS</span>
-      <div class="mpv-os-track">
-        <div class="mpv-os-fill" [class]="osBarClass()" [style.width]="osBarWidth()"></div>
-      </div>
-      <span class="mpv-os-value" [class]="osBarClass()">{{ myOverwatch }}</span>
-    </div>
+    <span class="mpv-vr-label">VR Mode</span>
   </div>
 
-  <!-- Header with optional host context -->
+  <!-- Context header: location + host marks -->
   <div class="mpv-header">
-    <span class="mpv-title">Matrix Icons</span>
     @if (currentHostName) {
-    <span class="mpv-host-badge">
-      <i class="fas fa-server me-1"></i>{{ currentHostName }}
+    <i class="fas fa-server mpv-ctx-icon"></i>
+    <span class="mpv-title">{{ currentHostName }}</span>
+    @if (hostMarks() > 0) {
+    <span class="mpv-host-marks" ngbTooltip="Your marks on this host" placement="top">
+      {{ dots(hostMarks()) }}
     </span>
     }
+    } @else {
+    <i class="fas fa-globe mpv-ctx-icon"></i>
+    <span class="mpv-title">Public Space</span>
+    }
   </div>
 
-  @if (targets.length === 0) {
+  @if (contextTargets.length === 0) {
   <div class="mpv-empty">No icons detected.</div>
   } @else {
-  @for (group of groupedTargets; track group.label) {
-  <div class="mpv-group">
-    <div class="mpv-group-label">{{ group.label }}</div>
-    @for (target of group.targets; track target.id) {
-    <div class="mpv-row" [class.mpv-row-silent]="target.visibility === 'running-silent'">
+  @for (target of contextTargets; track target.id) {
+  <div class="mpv-row" [class.mpv-row-silent]="target.visibility === 'running-silent'">
 
-      @if (target.visibility === 'running-silent') {
-      <!-- Unknown / running-silent icon -->
-      <i class="fas fa-question-circle mpv-icon mpv-icon-silent"
-        ngbTooltip="Unknown icon — running silent" placement="right"></i>
-      <span class="mpv-name mpv-name-silent">Unknown Icon</span>
-      <span class="mpv-type-badge mpv-type-silent">?</span>
+    @if (target.visibility === 'running-silent') {
+    <!-- Unknown / running-silent icon -->
+    <i class="fas fa-question-circle mpv-icon mpv-icon-silent"
+      ngbTooltip="Unknown icon — running silent" placement="right"></i>
+    <span class="mpv-name mpv-name-silent">Unknown Icon ■</span>
+    <span class="mpv-type-badge mpv-type-silent">?</span>
 
-      } @else {
-      <!-- Active / fully revealed icon -->
-      <i class="mpv-icon" [class]="typeIcon(target.type)"
-        [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
-      <span class="mpv-name">{{ target.name }}</span>
-      <span class="mpv-type-badge">{{ typeLabel(target.type) }}</span>
-      }
-
-      <!-- CM bar -->
-      <span class="mpv-cm" [ngbTooltip]="'Matrix CM: ' + target.matrixDamage + '/' + target.matrixHealth" placement="top">
-        @if (target.matrixDamage > 0) {
-        <span class="mpv-cm-dmg">{{ target.matrixDamage }}</span>
-        <span class="mpv-cm-sep">/</span>
-        }
-        <span class="mpv-cm-max">{{ target.matrixHealth }}</span>
-      </span>
-
-      <!-- My marks on this target -->
-      <span class="mpv-marks" [class.mpv-marks-none]="myMarks(target) === 0"
-        [ngbTooltip]="'Your marks: ' + myMarks(target) + '/3'" placement="top">
-        {{ dots(myMarks(target)) }}
-      </span>
-
-    </div>
+    } @else {
+    <!-- Normal (visible) icon -->
+    <i class="mpv-icon" [class]="typeIcon(target.type)"
+      [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
+    <span class="mpv-name">{{ target.name }}</span>
+    <span class="mpv-type-badge">{{ typeLabel(target.type) }}</span>
     }
+
+    <!-- Matrix CM: always shown as damage / max -->
+    <span class="mpv-cm"
+      [ngbTooltip]="'Matrix CM: ' + target.matrixDamage + ' / ' + target.matrixHealth"
+      placement="top">
+      <span [class.mpv-cm-dmg]="target.matrixDamage > 0">{{ target.matrixDamage }}</span>
+      <span class="mpv-cm-sep">/</span>
+      <span class="mpv-cm-max">{{ target.matrixHealth }}</span>
+    </span>
+
   </div>
   }
   }
