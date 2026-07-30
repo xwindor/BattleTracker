@@ -48,3 +48,7 @@ obj/Debug/
 .angular/cache/*
 .vscode/settings.json
 src/assets/version.txt
+
+.claude/worktrees/
+.claude/settings.local.json
+rules/
