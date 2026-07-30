@@ -83,7 +83,7 @@ export class DiceRollerComponent implements OnChanges {
 
   roll(): void {
     if (this.localRolling) return;
-    const count = Math.max(1, Math.min(20, this.diceCount));
+    const count = Math.max(1, Math.min(40, this.diceCount));
     const values = Array.from({ length: count }, () => Math.floor(Math.random() * 6) + 1);
     this.triggerLocalAnimation(values);
     this.rolledEvent.emit(values);

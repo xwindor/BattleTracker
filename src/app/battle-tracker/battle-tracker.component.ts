@@ -5,6 +5,7 @@ import { Subscription } from "rxjs";
 import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import { Participant } from "Combat/Participants/Participant";
+import { GroupParticipant } from "Combat/Participants/GroupParticipant";
 import { LogHandler } from "Logging";
 import { Action } from "Interfaces/Action";
 import { FormsModule } from '@angular/forms';
@@ -84,18 +85,22 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   incomingDiceRoll: { roller: string; values: number[] } | null = null;
 
+  /** Name the GM dice roller attributes rolls to ("GM" or a participant name). */
+  gmRollAs = "GM";
+
   onGmDiceRolled(values: number[]): void {
     const hits = values.filter(v => v >= 5).length;
+    const roller = this.gmRollAs.trim() || "GM";
     const logText = `rolled ${values.length}d6: [${values.join(", ")}] — ${hits} hit${hits !== 1 ? "s" : ""}`;
     if (this.shareRoomCode) {
-      this.appendSharedLog("GM", logText);
+      this.appendSharedLog(roller, logText);
       this.sessionSync.sendCommand({
         type: "dice_roll",
         player: "GM",
-        payload: { roller: "GM", diceCount: values.length, values }
+        payload: { roller, diceCount: values.length, values }
       });
     } else {
-      LogHandler.log(this.currentBTTime, `GM ${logText}`);
+      LogHandler.log(this.currentBTTime, `${roller} ${logText}`);
     }
   }
 
@@ -118,6 +123,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private observedLocalLogCount = 0;
   expandedDeckPanels = new Set<IParticipant>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
+  /** Deckers who owe a mid-combat +Nd6 delta roll after a VR mode change. */
+  private readonly pendingDeltaRolls = new Map<IParticipant, number>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
   private readonly participantClaimable = new Map<IParticipant, boolean>();
@@ -594,6 +601,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       );
       this.appendSharedLog("GM", `Registered ${characterName}`);
       this.sort();
+      // Mid-combat join: immediately prompt the new player for an initiative roll —
+      // the pre-combat Initiative Prep card is gone, so without this the joiner
+      // would have no way to roll.
+      if (this.combatManager.started) {
+        const joined = this.combatManager.participants.items.find(
+          p => this.participantOwners.get(p) === playerName && p.diceIni <= 0 && !p.ooc
+        );
+        if (joined) {
+          this.requestRollsForParticipants([joined]);
+        }
+      }
       return;
     }
     if (command.type === "configure_deck") {
@@ -634,18 +652,32 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
                    : vrModeStr === "cold-sim" ? VRMode.ColdSim
                    : VRMode.AR;
         const oldDices = mp.dices;
+        // If a previous mode switch is still waiting on a player delta roll,
+        // those gained dice were never actually added to the score — treat the
+        // rolled dice count as oldDices minus what is still owed.
+        const owedDelta = this.pendingDeltaRolls.get(mp) ?? 0;
+        this.pendingDeltaRolls.delete(mp);
+        const rolledDices = oldDices - owedDelta;
         const wasRolled = mp.diceIni > 0 && this.combatManager.started;
         const hadRolledPreCombat = mp.diceIni > 0 && !this.combatManager.started;
         this.applyVRMode(mp, mode);
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
         if (wasRolled) {
-          const diceDelta = mp.dices - oldDices;
+          const diceDelta = mp.dices - rolledDices;
           if (diceDelta < 0) {
             // Lost dice (e.g. Hot Sim → Cold Sim): server applies and logs immediately.
-            this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
+            this.applyAndLogInitiativeDelta(mp, rolledDices, mp.dices);
+          } else if (diceDelta > 0) {
+            // Gained dice: player should submit a delta roll_submission {isDelta:true}.
+            // Track it so the GM can see the tracker is waiting and roll as fallback.
+            this.pendingDeltaRolls.set(mp, diceDelta);
+            this.appendSharedLog("GM", `${mp.name} — awaiting +${diceDelta}d6 initiative roll (mode change)`);
           }
-          // diceDelta > 0: player will submit a delta roll_submission {isDelta:true}.
           // diceDelta === 0: no dice change; base stat shift is automatic via baseIni.
+        } else if (this.combatManager.started) {
+          // Jacked in mid-combat without any initiative roll yet (e.g. joined
+          // mid-combat): prompt the player for a full roll at the new dice count.
+          this.requestRollsForParticipants([mp]);
         } else if (hadRolledPreCombat && mp.dices !== oldDices) {
           // Pre-combat mode switch with a stale roll: clear diceIni so the participant
           // shows as pending a roll in the tracker. Player will submit a fresh roll_submission.
@@ -656,6 +688,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
         const oldDices = mp.dices;
+        // Dice still owed from an unanswered mode-change delta were never rolled
+        // into the score — don't subtract them back out on jack-out.
+        const owedDelta = this.pendingDeltaRolls.get(mp) ?? 0;
+        this.pendingDeltaRolls.delete(mp);
+        const rolledDices = oldDices - owedDelta;
         const wasRolled = payload["jackOut"] === true && mp.diceIni > 0 && this.combatManager.started;
         const hadRolledPreCombat = payload["jackOut"] === true && mp.diceIni > 0 && !this.combatManager.started;
         mp.vrMode = VRMode.None;
@@ -667,7 +704,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         mp.dices = 1;
         if (wasRolled) {
           // Mid-combat: server always handles jack-out dice loss: roll the lost dice, subtract, log.
-          this.applyAndLogInitiativeDelta(mp, oldDices, 1);
+          this.applyAndLogInitiativeDelta(mp, rolledDices, 1);
         } else if (hadRolledPreCombat) {
           // Pre-combat jack-out with a stale Matrix roll: clear it so the participant
           // shows as pending a roll in the tracker. Player will submit a fresh 1d6 roll_submission.
@@ -700,6 +737,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.participantOwners.set(target, playerName);
       this.appendSharedLog("GM", `Claimed ${target.name}`);
       this.sort();
+      // Mid-combat claim of an un-rolled character: prompt the player right away.
+      if (this.combatManager.started && target.diceIni <= 0 && !target.ooc) {
+        this.requestRollsForParticipants([target]);
+      }
       return;
     }
     if (command.type === "release_claims") {
@@ -728,8 +769,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (!target) {
         return;
       }
+      if (!isDelta && this.combatManager.started && target.diceIni > 0) {
+        // Guard: mid-combat full roll for a participant who already has a score.
+        // A stale roll prompt on the player side could otherwise silently
+        // overwrite their initiative. Ignore it.
+        return;
+      }
       if (isDelta) {
         // Mid-combat delta roll: add to existing diceIni rather than replacing it.
+        this.pendingDeltaRolls.delete(target);
         target.diceIni = Math.max(1, target.diceIni + roll);
         const total = target.getCurrentInitiative();
         const rawValues = command.payload?.["diceValues"];
@@ -1215,7 +1263,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   btnRollInitiative_Click(sender: IParticipant) {
     UndoHandler.StartActions();
-    this.rollAndLogInitiative(sender);
+    if (sender instanceof GroupParticipant) {
+      this.rollGroupInitiative(sender);
+    } else {
+      this.rollAndLogInitiative(sender);
+    }
   }
 
   btnAct_Click(sender: IParticipant, actModalContent: TemplateRef<unknown>) {
@@ -1593,6 +1645,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     LogHandler.log(this.currentBTTime, "Reset_Confirm");
     UndoHandler.StartActions();
     this.declaredActionSelections.clear();
+    this.pendingDeltaRolls.clear();
     this.combatManager.endCombat();
     this.initiativePrepActive = false;
     this.appendSharedLog("GM", "End Combat");
@@ -1974,6 +2027,91 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
+  // ── Identical-unit groups ────────────────────────────────────────────────
+  groupFormOpen = false;
+  groupAddName = "";
+  groupAddCount = 4;
+  groupAddReaction = 3;
+  groupAddIntuition = 3;
+  groupAddDices = 1;
+  groupAddPhysicalHealth = 10;
+  groupAddStunHealth = 10;
+
+  toggleGroupForm(): void {
+    this.groupFormOpen = !this.groupFormOpen;
+  }
+
+  isGroupMember(p: IParticipant): boolean {
+    return p instanceof GroupParticipant;
+  }
+
+  getGroupMembers(p: IParticipant): GroupParticipant[] {
+    if (!(p instanceof GroupParticipant)) {
+      return [];
+    }
+    return this.combatManager.participants.items.filter(
+      m => m instanceof GroupParticipant && m.groupId === p.groupId
+    ) as GroupParticipant[];
+  }
+
+  getGroupSize(p: IParticipant): number {
+    return this.getGroupMembers(p).length;
+  }
+
+  addGroup(): void {
+    const name = this.groupAddName.trim() || "Group";
+    const count = Math.max(2, Math.min(20, Math.floor(Number(this.groupAddCount || 2))));
+    const reaction = Math.max(0, Number(this.groupAddReaction || 0));
+    const intuition = Math.max(0, Number(this.groupAddIntuition || 0));
+    const dices = Math.max(1, Math.floor(Number(this.groupAddDices || 1)));
+    const physicalHealth = Math.max(1, Number(this.groupAddPhysicalHealth || 10));
+    const stunHealth = Math.max(1, Number(this.groupAddStunHealth || 10));
+    UndoHandler.StartActions();
+    const groupId = `grp-${Math.random().toString(36).slice(2, 10)}`;
+    // Shared tie-breaker keeps members adjacent when initiative scores tie.
+    const tieBreaker = Math.random();
+    for (let i = 1; i <= count; i++) {
+      const p = new GroupParticipant();
+      p.groupId = groupId;
+      p.name = `${name} ${i}`;
+      p.dices = dices;
+      p.physicalHealth = physicalHealth;
+      p.stunHealth = stunHealth;
+      this.combatManager.addParticipant(p);
+      this.participantClaimable.set(p, false);
+      this.participantEdgeRatings.set(p, 0);
+      this.participantReactions.set(p, reaction);
+      this.participantIntuitions.set(p, intuition);
+      p.baseIni = reaction + intuition;
+      this.participantTieBreakers.set(p, tieBreaker);
+      const id = this.getParticipantId(p);
+      this.lastKnownDamage.set(id, { physical: 0, stun: 0 });
+    }
+    LogHandler.log(this.currentBTTime, `Added group ${name} ×${count}`);
+    this.groupFormOpen = false;
+    this.syncSharedState();
+    this.sort();
+  }
+
+  /**
+   * Roll initiative ONCE for an entire group: same dice result is applied to
+   * every member, so they act back-to-back at the same score.
+   */
+  private rollGroupInitiative(member: GroupParticipant): void {
+    const members = this.getGroupMembers(member);
+    const values = Array.from({ length: member.dices }, () => Math.floor(Math.random() * 6) + 1);
+    const sum = values.reduce((s, v) => s + v, 0);
+    for (const m of members) {
+      m.diceIni = this.clampInitiativeRoll(sum, m);
+    }
+    const total = member.getCurrentInitiative();
+    const intuition = this.getParticipantIntuition(member);
+    const baseName = member.name.replace(/\s\d+$/, "");
+    const logText = `group initiative roll (×${members.length}): REA(${this.getParticipantReaction(member)}) + INT(${intuition}) + [${values.join(", ")}] = ${total}`;
+    LogHandler.log(this.currentBTTime, `${baseName} ${logText}`);
+    this.appendSharedLog(baseName || "Group", logText);
+  }
+
   isDeckPanelExpanded(p: IParticipant): boolean {
     return this.expandedDeckPanels.has(p);
   }
@@ -2020,6 +2158,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const mp = p as MatrixParticipant;
     const mode = this.getPendingVrMode(p);
     const oldDices = mp.dices;
+    const owedDelta = this.pendingDeltaRolls.get(mp) ?? 0;
+    this.pendingDeltaRolls.delete(mp);
+    const rolledDices = oldDices - owedDelta;
     const wasRolled = mp.diceIni > 0 && this.combatManager.started;
     this.applyVRMode(mp, mode);
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
@@ -2027,7 +2168,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (wasRolled) {
       // SR5E: mid-combat jack in — base stat delta automatic via baseIni;
       // only roll the extra/lost dice, apply, and log.
-      this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
+      this.applyAndLogInitiativeDelta(mp, rolledDices, mp.dices);
     } else if (mp.diceIni > 0) {
       // Pre-combat (initiative prep): participant already rolled for the old mode.
       // Dice count changed — roll a completely fresh initiative for the new mode.
@@ -2045,6 +2186,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
     const oldDices = mp.dices;
+    const owedDelta = this.pendingDeltaRolls.get(mp) ?? 0;
+    this.pendingDeltaRolls.delete(mp);
+    const rolledDices = oldDices - owedDelta;
     const wasRolled = mp.diceIni > 0 && this.combatManager.started;
     // Jack Out: clear VR mode, restore physical initiative, reset OS.
     mp.vrMode = VRMode.None;
@@ -2060,7 +2204,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (wasRolled) {
       // SR5E: mid-combat jack out — base stat delta automatic via baseIni;
       // only roll the lost dice, subtract, and log.
-      this.applyAndLogInitiativeDelta(mp, oldDices, 1);
+      this.applyAndLogInitiativeDelta(mp, rolledDices, 1);
     } else if (mp.diceIni > 0) {
       // Pre-combat (initiative prep): participant already rolled for the old mode.
       // Rolling out resets to 1d6 physical initiative — roll a fresh score now.
@@ -2192,6 +2336,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantReactions.delete(mp);
     this.participantIntuitions.delete(mp);
     this.participantTieBreakers.delete(mp);
+    this.pendingDeltaRolls.delete(mp);
     this.expandedDeckPanels.delete(mp);
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
@@ -2327,14 +2472,47 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     ).length;
   }
 
+  getPendingDeltaEntries(): { participant: IParticipant; dice: number }[] {
+    return Array.from(this.pendingDeltaRolls.entries()).map(([ participant, dice ]) => ({ participant, dice }));
+  }
+
+  /** GM fallback: roll an owed mode-change delta on behalf of the player. */
+  rollPendingDeltaFor(p: IParticipant): void {
+    const dice = this.pendingDeltaRolls.get(p);
+    if (!dice) {
+      return;
+    }
+    UndoHandler.StartActions();
+    this.pendingDeltaRolls.delete(p);
+    this.applyAndLogInitiativeDelta(p, p.dices - dice, p.dices);
+    this.sort();
+  }
+
   requestPlayerRolls() {
     if (!this.shareRoomCode || this.getPendingPlayerRollCount() <= 0) {
       return;
     }
+    const pending = this.combatManager.participants.items.filter(
+      p => !p.ooc && p.diceIni <= 0 && this.participantOwners.has(p)
+    );
+    this.requestRollsForParticipants(pending);
+  }
+
+  /**
+   * Send a targeted request_rolls command for specific participants.
+   * The payload carries participantIds so player views only prompt owners
+   * of the listed (still-pending) characters — critical mid-combat, where a
+   * blanket prompt could cause an already-rolled player to overwrite their score.
+   */
+  private requestRollsForParticipants(participants: IParticipant[]): void {
+    if (!this.shareRoomCode || participants.length === 0) {
+      return;
+    }
+    const participantIds = participants.map(p => this.getParticipantId(p));
     this.sessionSync.sendCommand({
       type: "request_rolls",
       player: "GM",
-      payload: {}
+      payload: { participantIds }
     });
   }
 
@@ -2363,6 +2541,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private rollOutstandingInitiative(includePlayers: boolean) {
     UndoHandler.StartActions();
     let rolledPlayer = false;
+    const rolledGroups = new Set<string>();
     for (const participant of this.combatManager.participants.items) {
       if (participant.ooc || participant.diceIni > 0) {
         continue;
@@ -2372,6 +2551,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       }
       if (this.participantOwners.has(participant)) {
         rolledPlayer = true;
+      }
+      if (participant instanceof GroupParticipant) {
+        // One roll per group — rollGroupInitiative fills in every member.
+        if (rolledGroups.has(participant.groupId)) {
+          continue;
+        }
+        rolledGroups.add(participant.groupId);
+        this.rollGroupInitiative(participant);
+        continue;
       }
       this.rollAndLogInitiative(participant);
     }
@@ -2402,6 +2590,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private beginCombatTurn() {
     UndoHandler.StartActions();
     this.initiativePrepActive = false;
+    this.pendingDeltaRolls.clear();
     this.combatManager.startRound();
     this.appendSharedLog("GM", `Start Combat Turn ${this.combatManager.combatTurn}`);
     this.appendSharedLog("GM", `Start Initiative Pass ${this.combatManager.initiativePass}`);

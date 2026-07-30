@@ -23,6 +23,7 @@ const corsOrigin = ALLOWED_ORIGINS.length === 1 && ALLOWED_ORIGINS[0] === "*"
 const ALLOWED_COMMAND_TYPES = new Set([
   "register_character",
   "configure_deck",
+  "configure_astral",
   "claim_character",
   "release_claims",
   "roll_submission",

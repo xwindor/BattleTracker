@@ -403,6 +403,19 @@ input:checked + .slider:before {
   padding-right: 0.2rem;
 }
 
+.gm-roll-as-select {
+  max-width: 12rem;
+}
+
+.group-num-input {
+  max-width: 4.2rem;
+}
+
+.group-member-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .gm-dice-input {
   min-width: 3rem;
   max-width: 3.6rem;

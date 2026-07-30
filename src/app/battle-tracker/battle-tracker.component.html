@@ -62,14 +62,24 @@
           </div>
         </div>
       </div>
-      @if(!combatManager.started && initiativePrepActive) {
+      @if((!combatManager.started && initiativePrepActive)
+        || (combatManager.started && (getPendingOutstandingRollCount() > 0 || getPendingDeltaEntries().length > 0))) {
       <div class="card mt-2 mb-2">
-        <div class="card-header">Initiative Prep</div>
+        <div class="card-header">{{ combatManager.started ? 'Outstanding Rolls' : 'Initiative Prep' }}</div>
         <div class="card-body py-2">
           <div class="small mb-2">
             Pending rolls: {{ getPendingOutstandingRollCount() }}
             (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
           </div>
+          @for (entry of getPendingDeltaEntries(); track $index) {
+          <div class="small mb-2 pending-delta-row">
+            ⏳ {{ entry.participant.name }} owes +{{ entry.dice }}d6 (VR mode change)
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-2"
+              (click)="rollPendingDeltaFor(entry.participant)">
+              Roll for player
+            </button>
+          </div>
+          }
           <div class="btn-group btn-group-sm" role="group">
             <button type="button" class="btn btn-outline-primary" (click)="btnRequestPlayerRolls_Click()"
               [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">
@@ -83,10 +93,12 @@
               [disabled]="getPendingOutstandingRollCount() <= 0">
               Force Roll Outstanding
             </button>
+            @if(!combatManager.started) {
             <button type="button" class="btn btn-success" (click)="btnBeginCombatTurn_Click()"
               [disabled]="getPendingOutstandingRollCount() > 0">
               Begin Combat Turn
             </button>
+            }
           </div>
         </div>
       </div>
@@ -158,8 +170,16 @@
         <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
           (click)="selectActor(p)" [class]="getParticipantStyles(p)" cdkDrag>
           <div class="col-4 col-xl-2">
-            <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
-              (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
+            <div class="d-flex align-items-center gap-1">
+              @if (isGroupMember(p)) {
+              <span class="badge text-bg-secondary group-member-badge"
+                title="Group of {{ getGroupSize(p) }} — shared initiative roll">
+                <i class="fa fa-users"></i>&nbsp;{{ getGroupSize(p) }}
+              </span>
+              }
+              <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
+                (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
+            </div>
           </div>
           <div class="col-2 col-xl text-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
@@ -451,7 +471,64 @@
           <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()" title="Add Participant">
             <i class="fa fa-plus fa-lg"></i>
           </button>
+          <button type="button" class="btn btn-outline-primary ms-1" (click)="toggleGroupForm()"
+            title="Add group of identical NPCs (one initiative roll, separate condition monitors)">
+            <i class="fa fa-users fa-lg"></i>
+          </button>
         </div>
+        @if (groupFormOpen) {
+        <div class="card mt-2 group-add-form">
+          <div class="card-header py-1">Add NPC Group</div>
+          <div class="card-body py-2">
+            <div class="d-flex flex-wrap gap-2 align-items-end">
+              <div>
+                <label class="form-label small mb-0">Name</label>
+                <input type="text" class="form-control form-control-sm" [(ngModel)]="groupAddName"
+                  placeholder="e.g. Ganger">
+              </div>
+              <div>
+                <label class="form-label small mb-0">Count</label>
+                <input type="number" class="form-control form-control-sm group-num-input" [(ngModel)]="groupAddCount"
+                  [min]="2" [max]="20">
+              </div>
+              <div>
+                <label class="form-label small mb-0">REA</label>
+                <input type="number" class="form-control form-control-sm group-num-input"
+                  [(ngModel)]="groupAddReaction" [min]="0">
+              </div>
+              <div>
+                <label class="form-label small mb-0">INT</label>
+                <input type="number" class="form-control form-control-sm group-num-input"
+                  [(ngModel)]="groupAddIntuition" [min]="0">
+              </div>
+              <div>
+                <label class="form-label small mb-0">Dice</label>
+                <input type="number" class="form-control form-control-sm group-num-input" [(ngModel)]="groupAddDices"
+                  [min]="1" [max]="5">
+              </div>
+              <div>
+                <label class="form-label small mb-0">Phys</label>
+                <input type="number" class="form-control form-control-sm group-num-input"
+                  [(ngModel)]="groupAddPhysicalHealth" [min]="1">
+              </div>
+              <div>
+                <label class="form-label small mb-0">Stun</label>
+                <input type="number" class="form-control form-control-sm group-num-input"
+                  [(ngModel)]="groupAddStunHealth" [min]="1">
+              </div>
+              <div>
+                <button type="button" class="btn btn-primary btn-sm" (click)="addGroup()">Add Group</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm ms-1"
+                  (click)="groupFormOpen = false">Cancel</button>
+              </div>
+            </div>
+            <div class="small text-muted mt-1">
+              One initiative roll for the whole group; wounds don't shift group initiative. Each unit has its own
+              condition monitor.
+            </div>
+          </div>
+        </div>
+        }
       </div>
       <div>
         @if (combatManager.started)
@@ -500,7 +577,18 @@
         </ul>
       </div>
       <div class="card mt-3">
-        <div class="card-header">Dice Roller</div>
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span>Dice Roller</span>
+          <select class="form-select form-select-sm gm-roll-as-select" [(ngModel)]="gmRollAs"
+            title="Attribute rolls to">
+            <option value="GM">Roll as: GM</option>
+            @for (p of combatManager.participants.items; track $index) {
+            @if (p.name) {
+            <option [value]="p.name">Roll as: {{ p.name }}</option>
+            }
+            }
+          </select>
+        </div>
         <app-dice-roller
           [incomingRoll]="incomingDiceRoll"
           (rolledEvent)="onGmDiceRolled($event)">

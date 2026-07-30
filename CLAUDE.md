@@ -242,3 +242,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 - **No changes to IParticipant or Participant** — MatrixParticipant/ICParticipant extend Participant and satisfy IParticipant via inheritance.
 - **All mutations go through UndoHandler.DoAction** — same as the existing engine.
+- **Side-data Maps in BattleTrackerComponent** — `participantReactions`, `participantIntuitions`, `participantEdgeRatings`, etc. still need entries for every participant (including Matrix). The `getParticipantBaseInitiative()` method must branch on `isMatrix(p)` to use `DP + INT` instead of `REA + INT`.
+- **No server changes needed** — `server.js` treats `SharedCombatState` as an opaque JSON blob; Matrix state additions to the interface are transparently relayed.
+- **Components go in `src/app/matrix/`** — one folder per component; all standalone.
+- **No i18n** — codebase already removed @ngx-translate; all strings hardcoded English.

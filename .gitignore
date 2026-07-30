@@ -51,3 +51,5 @@ src/assets/version.txt
 
 # Claude Code internals
 .claude/
+
+.project_planning_files

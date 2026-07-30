@@ -171,10 +171,21 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       });
       this.session.onCommand((command) => {
         if (command.type === "request_rolls") {
-          this.promptRoll = true;
-          this.pendingFullReroll = 0; // promptRoll supersedes the pre-combat re-roll banner
-          this.manualFullReroll = "";
-          this.triggerRollNudge();
+          // Targeted requests carry participantIds; only prompt if one of our
+          // still-pending characters is listed. Untargeted requests (legacy /
+          // prep-phase broadcast) prompt any owner of a pending character.
+          const rawIds = command.payload?.["participantIds"];
+          const ids = Array.isArray(rawIds) ? (rawIds as unknown[]).map(String) : [];
+          const pendingOwn = this.ownParticipants.filter(p => p.pendingRoll !== false);
+          const applies = ids.length === 0
+            ? pendingOwn.length > 0
+            : pendingOwn.some(p => ids.includes(p.id));
+          if (applies) {
+            this.promptRoll = true;
+            this.pendingFullReroll = 0; // promptRoll supersedes the pre-combat re-roll banner
+            this.manualFullReroll = "";
+            this.triggerRollNudge();
+          }
         } else if (command.type === "clear_roll_prompt") {
           this.promptRoll = false;
         } else if (command.type === "combat_ended") {
@@ -928,6 +939,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     const isFirstState = this.state === null;
     this.state = next;
     this.lastKnownCombatStarted = started;
+    // Safety: if a roll prompt is showing but none of our characters are still
+    // pending (we rolled, or the GM rolled for us), clear the stale banner so
+    // it can't produce a duplicate submission.
+    if (this.promptRoll && this.ownParticipants.length > 0
+      && !this.ownParticipants.some(p => p.pendingRoll !== false)) {
+      this.promptRoll = false;
+      this.manualRoll = "";
+    }
     // Restore deck fields from server state (survives reconnect/claim).
     const pc = this.primaryCharacter;
     if (pc?.isMatrix) {
