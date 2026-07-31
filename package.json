@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "battle-tracker",
   "version": "0.0.0",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "start": "npm run prebuild && ng serve --proxy-config proxy.conf.json",
     "server": "node server.js",
     "prod": "ng serve --configuration=production --proxy-config proxy.conf.json",
-    "test": "ng test",
+    "test": "cross-env NODE_OPTIONS=--max-old-space-size=4096 ng test --watch=false --browsers=ChromeHeadlessNoSandbox",
     "deploy": "ng deploy --base-href='/BattleTracker/'",
     "lint": "ng lint"
   },
@@ -26,16 +26,16 @@
     "@angular/platform-browser-dynamic": "19.2.18",
     "@angular/platform-server": "19.2.18",
     "@angular/router": "19.2.18",
-    "@popperjs/core": "^2.11.8",
     "@fortawesome/fontawesome-common-types": "6.7.2",
     "@fortawesome/fontawesome-free": "6.7.2",
     "@fortawesome/free-solid-svg-icons": "6.7.2",
     "@ng-bootstrap/ng-bootstrap": "18.0.0",
+    "@popperjs/core": "^2.11.8",
     "@types/node": "22.15.19",
     "bootstrap": "5.3.6",
     "bootstrap-slider": "11.0.2",
-    "cors": "^2.8.5",
     "core-js": "3.42.0",
+    "cors": "^2.8.5",
     "express": "^4.21.2",
     "jquery": "3.7.1",
     "rxjs": "7.8.2",
@@ -48,16 +48,20 @@
     "zone.js": "0.15.0"
   },
   "devDependencies": {
-    "@angular/cli": "19.2.21",
     "@angular-devkit/build-angular": "19.2.21",
+    "@angular/cli": "19.2.21",
     "@angular/compiler-cli": "19.2.18",
     "@types/jasmine": "^5.1.8",
-    "@web/test-runner": "^0.20.2",
     "angular-cli-ghpages": "3.0.2",
     "angular-eslint": "19.4.0",
+    "cross-env": "^10.1.0",
     "eslint": "^9.26.0",
     "jasmine-core": "^5.7.1",
-    "jasmine-spec-reporter": "7.0.0",
+    "karma": "^6.4.4",
+    "karma-chrome-launcher": "^3.2.0",
+    "karma-coverage": "^2.2.1",
+    "karma-jasmine": "^5.1.0",
+    "karma-jasmine-html-reporter": "^2.2.0",
     "ts-node": "10.9.2",
     "typescript-eslint": "8.56.1"
   }
