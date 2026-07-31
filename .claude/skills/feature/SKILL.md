@@ -34,15 +34,24 @@ gaps rather than filling them in.
 
 ## Stage 3 — validate
 
-Delegate to the `sr5-rules-validator` subagent. Pass it: the path to the brief,
-the paths of files changed in Stage 2, and the instruction to report only, never
-fix. It has `rules/` access and must independently re-derive every citation in
-the brief rather than trusting it.
-
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list back to a
-fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at two
-loops. On a third failure, stop and tell me the brief itself needs revisiting —
-do not keep patching against a spec that may be wrong.
+fresh sr5-implementer, then re-run a fresh sr5-rules-validator. Cap at two loops.
+
+On a third failure, stop and diagnose before fixing anything further. Report
+which of these it is:
+
+- The brief is wrong or incomplete — citations don't hold up, acceptance
+  criteria are ambiguous or missing cases. Go back to Stage 1.
+- The implementation is incomplete — the brief is sound, but the same defect
+  keeps appearing in code paths earlier rounds didn't touch. Before fixing
+  again, search exhaustively for every path that could exhibit the defect class
+  and propose routing them through one shared choke point. Show me the design
+  before implementing.
+- Genuinely separate defects — unrelated problems that surfaced together. Say
+  so, and I'll decide whether to fix or backlog each.
+
+Never launch a third fix round without naming which of the three this is.
+
 
 ## Stage 4 — approval brief
 
@@ -53,7 +62,7 @@ report. Show me its output and stop.
 
 When I say approved:
 
-1. Move the scenario tests into `tests/scenarios/` and confirm they run as part
+1. Move the scenario tests into `src/scenarios/` and confirm they run as part
    of the standard test command. Run the full suite and show me real output.
 2. Check whether this feature changed anything `ARCHITECTURE.md` describes —
    state shape, boundary semantics, where logic lives, participant model, undo
@@ -70,3 +79,4 @@ When I say approved:
 - Never paste rulebook prose into source files or docs. Paraphrase and cite.
 - If any stage's subagent reports a gap or a contradiction, surface it to me
   rather than resolving it silently.
+- Work in the main checkout. Do not create worktrees or branches.

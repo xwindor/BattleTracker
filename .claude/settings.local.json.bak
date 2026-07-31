@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(npx ng *)",
+      "Bash(Remove-Item -Recurse -Force \"E:\\\\Programs\\\\SR5E\\\\src\\\\app\\\\matrix\\\\jack-in-panel\")",
+      "Bash(git commit -m ' *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(git stash *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git diff *)",
+      "Bash(Remove-Item \"E:/Programs/SR5E/.git/index.lock\" -Force)",
+      "Bash(rm -f \"E:/Programs/SR5E/.git/index.lock\" && git add src/app/matrix/access-host-panel/ src/app/matrix/matrix-graph/ src/app/matrix/matrix-run-panel/matrix-run-panel.component.ts src/app/matrix/matrix-run-panel/matrix-run-panel.component.html src/app/matrix/matrix-run-panel/matrix-run-panel.component.css src/app/services/matrix-state.service.ts src/app/services/session-sync.service.ts src/app/player-view/player-view.component.ts src/app/player-view/player-view.component.html && git status --short)",
+      "Bash(rm -f \"E:/Programs/SR5E/.git/HEAD.lock\" \"E:/Programs/SR5E/.git/index.lock\")",
+      "Bash(python *)",
+      "Bash(git check-ignore *)",
+      "Bash(node -e \"console.log\\(process.arch, process.version\\)\")"
+    ]
+  }
+}
