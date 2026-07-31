@@ -55,9 +55,14 @@ When I say approved:
 
 1. Move the scenario tests into `tests/scenarios/` and confirm they run as part
    of the standard test command. Run the full suite and show me real output.
-2. Append any table rulings I decided to `RULINGS.md`, each with today's date
+2. Check whether this feature changed anything `ARCHITECTURE.md` describes —
+   state shape, boundary semantics, where logic lives, participant model, undo
+   behaviour. If so, update the affected sections to match the new code and
+   show me the diff. If nothing structural changed, say so explicitly and
+   change nothing.
+3. Append any table rulings I decided to `RULINGS.md`, each with today's date
    and the reasoning.
-3. Stage everything and show me the diff summary. Don't commit unless I ask.
+4. Stage everything and show me the diff summary. Don't commit unless I ask.
 
 ## Standing rules
 
