@@ -2,6 +2,7 @@ import { Undoable } from "Common";
 import { ParticipantList } from "./Participants/ParticipantList";
 import { StatusEnum } from "./Participants/StatusEnum";
 import { IParticipant } from "./Participants/IParticipant";
+import { INITIATIVE_PASS_DECAY } from "./Participants/Participant";
 
 class CombatManager extends Undoable {
   participants: ParticipantList;
@@ -87,10 +88,25 @@ class CombatManager extends Undoable {
     this.goToNextActors();
   }
 
+  /**
+   * Advance to the next Initiative Pass: subtract exactly 10 from every
+   * participant's running Initiative Score, once (brief criterion 2,
+   * pp. 159-160). Applied to everyone, including participants already at or
+   * below zero and participants currently out of combat - the latter so that
+   * re-entering mid-turn lands on the correct "roll, then subtract 10 per
+   * elapsed pass" value (brief F6, p. 160).
+   *
+   * Undo batching is the caller's responsibility: the production caller (the
+   * GM component's Next Pass button) calls `UndoHandler.StartActions()` first,
+   * so the whole advance collapses into one undo step. Called without an open
+   * chapter, each property write becomes its own chapter (still undoable, just
+   * not batched).
+   */
   nextIniPass() {
     this.passEnded = false;
     this.initiativePass++;
     for (const p of this.participants.items) {
+      p.applyInitiativeScoreDelta(-INITIATIVE_PASS_DECAY);
       if (!p.ooc && p.status !== StatusEnum.Delaying) {
         p.status = StatusEnum.Waiting;
       }
@@ -124,9 +140,15 @@ class CombatManager extends Undoable {
     return true;
   }
 
+  /**
+   * Would anyone still be above 0 after the next pass advance? This only
+   * *previews* the decay - `nextIniPass()` is the single place that actually
+   * applies it, so the -10 is never subtracted twice (brief criterion 4,
+   * p. 159).
+   */
   hasMoreIniPasses() {
     for (const p of this.participants.items) {
-      if (p.getCurrentInitiative() - 10 > 0 && !p.ooc) {
+      if (p.getCurrentInitiative() - INITIATIVE_PASS_DECAY > 0 && !p.ooc) {
         return true;
       }
     }
@@ -162,8 +184,28 @@ class CombatManager extends Undoable {
     p.seizeInitiative();
   }
 
-  addParticipant(participant: IParticipant) {
+  /**
+   * Insert a participant into the encounter.
+   *
+   * @param carriesRunningScore `true` when the participant's running
+   * Initiative Score is *already* correct for the current Initiative Pass -
+   * i.e. this is not a genuine late entry but a re-insertion of an existing
+   * participant (the GM component's in-place type swaps, and the shared-state
+   * restore path, which reconstructs the Score from the broadcast value).
+   * Those must not be decayed a second time: the pass decay is subtracted
+   * once per elapsed pass, not twice (brief F6, p. 160).
+   */
+  addParticipant(participant: IParticipant, carriesRunningScore = false) {
     participant.sortOrder = this.nextSortOrder++;
+    // Late entry into an in-progress Combat Turn: roll for Initiative Score
+    // as normal, then subtract 10 for each Initiative Pass that has already
+    // occurred (brief F6, p. 160). Under the old recompute-from-base
+    // accessor this fell out of the global pass counter for free; with a
+    // per-participant running Score it has to be seeded explicitly.
+    if (this.started && this.initiativePass > 1 && !carriesRunningScore) {
+      participant.applyInitiativeScoreDelta(
+        -(this.initiativePass - 1) * INITIATIVE_PASS_DECAY);
+    }
     this.participants.insert(participant);
   }
 

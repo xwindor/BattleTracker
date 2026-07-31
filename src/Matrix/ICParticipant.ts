@@ -2,6 +2,11 @@ import { MatrixParticipant } from "./MatrixParticipant";
 import { ICType } from "./ICType";
 import { IParticipant } from "Combat/Participants/IParticipant";
 
+// IC Initiative Dice (existing Matrix-module values, Table 4 / Table 24 - not
+// covered by this feature's brief; unchanged by this refactor).
+const PATROL_IC_DICE = 2;
+const IC_DICE = 4;
+
 /**
  * ICParticipant
  *
@@ -32,7 +37,10 @@ export class ICParticipant extends MatrixParticipant {
     // Per Table 4 / Table 24: baseIni = hostRating × 2;
     // dices = 2 for Patrol, 4 for everything else.
     this.baseIni = hostRating * 2;
-    this.dices = (icType === ICType.Patrol) ? 2 : 4;
+    // One-time construction: nothing has been rolled yet, so no dice change is
+    // owed - but the write still goes through the capped no-roll setter so the
+    // 5D6 hard cap is enforced universally (brief criterion 9, pp. 52/288).
+    this.setDicesWithoutRoll((icType === ICType.Patrol) ? PATROL_IC_DICE : IC_DICE);
   }
 
   override clone(): IParticipant {

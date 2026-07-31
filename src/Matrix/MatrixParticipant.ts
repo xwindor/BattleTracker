@@ -1,6 +1,12 @@
-import { Participant } from "Combat/Participants/Participant";
+import { Participant, PARTICIPANT_BASE_BACKING_FIELDS } from "Combat/Participants/Participant";
 import { IParticipant } from "Combat/Participants/IParticipant";
 import { VRMode } from "./VRMode";
+
+// Initiative Dice per Matrix interface mode (brief "Precise Definitions",
+// printed p. 159).
+const HOT_SIM_INITIATIVE_DICE = 4;
+const COLD_SIM_INITIATIVE_DICE = 3;
+const AR_INITIATIVE_DICE = 1;
 
 /**
  * MatrixParticipant
@@ -90,25 +96,41 @@ export class MatrixParticipant extends Participant {
   }
 
   /**
-   * Apply a jack-in (or mid-combat mode switch) for this decker.
-   * Recomputes baseIni and dices per Table 24 (4/3/1 d6) and flips the
-   * VR catatonia flag. The caller is responsible for applying initiative
-   * correctly: fresh roll if not yet rolled this pass, dice delta otherwise
-   * (SR5E: only roll extra/lost dice and add/subtract to the existing score).
+   * Initiative Dice for a Matrix interface mode (brief "Precise Definitions",
+   * printed p. 159): 1D6 Matrix AR, 3D6 cold-sim, 4D6 hot-sim.
    */
-  applyJackInMode(mode: VRMode, intuition: number): void {
-    this.vrMode = mode;
-    let dice: number;
+  static initiativeDiceForMode(mode: VRMode): number {
     switch (mode) {
-      case VRMode.HotSim:  dice = 4; break;
-      case VRMode.ColdSim: dice = 3; break;
+      case VRMode.HotSim:  return HOT_SIM_INITIATIVE_DICE;
+      case VRMode.ColdSim: return COLD_SIM_INITIATIVE_DICE;
       case VRMode.AR:
-      default:             dice = 1; break;
+      default:             return AR_INITIATIVE_DICE;
     }
-    this.dices = dice;
+  }
+
+  /**
+   * Apply a jack-in (or mid-combat mode switch) for this decker: the
+   * Initiative attribute (DP + INT) and the VR catatonia flag.
+   *
+   * The dice-count half is *not* applied here directly - it is handed to the
+   * mandatory `applyDiceCount` callback with the target count. That parameter
+   * is required rather than optional on purpose: a mid-combat mode switch is a
+   * dice change that has to roll the gained/lost dice and move the running
+   * Initiative Score (brief F5, p. 160), while initial character setup must
+   * not roll anything. Making the caller name which one it means is what stops
+   * a call site from silently skipping the roll (the `onVRModeChange` defect).
+   *
+   * Pass `p.changeDiceCount(n, ...)` for a real mid-turn change, or
+   * `p.setDicesWithoutRoll(n)` for construction/setup.
+   */
+  applyJackInMode(mode: VRMode, intuition: number, applyDiceCount: (targetDiceCount: number) => void): void {
+    this.vrMode = mode;
     this.baseIni = this.dataProcessing + intuition;
     this.jackedIn = true;
     this.blocksPhysicalActions = (mode !== VRMode.AR);
+    // Applied last so a caller that logs the resulting Score sees both halves
+    // of the change (attribute delta + rolled dice delta) already folded in.
+    applyDiceCount(MatrixParticipant.initiativeDiceForMode(mode));
   }
 
   /**
@@ -127,16 +149,15 @@ export class MatrixParticipant extends Participant {
     const src = this as unknown as Record<string, unknown>;
     const dst = clone as unknown as Record<string, unknown>;
 
-    // Copy Participant base fields (mirrors Participant.clone()).
-    const baseFields = [
-      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
-      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
-      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
-      "_hasPainEditor", "_sortOrder"
-    ];
-    for (const f of baseFields) {
+    // Copy Participant base fields (mirrors Participant.clone()), including
+    // the running Initiative Score backing fields.
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
       dst[f] = src[f];
     }
+    // Mirrors Participant.clone(): the copy gets no action history, so the
+    // Initiative already spent on Interrupt Actions is folded into its
+    // running Score rather than refunded (brief F9, p. 167).
+    dst["_currentInitiativeScore"] = this.getCurrentInitiative();
     dst["_actionHistory"] = [];
 
     // Copy Matrix fields

@@ -15,6 +15,14 @@ export interface SharedParticipantState {
   canInterrupt?: boolean;
   initiativeDice?: number;
   pendingRoll?: boolean;
+  /**
+   * Sum of the Initiative Dice already rolled this Combat Turn (`diceIni`).
+   * Broadcast so a rejoining GM can tell "already rolled" from "still needs to
+   * roll": Initiative is rolled once per Combat Turn (p. 159/160), so a restore
+   * must not re-offer the roll to a participant who already has a running
+   * Score. 0 / absent means the Initiative Test has not been taken.
+   */
+  rolledInitiativeTotal?: number;
   edgeRating?: number;
   reaction?: number;
   intuition?: number;

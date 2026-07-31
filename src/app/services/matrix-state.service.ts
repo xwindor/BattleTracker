@@ -26,17 +26,27 @@ export class MatrixStateService {
   /** Fires after any state mutation so subscribers can re-broadcast. */
   readonly stateChange$ = new Subject<void>();
 
+  /**
+   * Phase-1 skeleton, currently uncalled (the live GM jack-in path is
+   * BattleTrackerComponent.gmJackIn / handleSessionCommand).
+   *
+   * The dice count is written *without* rolling here on purpose: this body is
+   * a `UndoHandler.DoAction` action closure that is also replayed on redo, so
+   * rolling inside it would re-roll on every redo. A mid-turn dice change
+   * needs the roll-and-Score-delta (brief F5, p. 160) and must therefore go
+   * through BattleTrackerComponent's dice-count funnel, not through here.
+   */
   jackIn(decker: MatrixParticipant, vrMode: VRMode, intuition: number): void {
     UndoHandler.DoAction(
       () => {
-        decker.applyJackInMode(vrMode, intuition);
+        decker.applyJackInMode(vrMode, intuition, n => decker.setDicesWithoutRoll(n));
         if (!this.state.deckers.includes(decker)) {
           this.state.deckers.push(decker);
         }
       },
       () => {
         // Best-effort undo: revert to AR + un-jack.
-        decker.applyJackInMode(VRMode.AR, intuition);
+        decker.applyJackInMode(VRMode.AR, intuition, n => decker.setDicesWithoutRoll(n));
         decker.jackedIn = false;
         decker.blocksPhysicalActions = false;
         const idx = this.state.deckers.indexOf(decker);

@@ -152,9 +152,15 @@
                 (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
                 [min]="1"
                 title="Initiative Dice">
+              <!-- One-way binding + explicit handler (same shape as the dice-count
+                   box above): the typed value must be clamped *before* it reaches
+                   the Score-moving `diceIni` setter, otherwise an out-of-range
+                   entry moves the running Initiative Score by the unclamped
+                   amount (p. 160 - the Score only moves by the rolled delta). -->
               <input class="form-control inpDiceIni text-center gm-dice-input" name="diceIni" type="number"
-                (keydown)="inpDiceIni_KeyDown($event)" (focus)="inp_Focus($event)" (input)="iniChange($event, p)"
-                [(ngModel)]="p.diceIni" (ngModelChange)="onParticipantUpdated()" #field="ngModel" [min]="0"
+                (keydown)="inpDiceIni_KeyDown($event)" (focus)="inp_Focus($event)"
+                [ngModel]="p.diceIni" (ngModelChange)="onParticipantRolledTotalChanged(p, $event)"
+                #field="ngModel" [min]="0"
                 [max]="getParticipantInitiativeRollMax(p)">
               <div class="input-group-append">
                 <button type="button" class="btn btn-dark p-0 gm-roll-btn" (click)="btnRollInitiative_Click(p)"
@@ -184,7 +190,13 @@
               Delay
             </button>
             }
-            @if (combatManager.started && p.getCurrentInitiative() >= 1) {
+            <!-- The dropdown stays visible at any Initiative Score, including 0
+                 or below: a character down there can still defend/dodge and
+                 still has a Free Action per pass (brief criterion 5, p. 160).
+                 Affordability is gated per action by canUseAction() below,
+                 which refuses any interrupt costing more Score than is left
+                 (brief F9, p. 167). -->
+            @if (combatManager.started) {
             <div class="btn-group p-0" #interruptDropdown ngbDropdown autoClose="outside">
               <button ngbDropdownToggle id="interruptDropdownButton" type="button" class="btn btn-secondary"
                 dropdownToggle>
@@ -534,9 +546,15 @@
                 <div class="row align-items-center mb-2">
                   <div class="col-7"><span>Initiative Dices</span></div>
                   <div class="col-5">
-                    <input type="number" class="form-control form-control-sm"
+                    <!-- One-way binding + explicit handler, same shape as the
+                         row dice-count box. A two-way [(ngModel)] would write
+                         the new count onto the participant *before* the
+                         handler ran, so the handler would compare the new
+                         value against itself, see no change, and skip the
+                         roll-and-Score-delta entirely (brief F5, p. 160). -->
+                    <input type="number" class="form-control form-control-sm gm-stats-dice-count-input"
                       [min]="1" [max]="5" step="1"
-                      [(ngModel)]="selectedActor.dices"
+                      [ngModel]="selectedActor.dices"
                       (ngModelChange)="onParticipantDiceCountChanged(selectedActor, $event)">
                   </div>
                 </div>

@@ -4,7 +4,11 @@ import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } fr
 import { Subscription } from "rxjs";
 import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
-import { Participant } from "Combat/Participants/Participant";
+import {
+  Participant, PARTICIPANT_BASE_BACKING_FIELDS, MIN_DISPLAYED_DICE_TOTAL,
+  PHYSICAL_INITIATIVE_DICE, DiceCountChangeResult, NO_DICE_COUNT_CHANGE,
+  clampInitiativeDiceCount, rollInitiativeDie
+} from "Combat/Participants/Participant";
 import { LogHandler } from "Logging";
 import { Action } from "Interfaces/Action";
 import { FormsModule } from '@angular/forms';
@@ -18,7 +22,7 @@ import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, 
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
-import { AstralParticipant } from "Magic";
+import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
@@ -26,6 +30,17 @@ import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
 import { getInitiativeRollMax, clampInitiativeRoll } from "app/shared/roll-utils";
+
+/**
+ * Options for `changeParticipantDiceCount`. `rollGainedDice: false` is the
+ * session-protocol escape hatch: on a player-driven jack-in the *player*
+ * client rolls the gained dice and submits them as a delta `roll_submission`,
+ * so the GM must not roll them here or the gain would be counted twice. Lost
+ * dice are always rolled GM-side.
+ */
+interface DiceCountChangeOptions {
+  rollGainedDice?: boolean;
+}
 
 interface LocalLogEntry {
   timestamp: Date;
@@ -518,36 +533,29 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                    : vrModeStr === "cold-sim" ? VRMode.ColdSim
                    : VRMode.AR;
-        const oldDices = mp.dices;
-        const wasRolled = mp.diceIni > 0 && this.combatManager.started;
-        this.applyVRMode(mp, mode);
+        // Lost dice (e.g. Hot Sim → Cold Sim) are rolled and applied GM-side.
+        // Gained dice are not: the player client submits them as a delta
+        // roll_submission {isDelta:true}, so rolling here would double-count.
+        this.applyVRMode(mp, mode, { rollGainedDice: false });
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
-        if (wasRolled) {
-          const diceDelta = mp.dices - oldDices;
-          if (diceDelta < 0) {
-            // Lost dice (e.g. Hot Sim → Cold Sim): server applies and logs immediately.
-            this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
-          }
-          // diceDelta > 0: player will submit a delta roll_submission {isDelta:true}.
-          // diceDelta === 0: no dice change; base stat shift is automatic via baseIni.
-        }
-        // else: combat not started or no roll yet — player will send a full roll_submission.
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
-        const oldDices = mp.dices;
-        const wasRolled = payload["jackOut"] === true && mp.diceIni > 0 && this.combatManager.started;
+        const isJackOut = payload["jackOut"] === true;
         mp.vrMode = VRMode.None;
         mp.jackedIn = false;
         mp.blocksPhysicalActions = false;
         const reaction = this.participantReactions.get(mp) ?? 0;
         const intuition = this.getParticipantIntuition(mp);
         mp.baseIni = reaction + intuition;
-        mp.dices = 1;
-        if (wasRolled) {
-          // Server always handles jack-out dice loss: roll the lost dice, subtract, log.
-          this.applyAndLogInitiativeDelta(mp, oldDices, 1);
+        if (isJackOut) {
+          // Jack-out dice loss is always handled GM-side: roll the lost dice,
+          // subtract the total, log (brief F5 / criterion 8, p. 160).
+          this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
+        } else {
+          // Initial deck creation is character setup, not a mid-turn dice
+          // change - the player sends a full roll_submission afterwards.
+          mp.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
         }
-        // else: create or combat not started — player will send full roll_submission.
       }
       // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
       this.sort();
@@ -651,6 +659,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           this.updateInitiativePrepInfo();
         }
         this.sort();
+        return;
+      }
+      if (this.combatManager.started && target.diceIni > 0) {
+        // Initiative is rolled once per Combat Turn (p. 159/160). This
+        // participant already has a running Score, so a full Initiative Test
+        // submission is stale (e.g. a client that was showing a pre-restore
+        // "needs to roll" prompt) and must not be stacked on top of it.
+        LogHandler.log(
+          this.currentBTTime,
+          `${target.name} initiative roll ignored: already rolled this Combat Turn`
+        );
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
@@ -775,6 +794,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           canInterrupt: p.getCurrentInitiative() >= 1,
           initiativeDice: p.dices,
           pendingRoll: p.diceIni <= 0,
+          // Carried so a rejoining GM can reconstruct "already rolled" state
+          // instead of re-offering the once-per-Combat-Turn Initiative Test
+          // (p. 159/160). See restoreFromSharedState().
+          rolledInitiativeTotal: p.diceIni,
           edgeRating: this.getParticipantEdgeRating(p),
           reaction: this.getParticipantReaction(p),
           intuition: this.getParticipantIntuition(p)
@@ -915,6 +938,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       target = undefined;
     }
 
+    // Distinguishes genuine first-time setup (no roll owed) from a
+    // re-registration of a participant already in the encounter (a dice-count
+    // change there is a mid-turn rules event) - see applyRegisteredDiceCount.
+    const isExistingTarget = target !== undefined;
+
     if (!target) {
       target = isMatrix ? new MatrixParticipant() : new Participant();
       this.combatManager.addParticipant(target);
@@ -932,6 +960,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const safeIntuition = Math.max(0, Number(intuition || 0));
 
     if (isMatrix && target instanceof MatrixParticipant) {
+      const decker: MatrixParticipant = target;
       const safeDP = Math.max(1, Number(dataProcessing || 1));
       const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                  : vrModeStr === "cold-sim" ? VRMode.ColdSim
@@ -941,17 +970,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         // AR: physical initiative — REA+INT+initiativeDice, no catatonia.
         // jackedIn is NOT reset here — it's controlled by the GM via gmJackIn/gmJackOut.
         target.vrMode = VRMode.AR;
-        target.dices = Math.max(1, initiativeDice);
+        this.applyRegisteredDiceCount(target, initiativeDice, isExistingTarget);
         target.baseIni = safeReaction + safeIntuition;
         target.blocksPhysicalActions = false;
       } else {
         // Cold/Hot-Sim: Matrix initiative — DP+INT+3d6/4d6, physically catatonic.
-        target.applyJackInMode(mode, safeIntuition);
+        // Setup path, so the dice count is written without rolling.
+        decker.applyJackInMode(mode, safeIntuition, n => decker.setDicesWithoutRoll(n));
       }
       this.participantReactions.set(target, safeReaction);
       this.participantIntuitions.set(target, safeIntuition);
     } else {
-      target.dices = Math.max(1, initiativeDice);
+      this.applyRegisteredDiceCount(target, initiativeDice, isExistingTarget);
       target.baseIni = safeReaction + safeIntuition;
       this.participantReactions.set(target, safeReaction);
       this.participantIntuitions.set(target, safeIntuition);
@@ -965,6 +995,62 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       physical: Math.max(0, Number(target.physicalDamage || 0)),
       stun: Math.max(0, Number(target.stunDamage || 0))
     });
+  }
+
+  /**
+   * Apply the Initiative Dice count carried by a `register_character` command.
+   *
+   * First-time setup (a participant that did not exist yet), or a
+   * re-registration while combat has not started or before this turn's
+   * Initiative Test, is not a rules event: the count is simply written, no roll
+   * owed (the player submits their Initiative roll separately).
+   *
+   * A re-registration *mid-turn* for a participant who has already rolled is a
+   * different thing entirely - the player has activated a drug/spell and their
+   * dice count changed. That is a mid-turn Initiative Dice change and must roll
+   * the gained/lost dice and move the running Score like every other one
+   * (brief F5 / criteria 7-8, p. 160), so it goes through the same funnel
+   * rather than being silently overwritten.
+   */
+  private applyRegisteredDiceCount(
+    p: IParticipant,
+    initiativeDice: number,
+    isExistingTarget: boolean
+  ): void {
+    const clamped = clampInitiativeDiceCount(initiativeDice);
+    const isMidTurnChange = isExistingTarget
+      && this.combatManager.started
+      && p.diceIni > 0
+      && clamped !== p.dices;
+    if (isMidTurnChange) {
+      this.changeParticipantDiceCount(p, clamped);
+      return;
+    }
+    // Setup path: the 5D6 cap still applies (brief criterion 9, pp. 52/288).
+    p.setDicesWithoutRoll(clamped);
+  }
+
+  /**
+   * Rolled-dice total to restore for a broadcast participant.
+   *
+   * Prefers the transmitted `rolledInitiativeTotal`. Older snapshots (from a
+   * build that predates that field) only carry `pendingRoll`, which is exactly
+   * `diceIni <= 0` - so "not pending" is known to mean "rolled", even though
+   * the total itself is unrecoverable. In that case we restore the minimum
+   * non-zero total so the participant is still correctly treated as having
+   * taken their once-per-Combat-Turn Initiative Test (p. 159/160); the running
+   * Score is restored verbatim regardless, so only the displayed dice total is
+   * approximate.
+   */
+  private restoredRolledTotal(shared: SharedParticipantState, participant: IParticipant): number {
+    const transmitted = Number(shared.rolledInitiativeTotal);
+    if (Number.isFinite(transmitted) && transmitted > 0) {
+      return this.clampInitiativeRoll(transmitted, participant);
+    }
+    if (shared.pendingRoll === false && !Number.isFinite(transmitted)) {
+      return MIN_DISPLAYED_DICE_TOTAL;
+    }
+    return 0;
   }
 
   private restoreFromSharedState(state: SharedCombatState | null) {
@@ -986,12 +1072,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.combatManager.currentActors.clear(false);
     this.combatManager.nextSortOrder = 0;
 
+    // Turn/pass counters are restored *before* the participants, so the
+    // running Initiative Scores below are reconstructed against the pass
+    // count they actually belong to (and never decayed against a stale one).
+    this.combatManager.combatTurn = Math.max(1, Number(state.round || 1));
+    this.combatManager.initiativePass = Math.max(1, Number(state.pass || 1));
+    this.combatManager.started = Boolean(state.started);
+    this.combatManager.passEnded = Boolean(state.passEnded);
+    this.combatManager.currentInitiative = Number(state.currentInitiative ?? this.combatManager.currentInitiative);
+
     const ordered = [ ...state.participants ].sort((a, b) => a.order - b.order);
     for (const shared of ordered) {
       const participant = new Participant();
       participant.name = shared.name;
-      participant.dices = Math.max(1, Number(shared.initiativeDice || 1));
-      participant.diceIni = shared.pendingRoll ? 0 : 0;
+      // Reconstructing existing state, not a change event: no roll is owed
+      // (the Score is restored verbatim below). The 5D6 cap still applies.
+      participant.setDicesWithoutRoll(Number(shared.initiativeDice || 1));
+      // Reconstruct the already-rolled state. Initiative is rolled once per
+      // Combat Turn (p. 159/160), so a participant whose Score is already
+      // running must not come back marked as still needing to roll - that is
+      // what `pendingRoll` (getSharedParticipants) and the GM roll button both
+      // key off. The running Score itself is restored verbatim further down,
+      // so this write must be Score-neutral.
+      participant.setDiceIniWithoutScoreChange(
+        this.restoredRolledTotal(shared, participant)
+      );
       const safeReaction = Math.max(0, Number(shared.reaction || 0));
       const safeIntuition = Math.max(0, Number(shared.intuition || 0));
       participant.baseIni = safeReaction + safeIntuition > 0
@@ -1006,7 +1111,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.participantReactions.set(participant, safeReaction > 0 ? safeReaction : Math.max(0, Number(participant.baseIni || 0)));
       this.participantIntuitions.set(participant, safeIntuition);
       this.participantIds.set(participant, shared.id);
-      this.combatManager.addParticipant(participant);
+      // The broadcast payload carries each participant's *current* running
+      // Initiative Score, already reduced by every pass that has elapsed
+      // (brief pp. 159-160). Reconstruct it verbatim rather than re-deriving
+      // it from the pass count, and tell addParticipant() not to apply the
+      // late-entry decay on top (it would double-count).
+      this.combatManager.addParticipant(participant, true);
+      const restoredScore = Number(shared.initiativeScore);
+      if (Number.isFinite(restoredScore)) {
+        participant.currentInitiativeScore = restoredScore;
+        participant.appliedInitiativeAttribute = participant.initiativeAttribute;
+      }
       participant.sortOrder = sharedSortOrder;
       this.lastKnownDamage.set(shared.id, {
         physical: Math.max(0, Number(participant.physicalDamage || 0)),
@@ -1020,11 +1135,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       }
     }
 
-    this.combatManager.combatTurn = Math.max(1, Number(state.round || 1));
-    this.combatManager.initiativePass = Math.max(1, Number(state.pass || 1));
-    this.combatManager.started = Boolean(state.started);
-    this.combatManager.passEnded = Boolean(state.passEnded);
-    this.combatManager.currentInitiative = Number(state.currentInitiative ?? this.combatManager.currentInitiative);
     this.combatManager.participants.sortBySortOrder();
   }
 
@@ -1654,14 +1764,32 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       e.target.select();
   }
 
-  iniChange(e: Event, p: IParticipant) {
-    const clamped = this.clampInitiativeRoll(p.diceIni, p);
+  /**
+   * GM edit of the rolled-dice-total box.
+   *
+   * The box is the manual entry point for the Initiative Test result (its
+   * sibling is the Roll button, which is disabled once a total is present), so
+   * it *is* allowed to move the running Initiative Score - but only by the
+   * legitimate delta between the old and the new rolled total (brief F5 /
+   * criteria 7-8, p. 160). The value is therefore clamped to
+   * [0, dices x 6] *before* it is written through the Score-moving `diceIni`
+   * setter; previously the raw typed value reached that setter through a
+   * two-way `[(ngModel)]` binding and inflated the Score by the unclamped
+   * amount before any clamp could run.
+   *
+   * The one-way `[ngModel]` binding means Angular writes the clamped model
+   * value back into the DOM input, so what the GM sees always matches the
+   * model.
+   */
+  onParticipantRolledTotalChanged(p: IParticipant, value: number) {
+    // One undo step per edit: the clamp plus the resulting Score delta are a
+    // single reversible change.
+    UndoHandler.StartActions();
+    const clamped = this.clampInitiativeRoll(value, p);
     if (clamped !== p.diceIni) {
-      e.preventDefault();
       p.diceIni = clamped;
-      const target = e.target as HTMLInputElement;
-      target.value = String(clamped);
     }
+    this.onParticipantUpdated();
   }
 
   onParticipantUpdated() {
@@ -1669,28 +1797,77 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
+  /**
+   * GM edit of an Initiative Dice count box (participant row *and* the Stats
+   * tab - both bind one-way and call this). A thin wrapper over the single
+   * dice-count funnel; the engine owns the 5D6 cap, the roll and the Score
+   * math (brief F5 / criteria 7-9, p. 160, pp. 52/288).
+   */
   onParticipantDiceCountChanged(p: IParticipant, value: number) {
-    const oldDices = p.dices;
-    const normalizedDiceCount = Math.max(1, Math.floor(Number(value || 1)));
-    p.dices = normalizedDiceCount;
-    if (this.combatManager.started && p.diceIni > 0 && oldDices !== normalizedDiceCount) {
-      // SR5E: mid-combat dice change — only roll delta dice, add/subtract, and log.
-      this.applyAndLogInitiativeDelta(p, oldDices, normalizedDiceCount);
-    } else {
+    const result = this.changeParticipantDiceCount(p, value);
+    if (result.values.length === 0) {
+      // No dice were rolled (not started / not yet rolled / no actual change),
+      // so the displayed rolled total may now exceed the new pool's maximum.
       p.diceIni = this.clampInitiativeRoll(p.diceIni, p);
     }
     this.syncSharedState();
   }
 
   /**
-   * Roll `count` dice and return the individual values and their sum.
+   * Single component-side entry point for "this participant's Initiative Dice
+   * count changed". Every GM/session path that changes a dice count goes
+   * through here, so none of them can forget the roll-and-Score-delta step
+   * (brief F5 / criteria 7-8, p. 160).
+   *
+   * Two things live here rather than in the engine because they are not rules:
+   *  - the `combatManager.started` gate (the engine has no CombatManager
+   *    reference, and creating one would be an import cycle). Outside a running
+   *    combat there is no running Score to move, so the count is just written.
+   *  - `rollGainedDice: false`, the session-protocol case where the *player*
+   *    client rolls and submits the gained dice.
+   *
+   * The engine (`Participant.changeDiceCount`) owns the cap, the roll and the
+   * Score arithmetic; this method only decides whether a roll is owed and logs
+   * the outcome.
    */
-  private rollDiceDetailed(count: number): { values: number[]; sum: number } {
-    const values: number[] = [];
-    for (let i = 0; i < count; i++) {
-      values.push(Math.floor(Math.random() * 6) + 1);
+  private changeParticipantDiceCount(
+    p: IParticipant,
+    newDices: number,
+    options: DiceCountChangeOptions = {}
+  ): DiceCountChangeResult {
+    const clamped = clampInitiativeDiceCount(newDices);
+    const rollGainedDice = options.rollGainedDice !== false;
+    if (!this.combatManager.started || (!rollGainedDice && clamped > p.dices)) {
+      p.setDicesWithoutRoll(clamped);
+      return NO_DICE_COUNT_CHANGE;
     }
-    return { values, sum: values.reduce((s, v) => s + v, 0) };
+
+    const result = p.changeDiceCount(clamped, () => this.rollInitiativeDie());
+    if (result.values.length > 0) {
+      this.logInitiativeDiceDelta(p, result);
+    }
+    return result;
+  }
+
+  /**
+   * Single-die roller seam. Exists so the dice-count paths have one place to
+   * stub in tests; the engine takes the roller as a parameter.
+   */
+  private rollInitiativeDie(): number {
+    return rollInitiativeDie();
+  }
+
+  /**
+   * Log the outcome of a mid-turn dice change to both the local GM log and the
+   * shared session log.
+   */
+  private logInitiativeDiceDelta(p: IParticipant, result: DiceCountChangeResult): void {
+    const sign = result.delta > 0 ? '+' : '-';
+    const magnitude = Math.abs(result.delta);
+    const total = p.getCurrentInitiative();
+    const logText = `initiative delta: ${sign}[${result.values.join(', ')}] = ${sign}${magnitude} → score: ${total}`;
+    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
+    this.appendSharedLog(p.name || 'Participant', logText);
   }
 
   /**
@@ -1711,32 +1888,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
     LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
     this.appendSharedLog(p.name || 'Participant', logText);
-  }
-
-  /**
-   * Apply SR5E mid-combat initiative delta: roll only the gained or lost dice,
-   * add or subtract from p.diceIni, and log to both the local and shared logs.
-   * Only call when combat is active and p.diceIni > 0.
-   */
-  private applyAndLogInitiativeDelta(p: IParticipant, oldDices: number, newDices: number): void {
-    const delta = newDices - oldDices;
-    if (delta === 0) return;
-    const { values, sum } = this.rollDiceDetailed(Math.abs(delta));
-    const signed = delta > 0 ? sum : -sum;
-    p.diceIni = Math.max(1, p.diceIni + signed);
-    const sign = delta > 0 ? '+' : '-';
-    const total = p.getCurrentInitiative();
-    const logText = `initiative delta: ${sign}[${values.join(', ')}] = ${sign}${sum} → score: ${total}`;
-    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
-    this.appendSharedLog(p.name || 'Participant', logText);
-  }
-
-  /** @deprecated Use applyAndLogInitiativeDelta. Kept as internal shim. */
-  private rollDiceDelta(oldDices: number, newDices: number): number {
-    const delta = newDices - oldDices;
-    if (delta === 0) return 0;
-    const { sum } = this.rollDiceDetailed(Math.abs(delta));
-    return delta > 0 ? sum : -sum;
   }
 
   getParticipantEdgeRatingValue(p: IParticipant): number {
@@ -1868,6 +2019,28 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.sort();
   }
 
+  /**
+   * Enter or leave astral space. Both halves of the Initiative change are a
+   * delta on the running Score (brief "Astral projection mid-turn", p. 160):
+   *  - the attribute half (REA+INT <-> INT x 2) rides the `baseIni` setter;
+   *  - the dice half is a *relative* +1/-1 on the Initiative Dice count
+   *    (Astral base 2D6 vs Physical 1D6, p. 159), pushed through the single
+   *    dice-count funnel so the gained/lost die is actually rolled and applied
+   *    to the running Score - "gains the die (and the change in Initiative)
+   *    for their Astral Initiative during that Combat Turn" (p. 160).
+   *
+   * Relative rather than absolute so a magician already carrying bonus
+   * Initiative Dice keeps them. Outside a running combat, or before this
+   * turn's Initiative Test, the funnel just writes the count (no roll owed).
+   *
+   * The return trip subtracts the **realized** outbound gain
+   * (`projectionDiceGain`), not the constant: a dice decrease "rolls the number
+   * of lost dice and subtracts the total" (brief F5 / criterion 8, p. 160), so
+   * you only roll and subtract dice you actually lose. A magician already at
+   * the 5D6 cap (pp. 52/288) gains nothing on the way out - the cap absorbs it,
+   * nothing is rolled, the Score does not move - and so must lose nothing on
+   * the way back. The round trip nets to zero dice and zero Score.
+   */
   toggleAstralProjecting(p: IParticipant): void {
     if (!this.isAstral(p)) return;
     UndoHandler.StartActions();
@@ -1875,6 +2048,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     ap.astralProjecting = !ap.astralProjecting;
     ap.blocksPhysicalActions = ap.astralProjecting;
     ap.baseIni = this.getParticipantBaseInitiative(ap);
+    const countBefore = ap.dices;
+    const requested = ap.astralProjecting
+      ? countBefore + ASTRAL_PROJECTION_DICE_DELTA
+      : countBefore - ap.projectionDiceGain;
+    this.changeParticipantDiceCount(ap, requested);
+    // Record what the outbound trip actually achieved (the funnel clamps to the
+    // 5D6 cap, so this can be less than requested, or 0); clear it on return.
+    ap.projectionDiceGain = ap.astralProjecting ? ap.dices - countBefore : 0;
     LogHandler.log(
       this.currentBTTime,
       `${ap.name} ${ap.astralProjecting ? "entered astral space (INT\xD72 initiative)" : "returned from astral space (REA+INT initiative)"}`
@@ -1896,17 +2077,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
     const mode = this.getPendingVrMode(p);
-    const oldDices = mp.dices;
-    const wasRolled = mp.diceIni > 0 && this.combatManager.started;
+    // Mid-combat jack in: the base stat delta is automatic via baseIni; the
+    // dice half rolls only the gained/lost dice and applies the total to the
+    // running Score (brief F5 / criteria 7-8, p. 160). Outside a running
+    // combat the funnel just writes the count.
     this.applyVRMode(mp, mode);
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
     this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
-    if (wasRolled) {
-      // SR5E: mid-combat jack in — base stat delta automatic via baseIni;
-      // only roll the extra/lost dice, apply, and log.
-      this.applyAndLogInitiativeDelta(mp, oldDices, mp.dices);
-    }
-    // No else: initiative is not rolled automatically on jack in outside of combat.
     const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
     LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
     this.syncSharedState();
@@ -1917,8 +2094,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
-    const oldDices = mp.dices;
-    const wasRolled = mp.diceIni > 0 && this.combatManager.started;
     // Jack Out: clear VR mode, restore physical initiative.
     mp.vrMode = VRMode.None;
     mp.jackedIn = false;
@@ -1926,14 +2101,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.getParticipantIntuition(mp);
     mp.baseIni = reaction + intuition;
-    mp.dices = 1;
     this.pendingVrModes.set(p, VRMode.AR);
-    if (wasRolled) {
-      // SR5E: mid-combat jack out — base stat delta automatic via baseIni;
-      // only roll the lost dice, subtract, and log.
-      this.applyAndLogInitiativeDelta(mp, oldDices, 1);
-    }
-    // No else: initiative is not rolled automatically on jack out outside of combat.
+    // Mid-combat jack out — base stat delta automatic via baseIni; the dice
+    // half rolls the lost dice and subtracts the total (brief F5 / criterion
+    // 8, p. 160). Outside a running combat the funnel just writes the count.
+    this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
     LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
     this.syncSharedState();
     this.sort();
@@ -1950,16 +2122,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const mp = new MatrixParticipant();
     const src = p as unknown as Record<string, unknown>;
     const dst = mp as unknown as Record<string, unknown>;
-    const baseFields = [
-      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
-      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
-      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
-      "_hasPainEditor", "_sortOrder"
-    ];
-    for (const f of baseFields) {
+    // Shared field list: includes the running Initiative Score backing
+    // fields, so an in-place type swap keeps the participant's current Score.
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
       dst[f] = src[f];
     }
-    dst["_actionHistory"] = [];
+    // Same participant, new class: the action history comes along, so
+    // Initiative already committed to Interrupt Actions stays committed
+    // (and a persisting one such as Full Defense keeps holding). The
+    // reduction happens at the time of the Interrupt Action and is not
+    // reversible by a type swap (brief F9, p. 167).
+    dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     mp.dataProcessing = defaultDP;
     mp.vrMode = VRMode.None;
     const existingId = this.participantIds.get(p);
@@ -1997,7 +2170,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.selectedActor === p) this.selectedActor = mp;
     if (this.actModalParticipant === p) this.actModalParticipant = mp;
     this.combatManager.removeParticipant(p);
-    this.combatManager.addParticipant(mp);
+    // In-place type swap: the new instance already carries the running
+    // Initiative Score, so it must not take the late-entry decay again
+    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    this.combatManager.addParticipant(mp, true);
     return mp;
   }
 
@@ -2005,20 +2181,26 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const p = new Participant();
     const src = mp as unknown as Record<string, unknown>;
     const dst = p as unknown as Record<string, unknown>;
-    const baseFields = [
-      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
-      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
-      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
-      "_hasPainEditor", "_sortOrder"
-    ];
-    for (const f of baseFields) {
+    // Shared field list: includes the running Initiative Score backing
+    // fields, so an in-place type swap keeps the participant's current Score.
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
       dst[f] = src[f];
     }
-    dst["_actionHistory"] = [];
+    // Same participant, new class: the action history comes along, so
+    // Initiative already committed to Interrupt Actions stays committed
+    // (and a persisting one such as Full Defense keeps holding). The
+    // reduction happens at the time of the Interrupt Action and is not
+    // reversible by a type swap (brief F9, p. 167).
+    dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.participantIntuitions.get(mp) ?? 0;
-    p.dices = 1;
+    // Losing the deck's Initiative Dice mid-combat is a dice *decrease*: the
+    // newly-rolled lost dice are subtracted from the running Score "along with
+    // any decrease to their Initiative Attribute" (p. 160). `baseIni` covers
+    // the attribute half automatically; the dice half goes through the same
+    // funnel as gmJackOut().
     p.baseIni = reaction + intuition;
+    this.changeParticipantDiceCount(p, PHYSICAL_INITIATIVE_DICE);
     const existingId = this.participantIds.get(mp);
     if (existingId) this.participantIds.set(p, existingId);
     const owner = this.participantOwners.get(mp);
@@ -2049,7 +2231,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
     this.combatManager.removeParticipant(mp);
-    this.combatManager.addParticipant(p);
+    // In-place type swap: the new instance already carries the running
+    // Initiative Score, so it must not take the late-entry decay again
+    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    this.combatManager.addParticipant(p, true);
     return p;
   }
 
@@ -2057,16 +2242,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const ap = new AstralParticipant();
     const src = p as unknown as Record<string, unknown>;
     const dst = ap as unknown as Record<string, unknown>;
-    const baseFields = [
-      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
-      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
-      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
-      "_hasPainEditor", "_sortOrder"
-    ];
-    for (const f of baseFields) {
+    // Shared field list: includes the running Initiative Score backing
+    // fields, so an in-place type swap keeps the participant's current Score.
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
       dst[f] = src[f];
     }
-    dst["_actionHistory"] = [];
+    // Same participant, new class: the action history comes along, so
+    // Initiative already committed to Interrupt Actions stays committed
+    // (and a persisting one such as Full Defense keeps holding). The
+    // reduction happens at the time of the Interrupt Action and is not
+    // reversible by a type swap (brief F9, p. 167).
+    dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const existingId = this.participantIds.get(p);
     if (existingId) this.participantIds.set(ap, existingId);
     const owner = this.participantOwners.get(p);
@@ -2096,7 +2282,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.selectedActor === p) this.selectedActor = ap;
     if (this.actModalParticipant === p) this.actModalParticipant = ap;
     this.combatManager.removeParticipant(p);
-    this.combatManager.addParticipant(ap);
+    // In-place type swap: the new instance already carries the running
+    // Initiative Score, so it must not take the late-entry decay again
+    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    this.combatManager.addParticipant(ap, true);
     return ap;
   }
 
@@ -2104,20 +2293,26 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const p = new Participant();
     const src = ap as unknown as Record<string, unknown>;
     const dst = p as unknown as Record<string, unknown>;
-    const baseFields = [
-      "_active", "_baseIni", "_diceIni", "_dices", "_edge", "_finished",
-      "_name", "_ooc", "_overflowHealth", "_painTolerance", "_physicalDamage",
-      "_physicalHealth", "_status", "_stunDamage", "_stunHealth", "_waiting",
-      "_hasPainEditor", "_sortOrder"
-    ];
-    for (const f of baseFields) {
+    // Shared field list: includes the running Initiative Score backing
+    // fields, so an in-place type swap keeps the participant's current Score.
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
       dst[f] = src[f];
     }
-    dst["_actionHistory"] = [];
+    // Same participant, new class: the action history comes along, so
+    // Initiative already committed to Interrupt Actions stays committed
+    // (and a persisting one such as Full Defense keeps holding). The
+    // reduction happens at the time of the Interrupt Action and is not
+    // reversible by a type swap (brief F9, p. 167).
+    dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const reaction = this.participantReactions.get(ap) ?? 0;
     const intuition = this.participantIntuitions.get(ap) ?? 0;
-    p.dices = 1;
+    // Dropping back to Physical initiative is a dice *decrease* exactly like
+    // the Matrix jack-out twin (demoteToParticipant): `baseIni` covers the
+    // attribute half, and the dice half must roll the lost dice and subtract
+    // the total (brief F5 / criterion 8, p. 160). This site previously
+    // assigned the count directly and skipped the roll entirely.
     p.baseIni = reaction + intuition;
+    this.changeParticipantDiceCount(p, PHYSICAL_INITIATIVE_DICE);
     const existingId = this.participantIds.get(ap);
     if (existingId) this.participantIds.set(p, existingId);
     const owner = this.participantOwners.get(ap);
@@ -2148,7 +2343,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.selectedActor === ap) this.selectedActor = p;
     if (this.actModalParticipant === ap) this.actModalParticipant = p;
     this.combatManager.removeParticipant(ap);
-    this.combatManager.addParticipant(p);
+    // In-place type swap: the new instance already carries the running
+    // Initiative Score, so it must not take the late-entry decay again
+    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    this.combatManager.addParticipant(p, true);
     return p;
   }
 
@@ -2160,6 +2358,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
+  /**
+   * "Switch Mode" control. A mid-combat interface-mode switch is a dice change
+   * like any other: `applyVRMode` routes it through the dice-count funnel, so
+   * the gained/lost dice are rolled and applied to the running Score (brief
+   * F5 / criteria 7-8, p. 160). This handler previously changed the dice count
+   * with no roll and no Score effect at all.
+   */
   onVRModeChange(p: IParticipant, mode: VRMode): void {
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
@@ -2168,18 +2373,32 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
-  private applyVRMode(mp: MatrixParticipant, mode: VRMode): void {
+  /**
+   * Apply a Matrix interface mode: the Initiative attribute half directly, the
+   * Initiative Dice half through `changeParticipantDiceCount` - the single
+   * funnel that owns the cap, the delta roll and the Score movement.
+   */
+  private applyVRMode(
+    mp: MatrixParticipant,
+    mode: VRMode,
+    options: DiceCountChangeOptions = {}
+  ): DiceCountChangeResult {
     const intuition = this.getParticipantIntuition(mp);
     if (mode === VRMode.AR) {
       mp.vrMode = VRMode.AR;
       const reaction = this.participantReactions.get(mp) ?? 0;
       mp.baseIni = reaction + intuition;
-      mp.dices = 1;
       mp.jackedIn = false;
       mp.blocksPhysicalActions = false;
-    } else {
-      mp.applyJackInMode(mode, intuition);
+      return this.changeParticipantDiceCount(
+        mp, MatrixParticipant.initiativeDiceForMode(VRMode.AR), options
+      );
     }
+    let result: DiceCountChangeResult = NO_DICE_COUNT_CHANGE;
+    mp.applyJackInMode(mode, intuition, target => {
+      result = this.changeParticipantDiceCount(mp, target, options);
+    });
+    return result;
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {
@@ -2508,13 +2727,60 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return Math.max(0, Math.min(this.getInitiativeRollMax(p), normalized));
   }
 
+  /**
+   * Keep the displayed rolled-dice total inside its input bounds. This runs on
+   * *any* participant field edit (including unrelated ones such as the name
+   * field), so it must never move the running Initiative Score as a side
+   * effect - the Score only changes when dice are actually rolled (brief F5,
+   * p. 160).
+   *
+   * Because the clamp is Score-neutral by design, it can leave the rolled-total
+   * box showing a number that no longer reconciles with the running Score
+   * (attribute + displayed total != Score) - e.g. a decker who rolled 18 on 3D6
+   * and then lost two dice to a small lost-dice roll. That is correct per the
+   * rules but silently confusing at the table, so every clamp that opens such a
+   * gap emits a log line naming both numbers. The Score itself is never
+   * touched here.
+   */
   private enforceParticipantRollBounds() {
     for (const participant of this.combatManager.participants.items) {
       const clamped = this.clampInitiativeRoll(participant.diceIni, participant);
       if (participant.diceIni !== clamped) {
-        participant.diceIni = clamped;
+        participant.setDiceIniWithoutScoreChange(clamped);
+        this.logRolledTotalClamp(participant, clamped);
       }
     }
+  }
+
+  /**
+   * Log a Score-neutral rolled-total clamp when it leaves the displayed total
+   * irreconcilable with the Initiative Score the GM can actually see, so the
+   * gap is never silent. Purely a legibility signal - no Score math happens
+   * here (brief F5, p. 160).
+   *
+   * Both the guard and the message read `getCurrentInitiative()`, the
+   * *effective* Score (running Score + Initiative committed to Interrupt
+   * Actions, brief F9, p. 167) - the same value the Ini column, the roll log
+   * and the sort comparator use. Reading the raw `currentInitiativeScore`
+   * backing field instead would name a number that appears nowhere on screen
+   * for anyone holding Full Defense.
+   *
+   * The message states the two numbers and does not claim the clamp caused the
+   * gap: ordinary pass-boundary decay (-10, p. 160) opens the same gap on its
+   * own, and this function cannot tell the two apart.
+   */
+  private logRolledTotalClamp(p: IParticipant, clamped: number) {
+    const effectiveScore = p.getCurrentInitiative();
+    const reconcilable = p.initiativeAttribute + clamped === effectiveScore;
+    if (reconcilable) {
+      return;
+    }
+    const logText =
+      `rolled total clamped to ${clamped} (${p.dices}D6 max); `
+      + `initiative score reads ${effectiveScore} - display and Score do not `
+      + `reconcile (attribute ${p.initiativeAttribute} + rolled total)`;
+    LogHandler.log(this.currentBTTime, `${p.name || "Participant"} ${logText}`);
+    this.appendSharedLog(p.name || "Participant", logText);
   }
 
 }
