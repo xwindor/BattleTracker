@@ -206,6 +206,9 @@
       <li class="list-group-item"
           [class.log-entry-new]="isLogEntryNew($index)"
           [class.log-entry-gm-note]="entry.gmNote">
+        @if (entry.npc) {
+        <span class="log-badge log-badge-npc" data-testid="log-badge-npc">NPC</span>
+        }
         @if (entry.gmNote) {
         <span class="log-badge log-badge-note">GM narration</span>
         }

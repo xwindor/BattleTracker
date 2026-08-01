@@ -5,7 +5,7 @@ import { SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipan
 import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
-import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
+import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
@@ -75,11 +75,19 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.matrixGroupOpen = !this.matrixGroupOpen;
   }
 
-  incomingDiceRoll: { roller: string; values: number[] } | null = null;
+  /**
+   * `npc` comes straight off the broadcast payload, so the dice tray marks a
+   * GM roll made for a non-player combatant (p. 44) the same way the log entry
+   * for the same roll does - the two are on screen together.
+   */
+  incomingDiceRoll: { roller: string; values: number[]; npc?: boolean } | null = null;
   ownDiceRoll: { values: number[] } | null = null;
 
-  onPlayerDiceRolled(values: number[]): void {
+  onPlayerDiceRolled(request: DiceRollRequest): void {
     if (!this.connected) return;
+    // `rollAs` is never set here: the player view leaves `allowRollAs` off, so
+    // a player's roll is always their own (only the GM rolls for NPCs, p. 44).
+    const values = request.values;
     const rollerName = this.characterName || this.playerToken;
     this.session.sendCommand({
       type: "dice_roll",
@@ -184,7 +192,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           const rawValues = command.payload?.["values"];
           const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
           if (values.length > 0) {
-            this.incomingDiceRoll = { roller, values };
+            this.incomingDiceRoll = { roller, values, npc: !!command.payload?.["npc"] };
           }
         }
       });

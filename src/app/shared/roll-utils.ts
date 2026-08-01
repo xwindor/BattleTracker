@@ -2,8 +2,11 @@
 //
 // These are the only rules facts this feature needed, and every one of them
 // is computable from data the app already captures (the rolled die faces).
-// No limit, threshold, opposed-test or Edge concept exists in this codebase
-// and none is introduced here.
+// No limit, threshold, opposed-test or Edge concept exists in this *roll
+// resolution* path, and none is introduced here. Scoped deliberately: Edge does
+// exist elsewhere in the app (`Participant.edge`, the Edge-weighted initiative
+// ordering, the GM-editable Edge rating, Edge tie-breaking) - it is only the
+// dice-pool resolution below that has no notion of it.
 
 /** A die showing this face or higher is a *hit* (each 5 or 6, brief p. 44). */
 export const HIT_FACE_MINIMUM = 5;

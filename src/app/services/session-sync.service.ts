@@ -122,6 +122,16 @@ export interface SharedLogEntry {
   gmNote?: boolean;
 
   /**
+   * True when the gamemaster made this roll on behalf of a non-player
+   * combatant: `actor` is that combatant's name, not the GM's. The gamemaster
+   * governs the actions of the non-player characters and determines the
+   * results of their tests (brief p. 44), so the dice are the GM's but the
+   * roll belongs to the named NPC. Presentation only - nothing about the
+   * resolution differs from any other roll.
+   */
+  npc?: boolean;
+
+  /**
    * Set only on entries the GM kept off the wire. Whether GM rolls are visible
    * to players is a table decision, not a rule (brief p. 330). An entry
    * carrying this flag exists in the GM's local list only and was never sent

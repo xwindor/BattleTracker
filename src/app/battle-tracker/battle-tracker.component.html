@@ -487,6 +487,10 @@
               @if (entry.hiddenFromPlayers) {
               <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
               }
+              @if (entry.npc) {
+              <span class="log-badge log-badge-npc" data-testid="log-badge-npc"
+                    ngbTooltip="You rolled these dice on behalf of this non-player combatant (p. 44).">NPC</span>
+              }
               @if (entry.gmNote) {
               <span class="log-badge log-badge-note">GM narration</span>
               }
@@ -532,6 +536,9 @@
                 [class.log-entry-gm-note]="entry.gmNote"
                 data-testid="retained-hidden-entry">
               <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              @if (entry.npc) {
+              <span class="log-badge log-badge-npc" data-testid="log-badge-npc">NPC</span>
+              }
               @if (entry.gmNote) {
               <span class="log-badge log-badge-note">GM narration</span>
               }
@@ -580,7 +587,10 @@
         </div>
         }
         <app-dice-roller
+          #gmDiceRoller
           [incomingRoll]="incomingDiceRoll"
+          [allowRollAs]="true"
+          [rollAsNames]="rollAsNames"
           (rolledEvent)="onGmDiceRolled($event)">
         </app-dice-roller>
       </div>

@@ -50,6 +50,6 @@ Registering or claiming a character mid-combat now immediately prompts that play
 
 ## GM rolls as NPCs — 
 
-The GM Dice Roller header has a "Roll as" selector (GM or any participant); rolls broadcast and log under that name.
+The GM Dice Roller header has a "Roll as" selector (GM, any GM-run combatant, or a free-text label); rolls broadcast and log under that name, badged NPC. Player characters — claimed or merely marked Claimable — are excluded from the picker.
 
 Dice cap — Raised from 20 to 40.
