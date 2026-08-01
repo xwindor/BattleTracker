@@ -7,7 +7,7 @@ import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import {
   Participant, PARTICIPANT_BASE_BACKING_FIELDS, MIN_DISPLAYED_DICE_TOTAL,
   PHYSICAL_INITIATIVE_DICE, DiceCountChangeResult, NO_DICE_COUNT_CHANGE,
-  clampInitiativeDiceCount, rollInitiativeDie
+  clampInitiativeDiceCount, rollInitiativeDie, INITIATIVE_PASS_DECAY
 } from "Combat/Participants/Participant";
 import { LogHandler } from "Logging";
 import { Action } from "Interfaces/Action";
@@ -28,8 +28,12 @@ import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.compon
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
-import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
-import { getInitiativeRollMax, clampInitiativeRoll } from "app/shared/roll-utils";
+import {
+  buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass,
+  formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
+  formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference
+} from "app/shared/log-formatter";
+import { getInitiativeRollMax, clampInitiativeRoll, classifyRoll } from "app/shared/roll-utils";
 
 /**
  * Options for `changeParticipantDiceCount`. `rollGainedDice: false` is the
@@ -46,6 +50,17 @@ interface LocalLogEntry {
   timestamp: Date;
   text: string;
 }
+
+/**
+ * Marker appended to every GM-local log line the players never received.
+ *
+ * Whether the gamemaster's dice are seen is a table agreement (brief p. 330);
+ * once the table has chosen "hidden", the GM's own log still has to say which
+ * lines went out and which did not, or a GM reading back the log after a
+ * disconnect cannot tell the two apart. One constant so every hidden-write path
+ * tags the line identically.
+ */
+const HIDDEN_FROM_PLAYERS_TAG = "(hidden from players)";
 
 @Component({
   standalone: true,
@@ -96,16 +111,115 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   incomingDiceRoll: { roller: string; values: number[] } | null = null;
 
+  /**
+   * Whether the GM's own dice rolls go into the shared log at all.
+   *
+   * Whether the gamemaster's dice are visible - rolled in front of the players
+   * or behind a screen - is explicitly a table agreement, not a rule
+   * (brief p. 330). The table's chosen default here is *visible*: the
+   * tracker's whole value is a shared record, so a GM roll is broadcast unless
+   * the GM says otherwise.
+   */
+  static readonly GM_ROLLS_VISIBLE_BY_DEFAULT = true;
+
+  /** Session-level switch. False = every GM roll stays GM-local. */
+  gmRollsVisibleToPlayers = BattleTrackerComponent.GM_ROLLS_VISIBLE_BY_DEFAULT;
+
+  /** One-shot override: hide only the next GM roll, then reset itself. */
+  hideNextGmRoll = false;
+
+  /** True if the roll about to be logged must not reach players. */
+  isGmRollHiddenFromPlayers(): boolean {
+    return !this.gmRollsVisibleToPlayers || this.hideNextGmRoll;
+  }
+
+  /**
+   * Flip the session-level decision. Flipping it in *either* direction also
+   * disarms the one-shot: the "hide next roll" button is only on screen while
+   * the session is visible, so an arming that survived a round trip through
+   * session-hidden would be invisible state the GM cannot see or clear.
+   */
+  toggleGmRollVisibility(): void {
+    this.gmRollsVisibleToPlayers = !this.gmRollsVisibleToPlayers;
+    this.hideNextGmRoll = false;
+  }
+
+  toggleHideNextGmRoll(): void {
+    this.hideNextGmRoll = !this.hideNextGmRoll;
+  }
+
+  /**
+   * Read the visibility decision for one GM-originated roll and spend the
+   * one-shot. The one-shot is only spent while the session is visible -
+   * otherwise a session-hidden roll would silently burn an arming that had no
+   * observable effect.
+   */
+  private consumeGmRollVisibility(): boolean {
+    const hidden = this.isGmRollHiddenFromPlayers();
+    if (this.gmRollsVisibleToPlayers) {
+      this.hideNextGmRoll = false;
+    }
+    return hidden;
+  }
+
+  /**
+   * A participant nobody has claimed is run by the GM, so its initiative roll
+   * is a GM roll and answers to the same visibility decision as the dice
+   * roller (brief p. 330).
+   */
+  private isGmControlled(p: IParticipant): boolean {
+    return !this.participantOwners.has(p);
+  }
+
+  /**
+   * Log an initiative-track entry for a participant, honouring GM roll
+   * visibility for GM-run participants. Player-claimed participants are never
+   * hidden - the setting is about the *gamemaster's* dice (brief p. 330).
+   *
+   * `presetHidden` lets a batch (roll-outstanding) resolve the decision once
+   * and apply it to every roll in the batch, so the one-shot is spent once per
+   * GM action rather than once per participant.
+   *
+   * This also owns the *local* log line for the entry, so a line the players
+   * never received is tagged "(hidden from players)" in the GM's own log
+   * exactly like the dice roller's hidden rolls. Callers must not write their
+   * own local line, or the GM gets the same event twice with only one of the
+   * two copies telling the truth about visibility.
+   */
+  private appendParticipantRollLog(p: IParticipant, logText: string, presetHidden?: boolean): void {
+    const actor = p.name || 'Participant';
+    if (!this.isGmControlled(p)) {
+      LogHandler.log(this.currentBTTime, `${actor} ${logText}`);
+      this.appendSharedLog(actor, logText);
+      return;
+    }
+    const hidden = presetHidden !== undefined ? presetHidden : this.consumeGmRollVisibility();
+    if (hidden && this.shareRoomCode) {
+      // appendGmOnlyLog writes the local line itself, tagged as hidden.
+      this.appendGmOnlyLog(actor, logText);
+    } else {
+      LogHandler.log(this.currentBTTime, `${actor} ${logText}`);
+      this.appendSharedLog(actor, logText);
+    }
+  }
+
   onGmDiceRolled(values: number[]): void {
-    const hits = values.filter(v => v >= 5).length;
-    const logText = `rolled ${values.length}d6: [${values.join(", ")}] — ${hits} hit${hits !== 1 ? "s" : ""}`;
-    if (this.shareRoomCode) {
-      this.appendSharedLog("GM", logText);
+    // Hits, 1s and glitch status all come from the faces already rolled
+    // (brief pp. 44-45); nothing else about the test is modelled.
+    const glitch = classifyRoll(values).glitch;
+    const logText = formatDiceRollLogText(values);
+    const hidden = this.consumeGmRollVisibility();
+    if (this.shareRoomCode && !hidden) {
+      this.appendSharedLog("GM", logText, { glitch });
       this.sessionSync.sendCommand({
         type: "dice_roll",
         player: "GM",
         payload: { roller: "GM", diceCount: values.length, values }
       });
+    } else if (this.shareRoomCode) {
+      // Kept off the wire: recorded in the GM's own log only, flagged so the
+      // GM can see at a glance that the players did not get this one.
+      this.appendGmOnlyLog("GM", logText, { glitch });
     } else {
       LogHandler.log(this.currentBTTime, `GM ${logText}`);
     }
@@ -313,12 +427,33 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   async btnCreateShareSession_Click() {
     this.shareError = "";
     this.shareInfo = "";
+    // A fresh session starts a fresh record, which throws away any hidden
+    // entries retained from a session that closed under the GM. Those are the
+    // only copy in existence (the server never had them), and this button is
+    // the reflex action after a disconnect - so the loss is confirmed out loud
+    // rather than happening as a silent side effect (brief p. 330).
+    if (this.hasRetainedHiddenLogEntries()) {
+      const count = this.retainedHiddenLogEntryCount;
+      const confirmed = await this.confirmationDialog.confirm(
+        `${count} hidden GM log ${count === 1 ? "entry is" : "entries are"} still held locally from the closed `
+        + `session. The server never received ${count === 1 ? "it" : "them"}, so starting a new session discards `
+        + `${count === 1 ? "it" : "them"} permanently. Rejoin the old room code instead to keep `
+        + `${count === 1 ? "it" : "them"}.`,
+        "Discard retained hidden entries?",
+        "Discard and Create",
+        "Cancel"
+      );
+      if (!confirmed) {
+        this.shareInfo = "Kept the retained hidden entries; no new session created.";
+        return;
+      }
+    }
     try {
       this.sessionSync.connect();
       const { room } = await this.sessionSync.createSession();
       this.shareRoomCode = room;
       this.shareJoinCode = room;
-      this.sharedLogEntries = [];
+      this.sharedLogEntries = this.reseedLogOrder([]);
       this.clearSharedLogDecodeAnimations();
       this.attachShareListeners();
       this.syncSharedState();
@@ -339,7 +474,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.sessionSync.connect();
       const { state, log } = await this.sessionSync.joinAsGm(room);
       this.shareRoomCode = room;
-      this.sharedLogEntries = log || [];
+      this.sharedLogEntries = this.mergeHiddenLogEntries(log || []);
       this.clearSharedLogDecodeAnimations();
       this.pendingLogScroll = true;
       this.attachShareListeners();
@@ -412,7 +547,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.sessionSync.disconnect();
       this.shareRoomCode = "";
       this.shareJoinCode = "";
-      this.sharedLogEntries = [];
+      // Deliberate close: the GM ended this session's record on purpose, so
+      // the GM-local hidden entries go with it. (An *unexpected* close keeps
+      // them - see the onSessionClosed handler.)
+      this.sharedLogEntries = this.reseedLogOrder([]);
       this.clearSharedLogDecodeAnimations();
       this.initiativePrepActive = false;
       this.isClosingSession = false;
@@ -422,26 +560,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private attachShareListeners() {
     this.sessionSync.onCommand((command) => this.handleSessionCommand(command));
     this.sessionSync.onLog((entry) => {
-      this.sharedLogEntries = [ ...this.sharedLogEntries, entry ];
+      const index = this.insertSharedLogEntry(entry);
       this.pendingLogScroll = true;
-      this.flashSharedLogEntry(this.sharedLogEntries.length - 1);
-      this.startSharedLogDecode(this.sharedLogEntries.length - 1, entry.text);
+      this.flashSharedLogEntry(index);
+      this.startSharedLogDecode(index, entry.text);
       if (entry.actor !== "GM") {
         LogHandler.log(this.currentBTTime, `${entry.actor} ${entry.text}`);
       }
     });
-    this.sessionSync.onSessionClosed(() => {
-      if (this.isClosingSession) {
-        return;
-      }
-      this.shareInfo = "Session was closed.";
-      this.shareRoomCode = "";
-      this.shareJoinCode = "";
-      this.sharedLogEntries = [];
-      this.clearSharedLogDecodeAnimations();
-      this.initiativePrepActive = false;
-      this.sessionSync.disconnect();
-    });
+    this.sessionSync.onSessionClosed(() => this.handleSessionClosedExternally());
+  }
+
+  /**
+   * The session went away without the GM asking for it (server restart,
+   * dropped connection). Reset the share state but keep the GM-local hidden
+   * entries: the server never received them, so this list is the only copy and
+   * a rejoin merges them back in (brief p. 330).
+   */
+  private handleSessionClosedExternally() {
+    if (this.isClosingSession) {
+      return;
+    }
+    this.shareInfo = "Session was closed.";
+    this.shareRoomCode = "";
+    this.shareJoinCode = "";
+    this.sharedLogEntries = this.reseedLogOrder(this.getHiddenLogEntries());
+    this.clearSharedLogDecodeAnimations();
+    this.initiativePrepActive = false;
+    this.sessionSync.disconnect();
   }
 
   isParticipantClaimable(p: IParticipant): boolean {
@@ -643,18 +789,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         const total = target.getCurrentInitiative();
         const rawValues = command.payload?.["diceValues"];
         const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
-        const sign = roll >= 0 ? '+' : '';
-        if (diceValues.length > 0) {
-          this.appendSharedLog(
-            target.name || "Player",
-            `initiative delta: +[${diceValues.join(", ")}] = ${sign}${roll} → score: ${total}`
-          );
-        } else {
-          this.appendSharedLog(
-            target.name || "Player",
-            `initiative delta: manual(${sign}${roll}) → score: ${total}`
-          );
-        }
+        this.appendSharedLog(
+          target.name || "Player",
+          formatInitiativeDeltaLogText(diceValues, roll, total)
+        );
         if (this.initiativePrepActive) {
           this.updateInitiativePrepInfo();
         }
@@ -685,17 +823,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       }
       const rawValues = command.payload?.["diceValues"];
       const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
-      if (diceValues.length > 0) {
-        this.appendSharedLog(
-          target.name || "Player",
-          `initiative roll: ${baseLabel} + [${diceValues.join(", ")}] = ${total}`
-        );
-      } else {
-        this.appendSharedLog(
-          target.name || "Player",
-          `initiative roll: ${baseLabel} + manual(${target.diceIni}) = ${total}`
-        );
-      }
+      this.appendSharedLog(
+        target.name || "Player",
+        diceValues.length > 0
+          ? formatInitiativeRollLogText(baseLabel, diceValues, total)
+          : formatManualInitiativeRollLogText(baseLabel, target.diceIni, total)
+      );
       if (this.initiativePrepActive) {
         this.updateInitiativePrepInfo();
       }
@@ -751,9 +884,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const rawValues = command.payload?.["values"];
       const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
       if (values.length > 0) {
-        const hits = values.filter(v => v >= 5).length;
-        const logText = `rolled ${values.length}d6: [${values.join(", ")}] — ${hits} hit${hits !== 1 ? "s" : ""}`;
-        this.appendSharedLog(roller, logText);
+        // Same classification as a GM roll - hits, 1s, glitch (brief pp. 44-45).
+        this.appendSharedLog(roller, formatDiceRollLogText(values), { glitch: classifyRoll(values).glitch });
         this.incomingDiceRoll = { roller, values };
       }
       return;
@@ -826,15 +958,242 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       });
   }
 
-  private appendSharedLog(actor: string, text: string) {
+  private appendSharedLog(actor: string, text: string, extra?: Partial<SharedLogEntry>) {
     if (!this.shareRoomCode) {
       return;
     }
-    this.sessionSync.appendLog({
+    const entry: SharedLogEntry = {
       actor,
       text,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      id: this.nextLogEntryId(),
+      ...extra
+    };
+    // Reserve this entry's place in the GM's own log *now*, before it makes
+    // the round trip through the server. A hidden entry logged in the
+    // meantime is appended synchronously, so without a reservation the echo
+    // would land after it and the GM would read the two out of order.
+    this.assignLogOrder(entry);
+    this.sessionSync.appendLog(entry);
+  }
+
+  /**
+   * Append an entry to the GM's own log without sending it to the server.
+   *
+   * Used for GM rolls the GM chose to keep private (brief p. 330) and for any
+   * narration attached to one. The server broadcasts a log entry to the whole
+   * room, so "GM sees it, players do not" can only be done by not sending it.
+   */
+  private appendGmOnlyLog(
+    actor: string,
+    text: string,
+    extra?: Partial<SharedLogEntry>
+  ): SharedLogEntry {
+    const entry: SharedLogEntry = {
+      actor,
+      text,
+      timestamp: new Date().toISOString(),
+      id: this.nextLogEntryId(),
+      ...extra,
+      hiddenFromPlayers: true
+    };
+    const index = this.insertSharedLogEntry(entry);
+    this.pendingLogScroll = true;
+    this.flashSharedLogEntry(index);
+    this.startSharedLogDecode(index, entry.text);
+    LogHandler.log(this.currentBTTime, `${actor} ${text} ${HIDDEN_FROM_PLAYERS_TAG}`);
+    return entry;
+  }
+
+  private nextLogEntryId(): string {
+    return `log-${Date.now().toString(36)}-${(this.logEntryIdCounter++).toString(36)}`;
+  }
+  private logEntryIdCounter = 0;
+
+  // ── Local ordering of the GM's log pane ─────────────────────────────────
+  //
+  // Two append paths feed `sharedLogEntries`: visible entries arrive via the
+  // server echo (async) and hidden entries are pushed synchronously. A
+  // monotonic sequence assigned when the GM *originates* an entry keeps the
+  // two interleaved in the order they actually happened. Presentation only -
+  // it changes nothing about what players receive.
+
+  private logOrderSequence = 0;
+  private readonly logOrderById = new Map<string, number>();
+  private readonly logOrderByEntry = new WeakMap<SharedLogEntry, number>();
+
+  private assignLogOrder(entry: SharedLogEntry): number {
+    const existing = this.peekLogOrder(entry);
+    if (existing !== undefined) {
+      this.logOrderByEntry.set(entry, existing);
+      return existing;
+    }
+    const seq = this.logOrderSequence++;
+    if (entry.id) {
+      this.logOrderById.set(entry.id, seq);
+    }
+    this.logOrderByEntry.set(entry, seq);
+    return seq;
+  }
+
+  private peekLogOrder(entry: SharedLogEntry): number | undefined {
+    const byEntry = this.logOrderByEntry.get(entry);
+    if (byEntry !== undefined) {
+      return byEntry;
+    }
+    return entry.id ? this.logOrderById.get(entry.id) : undefined;
+  }
+
+  private getLogOrder(entry: SharedLogEntry): number {
+    const known = this.peekLogOrder(entry);
+    return known !== undefined ? known : this.assignLogOrder(entry);
+  }
+
+  /**
+   * Place an entry at its ordered position and return the index it landed at.
+   * Almost always the end; only a server echo that lost a race with a hidden
+   * entry goes anywhere else.
+   */
+  private insertSharedLogEntry(entry: SharedLogEntry): number {
+    const order = this.assignLogOrder(entry);
+    const entries = [ ...this.sharedLogEntries ];
+    let position = entries.length;
+    while (position > 0 && this.getLogOrder(entries[position - 1]) > order) {
+      position--;
+    }
+    entries.splice(position, 0, entry);
+    this.sharedLogEntries = entries;
+    if (position < entries.length - 1) {
+      // Everything after the insertion point shifted by one; the in-flight
+      // decode animations are keyed by index, so stop them rather than let
+      // them paint onto the wrong row.
+      this.cancelSharedLogDecodeFrom(position);
+    }
+    return position;
+  }
+
+  /**
+   * Maximum length of a GM's glitch narration. Not a rules limit - the session
+   * server rejects a log entry over 2 KB, so the text box is bounded well
+   * inside that.
+   */
+  static readonly GM_NOTE_MAX_LENGTH = 300;
+
+  /** Template-facing alias for the narration length cap. */
+  get glitchNoteMaxLength(): number {
+    return BattleTrackerComponent.GM_NOTE_MAX_LENGTH;
+  }
+
+  /** Draft narration text, keyed by the id of the entry it annotates. */
+  glitchNoteDrafts = new Map<string, string>();
+  /** Which glitch entry currently has its narration box open. */
+  openGlitchNoteEntryId: string | null = null;
+
+  /**
+   * A glitch entry can carry GM narration. Only glitched rolls offer the box;
+   * the consequence of a glitch is GM-adjudicated narrative with nothing to
+   * look up (brief p. 45), so this text is always typed by the GM and never
+   * generated.
+   */
+  canAnnotateGlitch(entry: SharedLogEntry): boolean {
+    return !!entry.id && !!entry.glitch && entry.glitch !== "none" && !entry.gmNote;
+  }
+
+  isGlitchNoteOpen(entry: SharedLogEntry): boolean {
+    return !!entry.id && this.openGlitchNoteEntryId === entry.id;
+  }
+
+  toggleGlitchNote(entry: SharedLogEntry): void {
+    if (!entry.id) {
+      return;
+    }
+    this.openGlitchNoteEntryId = this.openGlitchNoteEntryId === entry.id ? null : entry.id;
+  }
+
+  /**
+   * What will happen to *this* narration when it is submitted.
+   *
+   * Visibility is decided per entry: a narration about a roll the players
+   * already saw stays public even while the session-hidden switch is lit, and a
+   * narration about a hidden roll stays private even while GM rolls are
+   * visible. The switch is on the other side of the screen, so the input says
+   * which of the two this one is (brief p. 330).
+   */
+  getGlitchNoteVisibilityLabel(entry: SharedLogEntry): string {
+    return entry.hiddenFromPlayers ? "stays private" : "will be visible to players";
+  }
+
+  /** True when submitting this narration puts it on the wire. */
+  isGlitchNoteVisibleToPlayers(entry: SharedLogEntry): boolean {
+    return !entry.hiddenFromPlayers;
+  }
+
+  getGlitchNoteDraft(entry: SharedLogEntry): string {
+    return (entry.id && this.glitchNoteDrafts.get(entry.id)) || "";
+  }
+
+  setGlitchNoteDraft(entry: SharedLogEntry, text: string): void {
+    if (!entry.id) {
+      return;
+    }
+    this.glitchNoteDrafts.set(entry.id, text.slice(0, BattleTrackerComponent.GM_NOTE_MAX_LENGTH));
+  }
+
+  /**
+   * Record the GM's narration for a glitch as its own entry pointing back at
+   * the roll (`refId`). The log is append-only, so the original roll entry is
+   * never rewritten - its hits and glitch label stand exactly as rolled
+   * (brief p. 45).
+   *
+   * The narration also carries `refSummary`: the parent roll's actor and its
+   * hit/glitch summary, restated inline. The log is a flat list with no turn
+   * or pass grouping, so anything at all can be logged between the roll and
+   * its narration; the restatement is what makes the link readable instead of
+   * relying on the two happening to sit next to each other.
+   */
+  submitGlitchNote(entry: SharedLogEntry): void {
+    const text = this.getGlitchNoteDraft(entry).trim();
+    if (!entry.id || text.length === 0) {
+      return;
+    }
+    const extra: Partial<SharedLogEntry> = {
+      gmNote: true,
+      refId: entry.id,
+      refSummary: formatLogEntryReference(entry.actor, entry.text),
+      glitch: entry.glitch
+    };
+    if (entry.hiddenFromPlayers) {
+      // Narration about a roll the players never saw stays GM-local too.
+      this.appendGmOnlyLog("GM", text, extra);
+    } else {
+      this.appendSharedLog("GM", text, extra);
+    }
+    this.glitchNoteDrafts.delete(entry.id);
+    this.openGlitchNoteEntryId = null;
+  }
+
+  /**
+   * The line a narration entry shows to name the roll it is about.
+   *
+   * Prefers the summary captured when the narration was written, which travels
+   * with the entry and survives a reconnect. Falls back to re-deriving it from
+   * the parent entry if it is still in the log (older entries carry no
+   * `refSummary`). Returns "" when there is nothing to reference.
+   */
+  getLogEntryReference(entry: SharedLogEntry): string {
+    if (entry.refSummary) {
+      return entry.refSummary;
+    }
+    const parent = this.getAnnotatedEntry(entry);
+    return parent ? formatLogEntryReference(parent.actor, parent.text) : "";
+  }
+
+  /** The roll entry a narration entry is attached to, for display. */
+  getAnnotatedEntry(entry: SharedLogEntry): SharedLogEntry | null {
+    if (!entry.refId) {
+      return null;
+    }
+    return this.sharedLogEntries.find(e => e.id === entry.refId) || null;
   }
 
   private getParticipantId(participant: IParticipant): string {
@@ -1452,7 +1811,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.combatManager.nextIniPass();
     this.combatManager.goToNextActors();
     if (this.combatManager.initiativePass > 1) {
-      this.appendSharedLog("GM", `Start Initiative Pass ${this.combatManager.initiativePass}`);
+      this.appendSharedLog(
+        "GM",
+        formatPassStartLogText(this.combatManager.initiativePass, INITIATIVE_PASS_DECAY)
+      );
     }
     this.sort();
   }
@@ -1599,8 +1961,83 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return [ ...this.logHandler.logbook ].reverse();
   }
 
-  getVisibleSharedLogEntries(): SharedLogEntry[] {
-    return [ ...this.sharedLogEntries ];
+  /**
+   * The GM's own log pane shows *everything* the GM has, hidden entries
+   * included - the visibility decision is about what players receive
+   * (brief p. 330), not about what the GM can see. Already held in the order
+   * the entries happened (see `insertSharedLogEntry`).
+   */
+  getSharedLogEntriesForGm(): SharedLogEntry[] {
+    return this.sharedLogEntries;
+  }
+
+  /** Entries the GM kept off the wire - the only copy of them anywhere. */
+  private getHiddenLogEntries(): SharedLogEntry[] {
+    return this.sharedLogEntries.filter(e => e.hiddenFromPlayers);
+  }
+
+  /**
+   * Hidden entries still held after the session went away under the GM.
+   *
+   * With no room code the shared log pane has nothing to show, so without this
+   * the retained entries would exist in memory and appear nowhere - the GM
+   * would have no way to read them and no warning before an action that
+   * destroys them. Only meaningful while there is no live session; once
+   * rejoined they are ordinary entries in the merged log again.
+   */
+  getRetainedHiddenLogEntries(): SharedLogEntry[] {
+    return this.shareRoomCode ? [] : this.getHiddenLogEntries();
+  }
+
+  hasRetainedHiddenLogEntries(): boolean {
+    return this.getRetainedHiddenLogEntries().length > 0;
+  }
+
+  get retainedHiddenLogEntryCount(): number {
+    return this.getRetainedHiddenLogEntries().length;
+  }
+
+  /** Banner text for the retained-entry block in the GM's log pane. */
+  get retainedHiddenLogBanner(): string {
+    const count = this.retainedHiddenLogEntryCount;
+    return `${count} hidden GM ${count === 1 ? "entry" : "entries"} retained from the closed session `
+      + `- players never received ${count === 1 ? "it" : "them"}. Rejoin the room code to merge `
+      + `${count === 1 ? "it" : "them"} back in; creating a new session discards ${count === 1 ? "it" : "them"}.`;
+  }
+
+  /**
+   * Rebuild the log from a server-provided history without losing the GM's
+   * hidden entries. The server never received those, so they cannot come back
+   * in `incoming`; merging them in by timestamp is the only way a reconnect
+   * keeps them.
+   */
+  private mergeHiddenLogEntries(incoming: SharedLogEntry[]): SharedLogEntry[] {
+    const hidden = this.getHiddenLogEntries();
+    if (hidden.length === 0) {
+      return [ ...incoming ];
+    }
+    const seen = new Set(incoming.map(e => e.id).filter(Boolean));
+    const merged = [ ...incoming, ...hidden.filter(e => !e.id || !seen.has(e.id)) ];
+    merged.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+    return this.reseedLogOrder(merged);
+  }
+
+  /**
+   * Re-key the local ordering sequence to a wholesale replacement of the log
+   * (a rejoin, a reset). Without this the sequence numbers left over from the
+   * previous list would put newly arriving entries in the wrong place.
+   */
+  private reseedLogOrder(entries: SharedLogEntry[]): SharedLogEntry[] {
+    this.logOrderById.clear();
+    this.logOrderSequence = 0;
+    for (const entry of entries) {
+      const seq = this.logOrderSequence++;
+      if (entry.id) {
+        this.logOrderById.set(entry.id, seq);
+      }
+      this.logOrderByEntry.set(entry, seq);
+    }
+    return entries;
   }
 
   getSharedLogDisplayText(entry: SharedLogEntry, index: number): string {
@@ -1611,54 +2048,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return this.localLogDecodeText.get(this.getLocalLogKey(entry)) || entry.text;
   }
 
+  /**
+   * Log presentation is shared with the player view (`app/shared/log-formatter`)
+   * so a glitch, an action or a damage entry reads identically on both screens.
+   */
   getLogTextClass(text: string): string {
-    if (/Act_Click:|Action_Click:|Interrupt|Free:|Simple:|Complex:/i.test(text)) {
-      return "log-text-action";
-    }
-    if (/RollInitiative_Click|submitted initiative roll|roll/i.test(text)) {
-      return "log-text-roll";
-    }
-    return "log-text-system";
+    return getLogTextClass(text);
   }
 
   formatLogText(text: string): string {
-    let formatted = this.escapeHtml(text);
-    const rollPattern = /(initiative roll:\s*)(-?\d+)/i;
-    if (rollPattern.test(formatted)) {
-      return formatted.replace(rollPattern, `$1<span class="log-keyword-roll">$2</span>`);
-    }
-
-    const interruptPattern = /^(Interrupt\s+)(.+)$/i;
-    if (interruptPattern.test(formatted)) {
-      return formatted.replace(interruptPattern, `$1<span class="log-keyword-action">$2</span>`);
-    }
-
-    const categoryPattern = /(Free|Simple|Complex):\s*([^|]+)/gi;
-    if (categoryPattern.test(formatted)) {
-      return formatted.replace(categoryPattern, (_match, label: string, actions: string) => {
-        const highlightedActions = actions
-          .split(",")
-          .map((action: string) => action.trim())
-          .filter((action: string) => action.length > 0)
-          .map((action: string) => `<span class="log-keyword-action">${action}</span>`)
-          .join(", ");
-        return `${label}: ${highlightedActions}`;
-      });
-    }
-    formatted = formatted.replace(/(healed\s+Physical\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
-    formatted = formatted.replace(/(healed\s+Stun\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
-    formatted = formatted.replace(/(Physical\s+)(\d+)/gi, `$1<span class="log-keyword-physical">$2</span>`);
-    formatted = formatted.replace(/(Stun\s+)(\d+)/gi, `$1<span class="log-keyword-stun">$2</span>`);
-    return formatted;
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+    return formatLogText(text);
   }
 
   toggleActionDetails(event: Event, action: Action): void {
@@ -1862,19 +2261,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * shared session log.
    */
   private logInitiativeDiceDelta(p: IParticipant, result: DiceCountChangeResult): void {
-    const sign = result.delta > 0 ? '+' : '-';
-    const magnitude = Math.abs(result.delta);
     const total = p.getCurrentInitiative();
-    const logText = `initiative delta: ${sign}[${result.values.join(', ')}] = ${sign}${magnitude} → score: ${total}`;
-    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
-    this.appendSharedLog(p.name || 'Participant', logText);
+    const logText = formatInitiativeDeltaLogText(result.values, result.delta, total);
+    // appendParticipantRollLog writes the local line too, tagged if hidden.
+    this.appendParticipantRollLog(p, logText);
   }
 
   /**
    * Roll all initiative dice for p, update diceIni, and log the result to
    * both the local GM log and the shared session log (if active).
    */
-  private rollAndLogInitiative(p: IParticipant): void {
+  private rollAndLogInitiative(p: IParticipant, presetHidden?: boolean): void {
     const values = Array.from({ length: p.dices }, () => Math.floor(Math.random() * 6) + 1);
     p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
     const total = p.getCurrentInitiative();
@@ -1885,9 +2282,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
           ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
           : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
-    const logText = `initiative roll: ${baseLabel} + [${values.join(', ')}] = ${total}`;
-    LogHandler.log(this.currentBTTime, `${p.name} ${logText}`);
-    this.appendSharedLog(p.name || 'Participant', logText);
+    const logText = formatInitiativeRollLogText(baseLabel, values, total);
+    // appendParticipantRollLog writes the local line too, tagged if hidden.
+    this.appendParticipantRollLog(p, logText, presetHidden);
   }
 
   getParticipantEdgeRatingValue(p: IParticipant): number {
@@ -2534,17 +2931,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private rollOutstandingInitiative(includePlayers: boolean) {
     UndoHandler.StartActions();
     let rolledPlayer = false;
-    for (const participant of this.combatManager.participants.items) {
+    const targets = this.combatManager.participants.items.filter(participant => {
       if (participant.ooc || participant.diceIni > 0) {
-        continue;
+        return false;
       }
       if (!includePlayers && this.participantOwners.has(participant)) {
-        continue;
+        return false;
       }
+      return true;
+    });
+    // One GM action, one visibility decision: resolve (and spend) it once so a
+    // batch of NPC rolls is hidden or shown as a unit rather than the one-shot
+    // being burned by whichever participant happens to come first.
+    //
+    // The one-shot is only spent if this batch will actually roll at least one
+    // GM-run participant. A batch that rolls nothing (the GM tapping the button
+    // to check status when nothing is outstanding) or that rolls only
+    // player-claimed characters - who are never hidden - must leave the arming
+    // intact for the next real GM roll (brief p. 330).
+    const rollsGmControlled = targets.some(p => this.isGmControlled(p));
+    const hiddenForBatch = rollsGmControlled ? this.consumeGmRollVisibility() : false;
+    for (const participant of targets) {
       if (this.participantOwners.has(participant)) {
         rolledPlayer = true;
       }
-      this.rollAndLogInitiative(participant);
+      this.rollAndLogInitiative(participant, hiddenForBatch);
     }
     if (rolledPlayer && this.shareRoomCode) {
       this.sessionSync.sendCommand({
@@ -2575,7 +2986,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.initiativePrepActive = false;
     this.combatManager.startRound();
     this.appendSharedLog("GM", `Start Combat Turn ${this.combatManager.combatTurn}`);
-    this.appendSharedLog("GM", `Start Initiative Pass ${this.combatManager.initiativePass}`);
+    this.appendSharedLog(
+      "GM",
+      formatPassStartLogText(this.combatManager.initiativePass, INITIATIVE_PASS_DECAY)
+    );
     this.sort();
   }
 
@@ -2697,6 +3111,26 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.sharedLogDecodeText.clear();
   }
 
+  /**
+   * Stop the decode animation on every entry from `index` onward. Used when an
+   * out-of-order entry is inserted and the rows below it shift down; the
+   * animations are keyed by row index, so a stale one would paint on the wrong
+   * line. The entry's final text is what shows instead.
+   */
+  private cancelSharedLogDecodeFrom(index: number) {
+    for (const key of [ ...this.sharedLogDecodeTimers.keys() ]) {
+      if (key >= index) {
+        window.clearInterval(this.sharedLogDecodeTimers.get(key));
+        this.sharedLogDecodeTimers.delete(key);
+      }
+    }
+    for (const key of [ ...this.sharedLogDecodeText.keys() ]) {
+      if (key >= index) {
+        this.sharedLogDecodeText.delete(key);
+      }
+    }
+  }
+
   private clearLocalLogDecodeAnimations() {
     for (const timer of this.localLogDecodeTimers.values()) {
       window.clearInterval(timer);
@@ -2768,6 +3202,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * The message states the two numbers and does not claim the clamp caused the
    * gap: ordinary pass-boundary decay (-10, p. 160) opens the same gap on its
    * own, and this function cannot tell the two apart.
+   *
+   * It names the participant's Initiative Dice count, rolled total, Initiative
+   * attribute and Score, so for a GM-run participant it is subject to the same
+   * visibility decision as the roll it describes (brief p. 330) - hence it goes
+   * out through `appendParticipantRollLog` and not straight to the shared log.
+   * The decision is *read* rather than consumed: this line is a consequence of
+   * a dice-count change, not a roll of its own, so it must not spend the "hide
+   * next roll" one-shot the GM armed for something else.
    */
   private logRolledTotalClamp(p: IParticipant, clamped: number) {
     const effectiveScore = p.getCurrentInitiative();
@@ -2779,8 +3221,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       `rolled total clamped to ${clamped} (${p.dices}D6 max); `
       + `initiative score reads ${effectiveScore} - display and Score do not `
       + `reconcile (attribute ${p.initiativeAttribute} + rolled total)`;
-    LogHandler.log(this.currentBTTime, `${p.name || "Participant"} ${logText}`);
-    this.appendSharedLog(p.name || "Participant", logText);
+    this.appendParticipantRollLog(p, logText, this.isGmRollHiddenFromPlayers());
   }
 
 }

@@ -2,6 +2,31 @@
 
 Running list of future features. Newest at the top.
 
+## Surprise Test and spell Drain logging
+
+Marked explicitly out of scope for the combat-log-readability feature
+(`briefs/combat-log-readability.md`, ACs 22–23): neither the Surprise Test
+mechanic (p. 192–193 — glitch/critical glitch effects, the -10 Initiative
+Score modifier) nor spell Drain (p. 282 — Physical vs. Stun based on casting
+hits vs. Magic rating) exists anywhere in the app. Building log formatting
+for either means building the underlying mechanic first, via its own rules
+brief through the `/feature` pipeline — not a log-formatting change.
+
+## GM roll-visibility toggle — close remaining leak paths
+
+The GM roll-visibility toggle added by combat-log-readability
+(`briefs/combat-log-readability.md`, "Known limitations") ships as a
+best-effort convenience, not a guarantee. Known open gaps as of 2026-07-31:
+the periodic participant state-sync broadcast (`getSharedParticipants`)
+sends a hidden roll's underlying numbers to players regardless of the
+toggle; hidden log entries are only preserved across a deliberate "Close
+Room," not an ordinary disconnect (server restart, dropped connection); and
+`logRolledTotalClamp` can leak a hidden roll's numbers via the one-shot
+"hide next roll" path specifically. A real fix needs a single choke point
+that every GM-originated roll (and its consequences — clamps, state-sync)
+routes through, rather than patching each leak path individually. See
+`RULINGS.md`, "GM/NPC dice roll visibility defaults."
+
 ## Initiative Score mutation sources
 
 Implement the full set of things that change Initiative Score mid-turn:

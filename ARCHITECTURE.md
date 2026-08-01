@@ -498,8 +498,21 @@ active. Session sync is a one-way derived broadcast layered on top:
   player owned (if `claimable`), and rebroadcasts — this is the one place
   combat-adjacent state is touched outside the GM tab's own logic.
 - Reconnect/rejoin (`joinAsGm`, `joinAsPlayer`) replays the last broadcast
-  `state` and `log` verbatim from the server's in-memory snapshot; there is
-  no reconciliation logic. `restoreFromSharedState()` sets the turn/pass
+  `state` and `log` from the server's in-memory snapshot. **Combat state is
+  replayed verbatim with no reconciliation. The log is not.** A GM rejoin runs
+  the server's log through `mergeHiddenLogEntries()`: entries the GM chose to
+  keep off the wire (`hiddenFromPlayers`, written by `appendGmOnlyLog`) exist
+  only in the GM tab's `sharedLogEntries`, so the server's history can never
+  contain them and a verbatim replace would destroy them. The merge keeps the
+  server list, re-adds any GM-local hidden entry whose `id` is not already in
+  it, sorts the union by `timestamp`, and reseeds the local ordering sequence
+  (`reseedLogOrder`) to the merged order. Consequences worth knowing before
+  changing this: hidden entries are retained (not cleared) when a session drops
+  unexpectedly (`handleSessionClosedExternally`) so a rejoin can merge them
+  back, while a deliberate `btnCloseShareSession_Click` discards them, and
+  `btnCreateShareSession_Click` discards them only behind an explicit GM
+  confirmation. Entry `timestamp` is therefore load-bearing for ordering, not
+  just display. `restoreFromSharedState()` sets the turn/pass
   counters *before* rebuilding participants and then assigns each restored
   participant's `currentInitiativeScore` directly from the broadcast
   `initiativeScore` — the running Score is reconstructed from the transmitted

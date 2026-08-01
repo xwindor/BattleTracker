@@ -57,3 +57,31 @@ Matrix VR-mode dice counts (AR/Cold-Sim/Hot-Sim) are still implemented as
 absolute per-mode counts, not relative deltas — this ruling does not
 retroactively apply to Matrix, which is a separate, currently-paused module
 (see CLAUDE.md "Current focus").
+
+## 2026-07-31 — GM/NPC dice roll visibility defaults
+
+**Ruling:** GM and NPC dice rolls are visible to players in the shared
+combat log by default. The GM can hide an individual upcoming roll ("hide
+next roll") or the whole session ("GM rolls: hidden") to keep specific rolls
+or a whole session's worth of GM rolls out of the shared log. NPC dice pool
+compositions may also be shown to players — they are not hidden by default.
+
+**Why:** The core rulebook (printed p. 330, Gamemaster Advice) explicitly
+hands this decision to the table rather than mandating an answer: it tells
+the group to agree up front whether all dice, including the gamemaster's,
+are visible to everyone, whether the GM rolls discreetly or in the open, and
+when initiative is rolled and reported. Xavier chose visible-by-default with
+an opt-out, since the tracker's core value is a shared record of what
+happened (`briefs/combat-log-readability.md`, Open Question 1 and 2).
+
+**How to apply:** Any future feature that logs a GM- or NPC-originated roll
+should default to broadcasting it to players and should route it through
+whatever the current GM-visibility gate is (see
+`briefs/combat-log-readability.md`'s "Known limitations" — as of 2026-07-31
+this gate only reliably covers the dice-roller and initiative-roll log
+*lines*; it does not yet prevent a hidden roll's numbers from reaching
+players via the periodic participant state-sync broadcast, and hidden log
+entries are not reliably preserved across an ordinary disconnect, only a
+deliberate "Close Room." Treat the toggle as a convenience for keeping
+routine rolls out of the log, not as a guarantee of concealment, until those
+gaps are closed).

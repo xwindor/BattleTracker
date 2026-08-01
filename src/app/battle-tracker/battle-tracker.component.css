@@ -598,3 +598,114 @@ input:checked + .slider:before {
   background: rgba(111, 66, 193, 0.06);
   border-top: 1px solid rgba(111, 66, 193, 0.2);
 }
+
+/* ── Combat log readability ─────────────────────────────────────────────── */
+
+/* Glitch = more than half the dice showed a 1 (p. 45). */
+:host ::ng-deep .log-keyword-glitch {
+  background: #fef08a;
+  color: #713f12;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+  font-weight: 700;
+}
+
+/* Critical glitch = a glitch that also produced no hits (p. 45). */
+:host ::ng-deep .log-keyword-critical-glitch {
+  background: #b91c1c;
+  color: #fff;
+  border-radius: 0.25rem;
+  padding: 0.03rem 0.2rem;
+  font-weight: 700;
+}
+
+.log-text-glitch {
+  background: #fef08a;
+  color: #713f12;
+}
+
+.log-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 0.25rem;
+  padding: 0.02rem 0.3rem;
+  margin-right: 0.3rem;
+}
+
+.log-badge-hidden {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.log-badge-note {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+/* GM narration attached to a glitch (p. 45): indented so the flat list still
+   reads as one entry commenting on another. The entry names its parent roll
+   in .log-entry-ref, because the list is flat and the roll it is about may be
+   many lines further up. */
+.log-entry-gm-note {
+  padding-left: 1.5rem !important;
+  border-left: 3px solid #a78bfa;
+}
+
+.log-entry-ref {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: #6d28d9;
+  opacity: 0.9;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.log-entry-hidden {
+  opacity: 0.85;
+  border-left: 3px dashed #64748b;
+}
+
+.glitch-note-toggle {
+  padding: 0;
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+
+.glitch-note-editor {
+  max-width: 28rem;
+}
+
+/* Per-entry visibility cue on the narration box. Narration inherits the
+   visibility of the roll it annotates, which can disagree with the session
+   switch showing elsewhere on screen. */
+.glitch-note-visibility {
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.glitch-note-visibility-public {
+  color: #b45309;
+}
+
+.glitch-note-visibility-private {
+  color: #475569;
+}
+
+/* Hidden entries kept after a session closed under the GM: the only copy that
+   exists, so they get a loud block of their own above the local log. */
+.log-retained-banner {
+  font-size: 0.8rem;
+  color: #7c2d12;
+  background: #fef3c7;
+  border-left: 3px solid #d97706;
+}
+
+.gm-roll-visibility {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.4rem 0.6rem 0;
+}

@@ -1,5 +1,6 @@
 import { Injectable } from "@angular/core";
 import { io, Socket } from "socket.io-client";
+import { GlitchLevel } from "app/shared/roll-utils";
 
 export interface SharedParticipantState {
   id: string;
@@ -84,6 +85,49 @@ export interface SharedLogEntry {
   actor: string;
   text: string;
   timestamp: string;
+
+  /**
+   * Stable per-entry id. Present on entries a later entry can point at (a
+   * glitched roll). Optional so snapshots from older builds still load.
+   */
+  id?: string;
+
+  /**
+   * Glitch status of the roll this entry records: more than half the dice
+   * showed a 1, and `critical` when that roll also produced no hits
+   * (brief p. 45). Absent/`none` on entries that are not a roll.
+   */
+  glitch?: GlitchLevel;
+
+  /**
+   * `id` of the entry this one annotates. Used to attach GM glitch narration
+   * to the roll it describes without rewriting the original entry - the log
+   * is append-only.
+   */
+  refId?: string;
+
+  /**
+   * Human-readable restatement of the entry `refId` points at (actor plus that
+   * roll's hit/glitch summary), carried on the wire so both screens can show
+   * the link without holding the parent entry. The log is a flat list, so
+   * unrelated entries can land in between and adjacency proves nothing.
+   */
+  refSummary?: string;
+
+  /**
+   * True when the entry's text is GM-authored narrative typed at the table.
+   * Glitch consequences are entirely the GM's invention; nothing here is ever
+   * generated from a table (brief p. 45).
+   */
+  gmNote?: boolean;
+
+  /**
+   * Set only on entries the GM kept off the wire. Whether GM rolls are visible
+   * to players is a table decision, not a rule (brief p. 330). An entry
+   * carrying this flag exists in the GM's local list only and was never sent
+   * to the server, so players cannot receive one.
+   */
+  hiddenFromPlayers?: boolean;
 }
 
 export interface SessionCommand {
@@ -254,6 +298,11 @@ export class SessionSyncService {
 
   appendLog(entry: SharedLogEntry) {
     if (!this.currentRoom) return;
+    // A hidden entry is GM-local by construction (brief p. 330 leaves roll
+    // visibility to the table). Refuse to put one on the wire even if a
+    // caller passes it here by mistake - the server broadcasts to the whole
+    // room, so there is no way to send it to the GM alone.
+    if (entry.hiddenFromPlayers) return;
     this.socket?.emit("session:append-log", { room: this.currentRoom, entry });
   }
 

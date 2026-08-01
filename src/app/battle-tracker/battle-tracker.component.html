@@ -476,16 +476,73 @@
         <div class="card-header">Action Log</div>
         <ul class="list-group list-group-flush gm-log-list" #gmLogListContainer>
           @if (shareRoomCode) {
-            @if (getVisibleSharedLogEntries().length === 0) {
+            @if (getSharedLogEntriesForGm().length === 0) {
             <li class="list-group-item text-muted">No log entries yet.</li>
             }
-            @for (entry of getVisibleSharedLogEntries(); track $index) {
-            <li class="list-group-item" [class.log-entry-new]="isSharedLogEntryNew($index)">
+            @for (entry of getSharedLogEntriesForGm(); track $index) {
+            <li class="list-group-item"
+                [class.log-entry-new]="isSharedLogEntryNew($index)"
+                [class.log-entry-gm-note]="entry.gmNote"
+                [class.log-entry-hidden]="entry.hiddenFromPlayers">
+              @if (entry.hiddenFromPlayers) {
+              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              }
+              @if (entry.gmNote) {
+              <span class="log-badge log-badge-note">GM narration</span>
+              }
+              @if (entry.gmNote && getLogEntryReference(entry)) {
+              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
+              }
               <strong>{{ entry.actor }}</strong>:
               <span [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
+              @if (canAnnotateGlitch(entry)) {
+                @if (isGlitchNoteOpen(entry)) {
+                <div class="glitch-note-visibility"
+                     data-testid="glitch-note-visibility"
+                     [class.glitch-note-visibility-public]="isGlitchNoteVisibleToPlayers(entry)"
+                     [class.glitch-note-visibility-private]="!isGlitchNoteVisibleToPlayers(entry)"
+                     ngbTooltip="Narration follows the visibility of the roll it is attached to, not the current GM-roll switch.">
+                  This narration {{ getGlitchNoteVisibilityLabel(entry) }}.
+                </div>
+                <div class="glitch-note-editor input-group input-group-sm mt-1">
+                  <input type="text"
+                         class="form-control form-control-sm"
+                         placeholder="What happened? (your words)"
+                         [maxlength]="glitchNoteMaxLength"
+                         [ngModel]="getGlitchNoteDraft(entry)"
+                         (ngModelChange)="setGlitchNoteDraft(entry, $event)"
+                         (keyup.enter)="submitGlitchNote(entry)">
+                  <button type="button" class="btn btn-sm btn-primary" (click)="submitGlitchNote(entry)">Add</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" (click)="toggleGlitchNote(entry)">Cancel</button>
+                </div>
+                } @else {
+                <button type="button" class="btn btn-link btn-sm glitch-note-toggle" (click)="toggleGlitchNote(entry)">+ narration</button>
+                }
+              }
             </li>
             }
           } @else {
+            @if (hasRetainedHiddenLogEntries()) {
+            <li class="list-group-item log-retained-banner" data-testid="retained-hidden-banner">
+              <span class="log-badge log-badge-hidden">retained</span>
+              {{ retainedHiddenLogBanner }}
+            </li>
+            @for (entry of getRetainedHiddenLogEntries(); track $index) {
+            <li class="list-group-item log-entry-hidden"
+                [class.log-entry-gm-note]="entry.gmNote"
+                data-testid="retained-hidden-entry">
+              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              @if (entry.gmNote) {
+              <span class="log-badge log-badge-note">GM narration</span>
+              }
+              @if (entry.gmNote && getLogEntryReference(entry)) {
+              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
+              }
+              <strong>{{ entry.actor }}</strong>:
+              <span [innerHTML]="formatLogText(entry.text)"></span>
+            </li>
+            }
+            }
             @if (getVisibleLogEntries().length === 0) {
             <li class="list-group-item text-muted">No log entries yet.</li>
             }
@@ -500,6 +557,28 @@
       </div>
       <div class="card mt-3">
         <div class="card-header">Dice Roller</div>
+        @if (shareRoomCode) {
+        <div class="gm-roll-visibility">
+          <button type="button"
+                  class="btn btn-sm"
+                  [class.btn-outline-secondary]="gmRollsVisibleToPlayers"
+                  [class.btn-warning]="!gmRollsVisibleToPlayers"
+                  (click)="toggleGmRollVisibility()"
+                  ngbTooltip="Whether your dice are visible to the players is a table agreement, not a rule (p. 330). Default: visible.">
+            {{ gmRollsVisibleToPlayers ? "GM rolls: visible to players" : "GM rolls: hidden (session)" }}
+          </button>
+          @if (gmRollsVisibleToPlayers) {
+          <button type="button"
+                  class="btn btn-sm"
+                  [class.btn-outline-secondary]="!hideNextGmRoll"
+                  [class.btn-warning]="hideNextGmRoll"
+                  (click)="toggleHideNextGmRoll()"
+                  ngbTooltip="Hide only the next roll from players; resets itself afterwards.">
+            {{ hideNextGmRoll ? "Next roll: hidden" : "Hide next roll" }}
+          </button>
+          }
+        </div>
+        }
         <app-dice-roller
           [incomingRoll]="incomingDiceRoll"
           (rolledEvent)="onGmDiceRolled($event)">

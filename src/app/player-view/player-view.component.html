@@ -203,7 +203,15 @@
       <li class="list-group-item text-muted">No log entries yet.</li>
       }
       @for (entry of log; track $index) {
-      <li class="list-group-item" [class.log-entry-new]="isLogEntryNew($index)">
+      <li class="list-group-item"
+          [class.log-entry-new]="isLogEntryNew($index)"
+          [class.log-entry-gm-note]="entry.gmNote">
+        @if (entry.gmNote) {
+        <span class="log-badge log-badge-note">GM narration</span>
+        }
+        @if (entry.gmNote && getLogEntryReference(entry)) {
+        <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
+        }
         <strong>{{ entry.actor }}</strong>:
         <span [innerHTML]="formatLogText(getLogDisplayText(entry, $index))"></span>
       </li>

@@ -11,6 +11,8 @@ import {
 } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
+import { GlitchLevel, RollOutcome, classifyRoll, isHitFace } from "app/shared/roll-utils";
+import { getGlitchLabel } from "app/shared/log-formatter";
 
 export interface RemoteRoll {
   id: number;
@@ -40,7 +42,21 @@ export class DiceRollerComponent implements OnChanges {
   private localRollTimeout: ReturnType<typeof setTimeout> | null = null;
 
   get localHitCount(): number {
-    return this.localValues.filter(v => v >= 5).length;
+    return this.localOutcome.hits;
+  }
+
+  /** Hits, 1s and glitch status of the local roll (brief pp. 44-45). */
+  get localOutcome(): RollOutcome {
+    return classifyRoll(this.localValues);
+  }
+
+  getOutcome(values: number[]): RollOutcome {
+    return classifyRoll(values);
+  }
+
+  /** "GLITCH" / "CRITICAL GLITCH" / "" - the printed terms (brief p. 45). */
+  getGlitchLabel(level: GlitchLevel): string {
+    return getGlitchLabel(level);
   }
 
   get localTotal(): number {
@@ -57,7 +73,7 @@ export class DiceRollerComponent implements OnChanges {
   private remoteIdCounter = 0;
 
   getHitCount(values: number[]): number {
-    return values.filter(v => v >= 5).length;
+    return classifyRoll(values).hits;
   }
 
   // ── Face-value → rotation map ─────────────────────────────────────────
@@ -90,7 +106,12 @@ export class DiceRollerComponent implements OnChanges {
   }
 
   isHit(value: number): boolean {
-    return value >= 5;
+    return isHitFace(value);
+  }
+
+  /** A 1 - the face that counts toward a glitch (brief p. 45). */
+  isOne(value: number): boolean {
+    return value === 1;
   }
 
   getLocalDieStyle(index: number): Record<string, string> {

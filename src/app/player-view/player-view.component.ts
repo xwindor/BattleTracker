@@ -7,7 +7,7 @@ import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, 
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
 import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
-import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass } from "app/shared/log-formatter";
+import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
 
 @Component({
@@ -660,6 +660,23 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   formatLogText(text: string): string {
     return formatLogText(text);
+  }
+
+  /**
+   * The line a GM-narration entry shows to name the roll it is about. The log
+   * is a flat list, so unrelated entries routinely land between a roll and its
+   * narration; the reference restates the parent roll's actor and hit/glitch
+   * summary so the link does not depend on the two being adjacent.
+   */
+  getLogEntryReference(entry: SharedLogEntry): string {
+    if (entry.refSummary) {
+      return entry.refSummary;
+    }
+    if (!entry.refId) {
+      return "";
+    }
+    const parent = this.log.find(e => e.id === entry.refId);
+    return parent ? formatLogEntryReference(parent.actor, parent.text) : "";
   }
 
   toggleDeclaredActionCategory(categoryId: DeclaredActionCategoryId) {

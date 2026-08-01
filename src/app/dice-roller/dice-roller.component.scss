@@ -229,12 +229,45 @@
   border: 1px solid rgba(0, 255, 65, 0.4);
 }
 
+/* A 1 - the face that counts toward a glitch (brief p. 45). */
+.die-result-one {
+  background: #000;
+  color: #ffb000;
+  border: 1px solid #ffb000;
+  box-shadow: 0 0 5px rgba(255, 176, 0, 0.45);
+}
+
 .dice-hits-summary {
   font-size: 0.8rem;
   font-weight: 600;
   color: #00ff41;
   margin-left: 0.35rem;
   white-space: nowrap;
+}
+
+.dice-ones-summary {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ffb000;
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+
+.dice-glitch-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #000;
+  background: #ffb000;
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+
+.dice-glitch-badge--critical {
+  background: #ff3030;
+  color: #fff;
 }
 
 .twirly {
