@@ -82,12 +82,10 @@ export function getGlitchLabel(level: GlitchLevel): string {
 export function formatDiceRollLogText(values: readonly number[]): string {
   const outcome = classifyRoll(values);
   const faces = [ ...values ].sort((a, b) => b - a).join(", ");
-  const parts = [
-    `${outcome.hits} hit${outcome.hits !== 1 ? "s" : ""}`,
-    `${outcome.ones} one${outcome.ones !== 1 ? "s" : ""} of ${outcome.pool}`
-  ];
+  const parts = [`${outcome.hits} hit${outcome.hits !== 1 ? "s" : ""}`];
   const label = getGlitchLabel(outcome.glitch);
   if (label) {
+    parts.push(`${outcome.ones} one${outcome.ones !== 1 ? "s" : ""} of ${outcome.pool}`);
     parts.push(label);
   }
   return `rolled ${outcome.pool}d6: [${faces}]${LOG_SUMMARY_SEPARATOR}${parts.join(LOG_FACT_SEPARATOR)}`;

@@ -18,10 +18,16 @@ const PASS_DECAY = 10;
 
 describe('log-formatter: dice roll entries', () => {
 
-  it('shows dice rolled and number of 1s so glitch status is verifiable (AC1, p. 45)', () => {
-    const text = formatDiceRollLogText([6, 5, 4, 1, 1]);
+  it('shows dice rolled and number of 1s when the roll glitches, so glitch status is verifiable (AC1, p. 45)', () => {
+    const text = formatDiceRollLogText([6, 5, 1, 1, 1]);
     expect(text).toContain('rolled 5d6');
-    expect(text).toContain('2 ones of 5');
+    expect(text).toContain('3 ones of 5');
+    expect(text).toContain('2 hits');
+  });
+
+  it('omits the ones count on a clean, non-glitching roll (Xavier, 2026-07-31)', () => {
+    const text = formatDiceRollLogText([6, 5, 4, 1, 1]);
+    expect(text).not.toContain('ones of');
     expect(text).toContain('2 hits');
   });
 
@@ -52,7 +58,7 @@ describe('log-formatter: dice roll entries', () => {
   it('applies no glitch label to a clean roll', () => {
     const text = formatDiceRollLogText([6, 5, 4, 3, 2]);
     expect(text).not.toContain(GLITCH_LABEL);
-    expect(text).toContain('0 ones of 5');
+    expect(text).not.toContain('ones of');
   });
 
   it('uses the printed terms and no synonyms', () => {

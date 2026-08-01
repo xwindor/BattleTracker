@@ -46,8 +46,8 @@
             [class.die-result-miss]="!isHit(value) && !isOne(value)">{{ value }}</span>
       }
       <span class="dice-hits-summary">Total Hits: {{ localOutcome.hits }}</span>
-      <span class="dice-ones-summary">1s: {{ localOutcome.ones }} of {{ localOutcome.pool }}</span>
       @if (localOutcome.glitch !== "none") {
+      <span class="dice-ones-summary">1s: {{ localOutcome.ones }} of {{ localOutcome.pool }}</span>
       <span class="dice-glitch-badge"
             [class.dice-glitch-badge--critical]="localOutcome.glitch === 'critical'">{{ getGlitchLabel(localOutcome.glitch) }}</span>
       }
@@ -92,8 +92,8 @@
                   [class.die-result-miss]="!isHit(value) && !isOne(value)">{{ value }}</span>
             }
             <span class="dice-hits-summary">Total Hits: {{ getOutcome(roll.values).hits }}</span>
-            <span class="dice-ones-summary">1s: {{ getOutcome(roll.values).ones }} of {{ getOutcome(roll.values).pool }}</span>
             @if (getOutcome(roll.values).glitch !== "none") {
+            <span class="dice-ones-summary">1s: {{ getOutcome(roll.values).ones }} of {{ getOutcome(roll.values).pool }}</span>
             <span class="dice-glitch-badge"
                   [class.dice-glitch-badge--critical]="getOutcome(roll.values).glitch === 'critical'">{{ getGlitchLabel(getOutcome(roll.values).glitch) }}</span>
             }
