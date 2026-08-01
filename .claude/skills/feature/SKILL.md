@@ -34,8 +34,14 @@ gaps rather than filling them in.
 
 ## Stage 3 — validate
 
+Delegate to the `sr5-rules-validator` subagent. Pass it: the path to the brief,
+the paths of files changed in Stage 2, and the instruction to report only, never
+fix. It has `rules/` access and must independently re-derive every citation in
+the brief rather than trusting it.
+
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list back to a
-fresh sr5-implementer, then re-run a fresh sr5-rules-validator. Cap at two loops.
+fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at two
+loops.
 
 On a third failure, stop and diagnose before fixing anything further. Report
 which of these it is:
@@ -51,7 +57,6 @@ which of these it is:
   so, and I'll decide whether to fix or backlog each.
 
 Never launch a third fix round without naming which of the three this is.
-
 
 ## Stage 4 — approval brief
 
