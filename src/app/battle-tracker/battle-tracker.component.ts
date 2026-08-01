@@ -17,7 +17,7 @@ import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import ActionHandler from "Combat/ActionHandler";
 import { ConditionMonitorComponent } from "app/condition-monitor/condition-monitor.component";
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
-import { DiceRollerComponent } from "app/dice-roller/dice-roller.component";
+import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
 import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
@@ -62,6 +62,17 @@ interface LocalLogEntry {
  */
 const HIDDEN_FROM_PLAYERS_TAG = "(hidden from players)";
 
+/**
+ * Marker appended to a GM-local log line the GM rolled on behalf of a
+ * non-player combatant.
+ *
+ * The shared log carries this as the `npc` flag and renders it as a badge, but
+ * with no share session running there is no shared log - the line goes only to
+ * the plain Action Log, where without a tag it is shaped exactly like a player
+ * character's own roll line. One constant so every path tags it identically.
+ */
+const NPC_ROLL_TAG = "(NPC roll)";
+
 @Component({
   standalone: true,
   selector: "app-battle-tracker",
@@ -82,6 +93,8 @@ const HIDDEN_FROM_PLAYERS_TAG = "(hidden from players)";
 })
 export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild("gmLogListContainer") gmLogListContainer?: ElementRef<HTMLElement>;
+  /** The GM's dice roller, so its sticky "Roll as" state can be reset (p. 44). */
+  @ViewChild("gmDiceRoller") gmDiceRoller?: DiceRollerComponent;
   combatManager = CombatManager
   indexToSelect = -1;
   logHandler = LogHandler;
@@ -203,25 +216,201 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  onGmDiceRolled(values: number[]): void {
+  /** Name a roll is attributed to when the GM rolls as themselves. */
+  static readonly GM_ROLLER_NAME = "GM";
+
+  /**
+   * Names offered by the dice roller's "Roll as" picker: the combatants the GM
+   * actually runs. Anything `isPlayerCharacterName` claims is out - the
+   * gamemaster governs the actions of the *non-player* characters (brief
+   * p. 44), so offering a player's character here could only ever produce a
+   * roll impersonating them, badged NPC.
+   *
+   * Same predicate the roll-time re-validation in `onGmDiceRolled` uses, and
+   * deliberately so: when the picker filter and the roll-time guard were two
+   * separate expressions they drifted, and a state one of them excluded (a
+   * disconnected player's still-claimable character) sailed through the other.
+   *
+   * The GM can still type a name that is not in this list: a critter or
+   * bystander outside the initiative order still has dice.
+   */
+  get rollAsNames(): string[] {
+    const names = this.combatManager.participants.items
+      .map(p => (p.name || "").trim())
+      .filter(name => name.length > 0 && !this.isPlayerCharacterName(name));
+    return [ ...new Set(names) ];
+  }
+
+  /**
+   * Forget the sticky "Roll as" attribution in the dice roller.
+   *
+   * Sticky attribution is what makes a second roll for the same NPC one tap,
+   * but it has no natural end: once the fight is over the named NPC may be
+   * dead or gone, and the GM's next roll would silently go out under their
+   * name. Three moments end it, each meaning "that combatant is not who the
+   * next roll is for":
+   *
+   *  - End Combat (`btnReset_Click`) - the scene is finished;
+   *  - the armed combatant being deleted from the tracker (`btnDelete_Click`,
+   *    via `clearGmRollAttributionIfNamed`) - it is not in the fight any more;
+   *  - the GM closing the share session (`btnCloseShareSession_Click`) - this
+   *    table's session is over even if combat was never formally ended.
+   *
+   * A fourth case is handled at roll time instead of here: an armed name that
+   * has become a player-claimed character falls back to the GM in
+   * `onGmDiceRolled`, because the check has to happen against the state at the
+   * moment the dice land.
+   *
+   * Not undoable, deliberately: this is transient view state in an OnPush
+   * child component, not combat state routed through `Undoable.Set`, and
+   * `UndoHandler` only replays property/list closures on domain objects.
+   * Re-arming it is one tap in the same field, and an undo of End Combat (or
+   * of a delete) that silently re-attributed the GM's dice to a dead NPC would
+   * be worse than retyping the name.
+   */
+  private clearGmRollAttribution(): void {
+    this.gmDiceRoller?.clearRollAs();
+  }
+
+  /**
+   * Drop the sticky attribution only if it is the one naming `name`.
+   *
+   * Used at participant removal: deleting some unrelated combatant must not
+   * cost the GM the name they are mid-way through rolling for, but deleting
+   * *the* NPC they are rolling for leaves an attribution with nothing behind
+   * it, and the next roll would silently go out under a name that is no longer
+   * in the fight.
+   */
+  private clearGmRollAttributionIfNamed(name: string): void {
+    const armed = this.gmDiceRoller?.rollAsName;
+    if (armed && this.isSameCombatantName(armed, name)) {
+      this.clearGmRollAttribution();
+    }
+  }
+
+  /**
+   * Loose name comparison for attribution checks: trimmed, case-insensitive.
+   *
+   * The "Roll as" field is free text (the GM types names for critters outside
+   * the initiative order), so "ganger bravo" and "Ganger Bravo" are the same
+   * combatant as far as a human at the table is concerned. Matching loosely
+   * only ever makes the attribution checks *more* cautious - the outcome of a
+   * match is always "do not attribute to this name".
+   */
+  private isSameCombatantName(a: string, b: string): boolean {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+  }
+
+  /**
+   * True when `name` is the name of a participant that is a player's
+   * character rather than a non-player combatant.
+   *
+   * The gamemaster governs the actions of the *non-player* characters (brief
+   * p. 44), so this is the one test for "not mine to roll as". Two states
+   * count, joined by OR:
+   *
+   *  - a player owns the participant right now (`participantOwners`);
+   *  - the GM has marked it Claimable, which is the GM stating it is a
+   *    player's character, whether or not anyone currently holds the claim.
+   *
+   * The second half is not redundant. It is what covers the two ordinary
+   * states where a player character is momentarily unowned:
+   *
+   *  - prep, where the GM earmarks a character before any player has joined;
+   *  - a mid-fight disconnect, where `release_claims` deletes the owner entry
+   *    and leaves `claimable` set.
+   *
+   * Both now behave the same, because from the tracker's point of view they
+   * are the same situation: a character the GM has declared a player's.
+   *
+   * `isGmControlled` is deliberately left alone and *not* expressed in terms of
+   * this: its narrow "unclaimed right now" meaning is the correct test for
+   * whose dice an initiative roll is, which is a different question.
+   *
+   * Name-based, not participant-based, because attribution itself is a name:
+   * the "Roll as" field is free text, so a typed name that collides with a
+   * player's character is the same impersonation as picking it.
+   */
+  private isPlayerCharacterName(name: string): boolean {
+    return this.combatManager.participants.items.some(
+      p => (this.participantOwners.has(p) || this.isParticipantClaimable(p))
+        && this.isSameCombatantName(p.name || "", name)
+    );
+  }
+
+  /**
+   * Told to the GM when a roll they armed for an NPC went out under their own
+   * name instead. Silently re-attributing was the alternative and it is worse:
+   * the GM would read a log line that does not say what they expected and have
+   * no way to tell whether the tracker had decided something or they had
+   * mis-typed.
+   */
+  private playerCharacterFallbackNotice(name: string): string {
+    return `Rolled as GM — "${name}" is a player character.`;
+  }
+
+  onGmDiceRolled(request: DiceRollRequest): void {
+    const values = request.values;
     // Hits, 1s and glitch status all come from the faces already rolled
-    // (brief pp. 44-45); nothing else about the test is modelled.
+    // (brief pp. 44-45); nothing else about the test is modelled. Rolling on
+    // behalf of an NPC changes the *attribution* only - the gamemaster governs
+    // the actions of the non-player characters and determines the results of
+    // their tests (brief p. 44), using the same resolution as anyone else.
     const glitch = classifyRoll(values).glitch;
     const logText = formatDiceRollLogText(values);
+    const requestedName = (request.rollAs || "").trim();
+    // Re-validated here against the *same* predicate the picker filters on,
+    // not just in the picker: the field is sticky and free-text, so a name
+    // that was an unclaimed GM-run combatant when it was armed can be a
+    // player's character by the time the dice land (they claimed it, the GM
+    // marked it Claimable, or the GM typed such a name outright). Attributing
+    // to it now would impersonate that player, badged NPC. The dice still roll
+    // and still get logged - only the attribution falls back to the GM, who is
+    // after all the person who pressed the button.
+    const impersonatesPlayer = requestedName.length > 0 && this.isPlayerCharacterName(requestedName);
+    if (impersonatesPlayer) {
+      // Disarm rather than silently re-attribute every future roll: the GM
+      // should be able to see in the field that the name is no longer theirs
+      // to roll.
+      this.clearGmRollAttribution();
+      this.shareInfo = this.playerCharacterFallbackNotice(requestedName);
+    }
+    const npcName = impersonatesPlayer ? "" : requestedName;
+    // Tell the roller what the roll was *actually* logged as, not what was
+    // asked for. Its tray label is written at emit time from the requested
+    // name, and a tray reading "Your Roll - as Wombat" over a line logged as
+    // GM is the same lie in the other direction.
+    this.gmDiceRoller?.reportRollAttribution(
+      npcName || null,
+      impersonatesPlayer ? this.playerCharacterFallbackNotice(requestedName) : null
+    );
+    const roller = npcName || BattleTrackerComponent.GM_ROLLER_NAME;
+    // Marks the entry as "the GM rolled these dice for a non-player
+    // combatant", which is what makes it readable as something other than a
+    // player character's own roll.
+    const extra: Partial<SharedLogEntry> = npcName ? { glitch, npc: true } : { glitch };
+    // An NPC roll is still a GM roll, so it answers to the same visibility
+    // one-shot as any other; it does not bypass it.
     const hidden = this.consumeGmRollVisibility();
     if (this.shareRoomCode && !hidden) {
-      this.appendSharedLog("GM", logText, { glitch });
+      this.appendSharedLog(roller, logText, extra);
       this.sessionSync.sendCommand({
         type: "dice_roll",
-        player: "GM",
-        payload: { roller: "GM", diceCount: values.length, values }
+        // `player` stays "GM": it is the authenticated identity the server
+        // checks. Who the roll is *for* travels in `roller`.
+        player: BattleTrackerComponent.GM_ROLLER_NAME,
+        payload: { roller, diceCount: values.length, values, npc: !!npcName }
       });
     } else if (this.shareRoomCode) {
       // Kept off the wire: recorded in the GM's own log only, flagged so the
       // GM can see at a glance that the players did not get this one.
-      this.appendGmOnlyLog("GM", logText, { glitch });
+      this.appendGmOnlyLog(roller, logText, extra);
     } else {
-      LogHandler.log(this.currentBTTime, `GM ${logText}`);
+      // No share session: the plain Action Log is the only record, and it has
+      // no badges. Tag the line so an NPC roll is still readable as one and
+      // not as that character's player rolling for themselves.
+      const tag = npcName ? ` ${NPC_ROLL_TAG}` : "";
+      LogHandler.log(this.currentBTTime, `${roller} ${logText}${tag}`);
     }
   }
 
@@ -553,6 +742,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.sharedLogEntries = this.reseedLogOrder([]);
       this.clearSharedLogDecodeAnimations();
       this.initiativePrepActive = false;
+      // Second choke point alongside End Combat: a GM who closes the session
+      // has finished with this table's scene even if they never pressed End
+      // Combat, and a name left armed here would carry into the next session.
+      // Deliberate closes only - an *unexpected* close (handleSessionClosedExternally)
+      // is a dropped connection mid-fight, where the NPC is still standing and
+      // the GM is still rolling for it.
+      this.clearGmRollAttribution();
       this.isClosingSession = false;
     }
   }
@@ -1844,6 +2040,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(sender);
     this.participantTieBreakers.delete(sender);
     this.combatManager.removeParticipant(sender);
+    // The combatant the GM was rolling for is gone: the sticky attribution
+    // outlives it otherwise, and the next roll (their own Perception check,
+    // say) goes out under a name no longer in the fight. Cleared only when it
+    // is *this* name - deleting an unrelated combatant leaves it armed.
+    this.clearGmRollAttributionIfNamed(sender.name || "");
     if (this.selectedActor === sender) {
       this.selectedActor = null;
     }
@@ -1893,6 +2094,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.declaredActionSelections.clear();
     this.combatManager.endCombat();
     this.initiativePrepActive = false;
+    // The scene is over: whoever the GM was rolling for may not exist next
+    // fight, so the sticky attribution does not carry across the boundary.
+    this.clearGmRollAttribution();
     this.appendSharedLog("GM", "End Combat");
     if (this.shareRoomCode) {
       this.sessionSync.sendCommand({

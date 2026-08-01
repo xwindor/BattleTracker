@@ -645,6 +645,13 @@ input:checked + .slider:before {
   color: #5b21b6;
 }
 
+/* The GM rolled these dice for a non-player combatant (p. 44). Its own colour
+   so an NPC's roll is not read as a player character's own roll at a glance. */
+.log-badge-npc {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 /* GM narration attached to a glitch (p. 45): indented so the flat list still
    reads as one entry commenting on another. The entry names its parent roll
    in .log-entry-ref, because the list is flat and the roll it is about may be

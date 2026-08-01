@@ -25,6 +25,26 @@
   width: 4.5rem;
 }
 
+// ── Roll as (GM only) ─────────────────────────────────────────────────────
+.dice-roller-rollas {
+  margin-top: -0.35rem;
+}
+
+.roll-as-select {
+  width: 11rem;
+}
+
+.roll-as-other-input {
+  width: 9rem;
+}
+
+.roll-as-hint {
+  font-size: 0.7rem;
+  color: rgba(0, 255, 65, 0.65);
+  font-style: italic;
+  flex-basis: 100%;
+}
+
 // ── Sections ──────────────────────────────────────────────────────────────
 .dice-section {
   border: 1px solid #00ff41;
@@ -41,6 +61,31 @@
   letter-spacing: 0.05em;
   color: #00ff41;
   margin-bottom: 0.4rem;
+}
+
+// The tray label still names the roll that was made, but the attribution has
+// since changed - greyed so it does not compete with the "next roll" hint.
+.dice-section-label--stale {
+  color: rgba(0, 255, 65, 0.4);
+  font-weight: 500;
+}
+
+.dice-attribution-override-note {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.65rem;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: normal;
+  color: #ffb300;
+}
+
+.dice-attribution-stale-note {
+  margin-left: 0.3rem;
+  font-size: 0.65rem;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .dice-section-remote {
@@ -80,6 +125,19 @@
   color: #00ff41;
   margin-bottom: 0.25rem;
   font-weight: 600;
+}
+
+// Matches the log's NPC badge, so the dice tray and the log entry two cards
+// below say the same thing about the same roll (brief p. 44).
+.dice-roller-npc-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border: 1px solid #ff4d4d;
+  border-radius: 0.2rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  color: #ff4d4d;
 }
 
 // Each stacked remote roll entry

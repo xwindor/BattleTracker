@@ -65,7 +65,7 @@ describe('Combat log readability', () => {
   describe('S2 (in-scope part) - a roll that both succeeds and glitches', () => {
     it('labels the roll GLITCH while still reporting its hits (AC2, AC3, p. 45)', () => {
       // Nine dice, five 1s -> more than half, so a glitch; three hits stand.
-      component.onGmDiceRolled([6, 5, 5, 1, 1, 1, 1, 1, 3]);
+      component.onGmDiceRolled({ values: [6, 5, 5, 1, 1, 1, 1, 1, 3], rollAs: null });
 
       expect(sent.length).toBe(1);
       expect(sent[0].text).toContain('3 hits');
@@ -76,7 +76,7 @@ describe('Combat log readability', () => {
     });
 
     it('accepts GM-authored narration as its own linked entry, leaving the roll untouched (AC24, p. 45)', () => {
-      component.onGmDiceRolled([6, 1, 1, 1, 2]);
+      component.onGmDiceRolled({ values: [6, 1, 1, 1, 2], rollAs: null });
       const rollEntry = sent[0];
       const rollTextBefore = rollEntry.text;
 
@@ -93,16 +93,16 @@ describe('Combat log readability', () => {
     });
 
     it('offers narration only on glitched entries (p. 45)', () => {
-      component.onGmDiceRolled([6, 5, 4, 3, 2]);
+      component.onGmDiceRolled({ values: [6, 5, 4, 3, 2], rollAs: null });
       expect(component.canAnnotateGlitch(sent[0])).toBe(false);
 
-      component.onGmDiceRolled([1, 1, 1, 2, 3]);
+      component.onGmDiceRolled({ values: [1, 1, 1, 2, 3], rollAs: null });
       expect(component.canAnnotateGlitch(sent[1])).toBe(true);
     });
   });
 
   it('labels a glitch with no hits as a CRITICAL GLITCH (AC3, p. 45)', () => {
-    component.onGmDiceRolled([1, 1, 1, 2, 3]);
+    component.onGmDiceRolled({ values: [1, 1, 1, 2, 3], rollAs: null });
 
     expect(sent[0].text).toContain('0 hits');
     expect(sent[0].text).toContain(CRITICAL_GLITCH_LABEL);
@@ -129,7 +129,7 @@ describe('Combat log readability', () => {
       expect(component.gmRollsVisibleToPlayers).toBe(true);
       expect(component.isGmRollHiddenFromPlayers()).toBe(false);
 
-      component.onGmDiceRolled([6, 5, 2]);
+      component.onGmDiceRolled({ values: [6, 5, 2], rollAs: null });
 
       expect(sent.length).toBe(1);
       expect(sent[0].hiddenFromPlayers).toBeUndefined();
@@ -140,7 +140,7 @@ describe('Combat log readability', () => {
       component.toggleGmRollVisibility();
       expect(component.gmRollsVisibleToPlayers).toBe(false);
 
-      component.onGmDiceRolled([6, 5, 2]);
+      component.onGmDiceRolled({ values: [6, 5, 2], rollAs: null });
 
       expect(sent.length).toBe(0);
       expect(commands.length).toBe(0);
@@ -153,8 +153,8 @@ describe('Combat log readability', () => {
       component.toggleHideNextGmRoll();
       expect(component.isGmRollHiddenFromPlayers()).toBe(true);
 
-      component.onGmDiceRolled([1, 1, 1]);   // hidden
-      component.onGmDiceRolled([6, 6, 6]);   // visible again
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });   // hidden
+      component.onGmDiceRolled({ values: [6, 6, 6], rollAs: null });   // visible again
 
       expect(component.hideNextGmRoll).toBe(false);
       expect(sent.length).toBe(1);
@@ -176,7 +176,7 @@ describe('Combat log readability', () => {
 
     it('narration about a hidden roll stays hidden too', () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       const hiddenRoll = component.sharedLogEntries[0];
 
       component.setGlitchNoteDraft(hiddenRoll, 'Ambusher fumbles.');
@@ -206,7 +206,7 @@ describe('Combat log readability', () => {
 
     it('names the roll it annotates even with unrelated entries logged in between', () => {
       // The roll being narrated: 1 hit, 3 ones of 5 -> GLITCH.
-      component.onGmDiceRolled([1, 1, 1, 6, 2]);
+      component.onGmDiceRolled({ values: [1, 1, 1, 6, 2], rollAs: null });
       const rollEntry = echo(sent[0]);
 
       // Real play: several other things happen before the GM types anything,
@@ -253,7 +253,7 @@ describe('Combat log readability', () => {
     });
 
     it('renders the reference on the player screen too, from the entry itself', () => {
-      component.onGmDiceRolled([1, 1, 1, 6, 2]);
+      component.onGmDiceRolled({ values: [1, 1, 1, 6, 2], rollAs: null });
       const rollEntry = sent[0];
       component.setGlitchNoteDraft(rollEntry, 'Sight snags on his pocket.');
       component.submitGlitchNote(rollEntry);
@@ -355,7 +355,7 @@ describe('Combat log readability', () => {
       expect(component.hideNextGmRoll).toBe(false);
       expect(component.isGmRollHiddenFromPlayers()).toBe(false);
 
-      component.onGmDiceRolled([6, 5, 2]);
+      component.onGmDiceRolled({ values: [6, 5, 2], rollAs: null });
 
       expect(sent.length).toBe(1);
       expect(sent[0].hiddenFromPlayers).toBeUndefined();
@@ -366,7 +366,7 @@ describe('Combat log readability', () => {
       component.toggleGmRollVisibility();   // -> session hidden, arming cleared
       component.hideNextGmRoll = true;      // as if armed by other means
 
-      component.onGmDiceRolled([6, 5, 2]);  // hidden by the session setting
+      component.onGmDiceRolled({ values: [6, 5, 2], rollAs: null });  // hidden by the session setting
 
       expect(component.hideNextGmRoll).toBe(true);
     });
@@ -393,7 +393,7 @@ describe('Combat log readability', () => {
       expect(sent.length).toBe(0);
 
       // ...and the next real GM roll is the one that gets hidden.
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       expect(sent.length).toBe(0);
       expect(component.sharedLogEntries.length).toBe(1);
       expect(component.sharedLogEntries[0].hiddenFromPlayers).toBe(true);
@@ -513,7 +513,7 @@ describe('Combat log readability', () => {
 
   describe('narration visibility indicator', () => {
     it('says "will be visible to players" for a public roll even while session-hidden is lit', () => {
-      component.onGmDiceRolled([1, 1, 1, 6, 2]);     // public
+      component.onGmDiceRolled({ values: [1, 1, 1, 6, 2], rollAs: null });     // public
       const publicRoll = sent[0];
       component['insertSharedLogEntry'](publicRoll); // the server echo
 
@@ -536,7 +536,7 @@ describe('Combat log readability', () => {
 
     it('says "stays private" for a hidden roll', () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       const hiddenRoll = component.sharedLogEntries[0];
 
       component.toggleGlitchNote(hiddenRoll);
@@ -554,7 +554,7 @@ describe('Combat log readability', () => {
   describe('GM-local hidden entries on reconnect', () => {
     it('are merged back in rather than wiped by the server log', async () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       const hidden = component.sharedLogEntries[0];
 
       const serverLog: SharedLogEntry[] = [
@@ -596,7 +596,7 @@ describe('Combat log readability', () => {
       // The ordering sequence was reseeded to the merged order, so the next
       // hidden entry lands at the end rather than in the middle of the history.
       component.toggleHideNextGmRoll();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       expect(component.sharedLogEntries.length).toBe(6);
       expect(component.sharedLogEntries[5].hiddenFromPlayers).toBe(true);
       expect(component.sharedLogEntries[5].text).toContain(CRITICAL_GLITCH_LABEL);
@@ -604,7 +604,7 @@ describe('Combat log readability', () => {
 
     it('keeps them when the session closes unexpectedly, so a rejoin still has them', () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       component.sharedLogEntries = [
         ...component.sharedLogEntries,
         { actor: 'Wombat', text: 'shared line', timestamp: new Date().toISOString(), id: 'srv-2' }
@@ -618,7 +618,7 @@ describe('Combat log readability', () => {
 
     it('shows the retained entries in the GM log pane even with no room code', () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
 
       component['handleSessionClosedExternally']();
       fixture.detectChanges();
@@ -640,7 +640,7 @@ describe('Combat log readability', () => {
 
     it('reports no retained entries while a session is live', () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
 
       expect(component.shareRoomCode).toBe('ABC123');
       expect(component.hasRetainedHiddenLogEntries()).toBe(false);
@@ -648,7 +648,7 @@ describe('Combat log readability', () => {
 
     it('asks before "Create Share Session" throws the retained entries away', async () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       component['handleSessionClosedExternally']();
       const retained = component.sharedLogEntries[0];
 
@@ -667,7 +667,7 @@ describe('Combat log readability', () => {
 
     it('discards them only after the GM confirms', async () => {
       component.toggleGmRollVisibility();
-      component.onGmDiceRolled([1, 1, 1]);
+      component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });
       component['handleSessionClosedExternally']();
 
       spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
@@ -704,11 +704,11 @@ describe('Combat log readability', () => {
   // ── Ordering of the GM's own pane ───────────────────────────────────────
 
   it('keeps a hidden roll after the visible roll it followed, despite the echo delay', () => {
-    component.onGmDiceRolled([6, 6, 6]);        // visible: goes out, echo pending
+    component.onGmDiceRolled({ values: [6, 6, 6], rollAs: null });        // visible: goes out, echo pending
     const visible = sent[0];
 
     component.toggleHideNextGmRoll();
-    component.onGmDiceRolled([1, 1, 1]);        // hidden: lands immediately
+    component.onGmDiceRolled({ values: [1, 1, 1], rollAs: null });        // hidden: lands immediately
     const hidden = component.sharedLogEntries[0];
     expect(hidden.hiddenFromPlayers).toBe(true);
 
@@ -723,7 +723,7 @@ describe('Combat log readability', () => {
   // ── Persistence: the log is append-only history ─────────────────────────
 
   it('never rewrites an existing entry - corrections are appended', () => {
-    component.onGmDiceRolled([1, 1, 1, 6, 2]);
+    component.onGmDiceRolled({ values: [1, 1, 1, 6, 2], rollAs: null });
     const first = sent[0];
     const originalText = String(first.text);
     component.setGlitchNoteDraft(first, 'Gun jams.');

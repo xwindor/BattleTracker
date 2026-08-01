@@ -19,9 +19,82 @@
     </button>
   </div>
 
+  <!-- ── Roll as (GM only): attribute this roll to an NPC ── -->
+  @if (allowRollAs) {
+  <div class="dice-roller-controls dice-roller-rollas">
+    <label class="dice-roller-label" for="dice-roll-as">Roll as</label>
+    <!-- A real picker, not a typeahead: the roster is the common case and the
+         GM should see the whole of it in one tap. "Other..." is the escape
+         hatch for a critter or bystander outside the initiative order. -->
+    <select
+      id="dice-roll-as"
+      class="form-select form-select-sm roll-as-select"
+      data-testid="roll-as-select"
+      [ngModel]="rollAsSelection"
+      (ngModelChange)="rollAsSelection = $event"
+      [disabled]="localRolling">
+      <option [value]="ROLL_AS_SELF">yourself (GM)</option>
+      @for (name of rollAsNames; track name) {
+      <option [value]="name">{{ name }}</option>
+      }
+      <option [value]="ROLL_AS_OTHER">Other…</option>
+    </select>
+    @if (isRollAsOther) {
+    <input
+      #rollAsOtherInput
+      type="text"
+      class="form-control form-control-sm roll-as-other-input"
+      data-testid="roll-as-other-input"
+      placeholder="NPC name"
+      aria-label="Other NPC name"
+      [(ngModel)]="rollAs"
+      [disabled]="localRolling">
+    }
+    @if (rollAsName) {
+    <button
+      type="button"
+      class="btn btn-sm btn-outline-secondary roll-as-clear"
+      data-testid="roll-as-clear"
+      (click)="clearRollAs()">
+      Clear
+    </button>
+    }
+    <span class="roll-as-hint" data-testid="roll-as-hint">
+      @if (rollAsName) {
+      Next roll is logged as <strong>{{ rollAsName }}</strong>
+      } @else {
+      Next roll is logged as you
+      }
+    </span>
+  </div>
+  }
+
   <!-- ── Your Roll ── -->
   <div class="dice-section">
-    <div class="dice-section-label">Your Roll</div>
+    <!-- The label describes the roll already in the tray; the "Roll as" hint
+         above describes the *next* roll. Once those two disagree (Clear or a
+         retype), the label is greyed and says so, so only one of the two lines
+         reads as current. -->
+    <div class="dice-section-label"
+         [class.dice-section-label--stale]="isLocalAttributionStale"
+         [attr.data-testid]="isLocalAttributionStale ? 'local-roll-attribution-stale' : null">
+      @if (localRollAs) {
+      Your Roll — as <span data-testid="local-roll-attribution">{{ localRollAs }}</span>
+      @if (isLocalAttributionStale) {
+      <span class="dice-attribution-stale-note">(previous roll)</span>
+      }
+      } @else {
+      Your Roll
+      }
+      <!-- The tracker re-attributed this roll after it was emitted (the armed
+           name turned out to be a player's character). The label above already
+           shows the name it was really logged under; this says why it is not
+           the name that was in the field. -->
+      @if (attributionOverrideNote) {
+      <span class="dice-attribution-override-note"
+            data-testid="local-roll-attribution-override">{{ attributionOverrideNote }}</span>
+      }
+    </div>
     @if (localValues.length > 0) {
     <div class="dice-tray">
       @for (value of localValues; track $index) {
@@ -68,7 +141,13 @@
       @if (remoteRolls.length > 0) {
         @for (roll of remoteRolls; track roll.id) {
         <div class="remote-roll-entry">
-          <div class="dice-roller-attribution">{{ roll.roller }}</div>
+          <div class="dice-roller-attribution">
+            {{ roll.roller }}
+            @if (roll.npc) {
+            <span class="dice-roller-npc-badge" data-testid="remote-roll-npc-badge"
+                  title="Rolled by the GM on behalf of a non-player combatant.">NPC</span>
+            }
+          </div>
           <div class="dice-tray">
             @for (value of roll.values; track $index) {
             <div class="die-scene" [class.is-rolling]="roll.rolling" [style]="getRemoteDieStyle(roll, $index)">
