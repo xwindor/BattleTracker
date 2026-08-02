@@ -409,9 +409,12 @@ describe('Combat log readability', () => {
 
       // A player's roll is never hidden (p. 330), so the arming is untouched.
       expect(component.hideNextGmRoll).toBe(true);
-      expect(sent.length).toBe(1);
-      expect(sent[0].actor).toBe('Wombat');
-      expect(sent[0].hiddenFromPlayers).toBeUndefined();
+      // Batch summary first, then the one roll it summarises.
+      expect(sent.length).toBe(2);
+      expect(sent[0].actor).toBe('GM');
+      expect(sent[0].text).toContain('Force-rolled initiative for 1');
+      expect(sent[1].actor).toBe('Wombat');
+      expect(sent[1].hiddenFromPlayers).toBeUndefined();
     });
 
     it('is spent - once - by a batch that does roll a GM-run participant', () => {
@@ -423,7 +426,9 @@ describe('Combat log readability', () => {
 
       expect(component.hideNextGmRoll).toBe(false);
       expect(sent.length).toBe(0);
-      expect(component.sharedLogEntries.length).toBe(2);
+      // Batch summary + two rolls, and the summary follows the batch's own
+      // visibility decision so it cannot leak the hidden rolls it counts.
+      expect(component.sharedLogEntries.length).toBe(3);
       expect(component.sharedLogEntries.every(e => e.hiddenFromPlayers === true)).toBe(true);
     });
   });
@@ -442,7 +447,7 @@ describe('Combat log readability', () => {
       component['enforceParticipantRollBounds']();
 
       expect(sent.length).toBe(0);
-      const clampEntries = component.sharedLogEntries.filter(e => e.text.includes('rolled total clamped'));
+      const clampEntries = component.sharedLogEntries.filter(e => e.text.includes('initiative roll clamped'));
       expect(clampEntries.length).toBe(1);
       expect(clampEntries[0].hiddenFromPlayers).toBe(true);
       expect(clampEntries[0].actor).toBe('Ganger D');
@@ -458,7 +463,7 @@ describe('Combat log readability', () => {
       component['enforceParticipantRollBounds']();
 
       expect(sent.length).toBe(1);
-      expect(sent[0].text).toContain('rolled total clamped');
+      expect(sent[0].text).toContain('initiative roll clamped');
       expect(sent[0].hiddenFromPlayers).toBeUndefined();
     });
 

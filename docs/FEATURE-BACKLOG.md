@@ -53,3 +53,37 @@ Registering or claiming a character mid-combat now immediately prompts that play
 The GM Dice Roller header has a "Roll as" selector (GM, any GM-run combatant, or a free-text label); rolls broadcast and log under that name, badged NPC. Player characters — claimed or merely marked Claimable — are excluded from the picker.
 
 Dice cap — Raised from 20 to 40.
+
+## Action Log — known minor issues (from the 2026-08-01 attribution review)
+
+Raised during the `briefs/action-log-improvements.md` review and deliberately
+not fixed there; each was assessed as pre-existing, an accepted trade-off, or
+out of that change's scope. All in
+`src/app/battle-tracker/battle-tracker.component.ts` unless noted.
+
+- **N2 — astral/jack log entries are lost if the socket drops mid-session.**
+  `appendSharedLog` sends and forgets: the entry only reaches the GM's own pane
+  via the server echo, so a broadcast that fails in flight leaves no record
+  anywhere. Affects `appendParticipantEventLog`'s session branch
+  (`enableAstral`, `disableAstral`, `toggleAstralProjecting`, `gmJackIn`,
+  `gmJackOut`) along with every other `appendSharedLog` caller. Accepted as
+  consistent with the existing convention; a fix means local-first writes plus
+  echo de-duplication by entry `id`.
+- **N5 — `appendParticipantRollLog` double-logs.** The visible branch writes the
+  line locally *and* sends it, and the server echo then mirrors it again for any
+  actor other than `"GM"`. Predates the attribution change (not a regression),
+  but it means participant-attributed roll lines can appear twice in the GM's
+  Action Log.
+- **N7 — a participant literally named "GM" suppresses its own log mirror.**
+  The echo handler in `attachShareListeners` gates the local `LogHandler` mirror
+  on `entry.actor !== "GM"`, a magic string. A combatant the GM names "GM"
+  therefore silently loses every local mirror line. Pre-existing; wants a real
+  flag on `SharedLogEntry` rather than an actor-name comparison.
+- **N8 — re-registering with a blank name overwrites an established name.**
+  `handleSessionCommand`'s `register_character` branch resolves an empty
+  `characterName` to `REGISTERED_CHARACTER_FALLBACK_NAME` and
+  `upsertPlayerParticipant` writes it over the existing row, so a player whose
+  client reloads with an empty name field renames their own established
+  character to "Unnamed Character". Minor UX rough edge; a fix is to keep the
+  current name when the incoming one is empty and the participant already
+  exists.

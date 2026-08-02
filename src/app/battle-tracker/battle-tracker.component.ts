@@ -23,6 +23,8 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
+import { GruntMember, NpcRowParticipant, isNpcRow } from "Grunts";
+import type { GruntDamageType } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
@@ -31,7 +33,8 @@ import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declar
 import {
   buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass,
   formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
-  formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference
+  formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference,
+  formatGroupWoundLogText
 } from "app/shared/log-formatter";
 import { getInitiativeRollMax, clampInitiativeRoll, classifyRoll } from "app/shared/roll-utils";
 
@@ -50,6 +53,17 @@ interface LocalLogEntry {
   timestamp: Date;
   text: string;
 }
+
+/**
+ * Edge rating a linked NPC row is created with, and keeps.
+ *
+ * Grunts have no Edge attribute at all (brief "NPC Group Initiative"
+ * criterion 10 / Decision 5, p. 380), and ERIC's first step is the Edge
+ * attribute (p. 159) - so a row enters the tie-break with 0 and falls through
+ * to Reaction, then Intuition, then the coin toss. Deliberately *not* the
+ * group's Professional Rating / Group Edge pool, which Decision 5 rules out.
+ */
+const NPC_ROW_EDGE_RATING = 0;
 
 /**
  * Marker appended to every GM-local log line the players never received.
@@ -72,6 +86,94 @@ const HIDDEN_FROM_PLAYERS_TAG = "(hidden from players)";
  * character's own roll line. One constant so every path tags it identically.
  */
 const NPC_ROLL_TAG = "(NPC roll)";
+
+/**
+ * Actor used for a player-command log entry whose target participant has no
+ * name yet. Matches the `target.name || "Player"` idiom the existing
+ * player-command handlers use, so a nameless row does not fall back to `"GM"`.
+ */
+const PLAYER_COMMAND_FALLBACK_ACTOR = "Player";
+
+/**
+ * Shape of the opaque token the player client mints for itself
+ * (`player-view.component.ts` builds it as `pl-` plus a random base-36 run;
+ * the exact length is not depended on here).
+ *
+ * Deliberately **not** used on its own to decide "this is a token": a player
+ * may legitimately name a character something token-shaped ("PL-2077"), and a
+ * bare shape test would silently rename them. It is only ever a *secondary*
+ * guard on top of an exact comparison against the authenticated
+ * `command.player` value - see `rollerName`.
+ */
+const PLAYER_TOKEN_PATTERN = /^pl-[a-z0-9]{4,}$/i;
+
+/**
+ * Name given to a participant registered with no character name.
+ *
+ * Deliberately not the player token: `register_character` writes this straight
+ * onto `participant.name`, so a token used here would not just mis-attribute
+ * one log line - it would become the row's permanent name, its shared-state
+ * name, and the actor of every later entry about it.
+ */
+const REGISTERED_CHARACTER_FALLBACK_NAME = "Unnamed Character";
+
+/**
+ * Same, for `release_claims` - which is fired by the *server* on a dropped
+ * socket as well as by the player, so "Player" would over-claim intent for a
+ * row released by a network blip.
+ */
+const RELEASED_CLAIM_FALLBACK_ACTOR = "Participant";
+
+/**
+ * Text of the player-command shared-log entries. One constant per event so the
+ * wording cannot drift between the handler and the tests that read it, and so
+ * every string can be checked once against `getLogTextClass`'s classifier
+ * (none of these may contain "Interrupt", "Free:/Simple:/Complex:" or a
+ * standalone "Act", which would misclassify them as action lines).
+ *
+ * The astral/Matrix entries here are shared with the GM-side buttons for the
+ * same events (`enableAstral`, `disableAstral`, `toggleAstralProjecting`,
+ * `gmJackIn`, `gmJackOut`), so the log reads the same whether the player
+ * submitted the command or the GM pressed the button.
+ */
+const PLAYER_COMMAND_LOG_TEXT = {
+  joined: "joined the session",
+  claimed: "claimed by a player",
+  claimReleased: "claim released",
+  deckRemoved: "deck removed",
+  deckConfigured: "deck configured",
+  // `jackIn: true` covers both an actual jack-in and a mode switch by someone
+  // already jacked in (Hot Sim -> Cold Sim). They are different events and the
+  // log says so; "jacked in (Cold Sim)" for a decker who never left the Matrix
+  // reads as a fresh connection that did not happen.
+  jackedIn: (mode: string) => `jacked in (${mode})`,
+  switchedVrMode: (mode: string) => `switched to ${mode}`,
+  jackedOut: "jacked out",
+  awakened: "is now Awakened",
+  awakenedRemoved: "removed Awakened status",
+  astralProjecting: "entered astral space (INT\xD72 initiative)",
+  astralReturned: "returned from astral space (REA+INT initiative)"
+} as const;
+
+/**
+ * Pluralise a counted noun. Same idiom as `formatDiceRollLogText`'s
+ * `${hits} hit${hits !== 1 ? "s" : ""}` - a batch of one is a real and common
+ * case at the table (one straggler left to roll) and "1 participants" reads as
+ * a bug in the tracker.
+ */
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count !== 1 ? "s" : ""}`;
+}
+
+/** GM-action shared-log entries added by the Action Log attribution change. */
+const GM_LOG_TEXT = {
+  leftCombat: (name: string) => `${name} left combat`,
+  reEnteredCombat: (name: string) => `${name} re-entered combat`,
+  forceRolledBatch: (count: number) =>
+    `Force-rolled initiative for ${pluralize(count, "outstanding participant")}`,
+  nonPlayerRolledBatch: (count: number) =>
+    `Rolled initiative for ${pluralize(count, "non-player participant")}`
+} as const;
 
 @Component({
   standalone: true,
@@ -433,6 +535,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private observedLocalLogCount = 0;
   expandedDeckPanels = new Set<IParticipant>();
   expandedAstralPanels = new Set<IParticipant>();
+  /** Which linked NPC rows have their member list open (brief p. 379). */
+  expandedRowPanels = new Set<IParticipant>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
@@ -809,7 +913,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (!playerName) {
         return;
       }
-      const characterName = String(payload["characterName"] || playerName);
+      // Never `playerName`: that is the opaque `pl-…` token, and this value is
+      // written straight onto `participant.name` (upsertPlayerParticipant), so
+      // a token here would become the row's permanent name everywhere - roster,
+      // shared state, and every future log line about it - not just this entry.
+      const characterName = this.nameUnlessToken(
+        payload["characterName"],
+        playerName,
+        REGISTERED_CHARACTER_FALLBACK_NAME
+      );
       const initiativeDice = Number(payload["initiativeDice"] || 1);
       const edgeRating = Number(payload["edgeRating"] || 0);
       const reaction = Number(payload["reaction"] || 0);
@@ -820,7 +932,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const isMatrix = payload["isMatrix"] === true;
       const dataProcessing = Number(payload["dataProcessing"] || 0);
       const vrMode = String(payload["vrMode"] || "AR");
-      this.upsertPlayerParticipant(
+      const registered = this.upsertPlayerParticipant(
         playerName,
         characterName,
         initiativeDice,
@@ -834,7 +946,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         dataProcessing,
         vrMode
       );
-      this.appendSharedLog("GM", `Registered ${characterName}`);
+      // A re-registration (sheet edit, reconnect) comes through this same path
+      // and deliberately re-announces the player - suppressing it would need a
+      // "have we seen this token" check duplicating `participantOwners`.
+      this.appendPlayerCommandLog(registered, PLAYER_COMMAND_LOG_TEXT.joined);
       this.sort();
       return;
     }
@@ -856,7 +971,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         if (target instanceof MatrixParticipant) {
           this.demoteToParticipant(target);
         }
-        this.appendSharedLog("GM", `${targetName} deck removed`);
+        // Name captured before the demote: that swaps the participant instance.
+        this.appendPlayerCommandLog(targetName, PLAYER_COMMAND_LOG_TEXT.deckRemoved);
         this.sort();
         return;
       }
@@ -871,6 +987,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
       if (payload["jackIn"] === true) {
         // Jack In / Switch Mode: apply the chosen VR mode and mark as jacked in.
+        // Read *before* applyVRMode, which writes `jackedIn`: the same payload
+        // flag covers a real jack-in and a mode switch by someone already
+        // jacked in, and only the previous state tells the two apart.
+        const wasJackedIn = mp.jackedIn;
         const vrModeStr = String(payload["vrMode"] || "AR");
         const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                    : vrModeStr === "cold-sim" ? VRMode.ColdSim
@@ -880,6 +1000,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         // roll_submission {isDelta:true}, so rolling here would double-count.
         this.applyVRMode(mp, mode, { rollGainedDice: false });
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
+        // Jacking in changes Initiative attribute *and* dice count, so it has
+        // to leave a trace in the log the players read, not only the GM's.
+        const modeLabel = this.vrModeLabel(mode);
+        this.appendPlayerCommandLog(
+          mp,
+          wasJackedIn
+            ? PLAYER_COMMAND_LOG_TEXT.switchedVrMode(modeLabel)
+            : PLAYER_COMMAND_LOG_TEXT.jackedIn(modeLabel)
+        );
       } else if (payload["jackOut"] === true || payload["create"] === true) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
         const isJackOut = payload["jackOut"] === true;
@@ -893,13 +1022,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           // Jack-out dice loss is always handled GM-side: roll the lost dice,
           // subtract the total, log (brief F5 / criterion 8, p. 160).
           this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
+          this.appendPlayerCommandLog(mp, PLAYER_COMMAND_LOG_TEXT.jackedOut);
         } else {
           // Initial deck creation is character setup, not a mid-turn dice
           // change - the player sends a full roll_submission afterwards.
           mp.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
+          this.appendPlayerCommandLog(mp, PLAYER_COMMAND_LOG_TEXT.deckConfigured);
         }
       }
-      // else (stat-edit): stats already set above — don't touch vrMode, jackedIn, or initiative.
+      // No `else`: a bare stat-edit payload (no create/jackIn/jackOut) writes
+      // the stats above and nothing else. It is not reachable from the player
+      // client today - every `configure_deck` it sends carries one of those
+      // flags - so a log line here would be dead code that reads as covered.
       this.sort();
       return;
     }
@@ -911,21 +1045,25 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         p => this.participantOwners.get(p) === playerName
       );
       if (!target) return;
+      // These three sites write no log line of their own: `enableAstral`,
+      // `disableAstral` and `toggleAstralProjecting` each own their entry, so
+      // the GM's log reads the same whether the player sent the command or the
+      // GM pressed the button - and the event is not recorded twice.
       if (payload["isAstral"] === false) {
         if (this.isAstral(target)) {
           this.disableAstral(target);
-          LogHandler.log(this.currentBTTime, `${target.name} removed Awakened status`);
         }
         return;
       }
       if (payload["isAstral"] === true && !this.isAstral(target)) {
         this.enableAstral(target);
-        LogHandler.log(this.currentBTTime, `${target.name} is now Awakened`);
         return;
       }
       if (payload["project"] !== undefined && this.isAstral(target)) {
         const wantProject = payload["project"] === true;
         if (this.asAstral(target).astralProjecting !== wantProject) {
+          // Astral projection changes the Initiative attribute and the dice
+          // count, so it belongs in the log the players read.
           this.toggleAstralProjecting(target);
         }
       }
@@ -949,7 +1087,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         return;
       }
       this.participantOwners.set(target, playerName);
-      this.appendSharedLog("GM", `Claimed ${target.name}`);
+      this.appendPlayerCommandLog(target, PLAYER_COMMAND_LOG_TEXT.claimed);
       this.sort();
       return;
     }
@@ -963,6 +1101,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         if (this.participantOwners.get(participant) === playerName && this.participantClaimable.get(participant) === true) {
           this.participantOwners.delete(participant);
           changed = true;
+          // One entry per participant actually released, and none when nothing
+          // was. The server fires a synthetic release_claims on every dropped
+          // socket and the player client fires one on ngOnDestroy, so a closing
+          // tab produces two commands - the second finds no owner, releases
+          // nothing, and logs nothing. Wording deliberately states no intent.
+          this.appendPlayerCommandLog(
+            participant,
+            PLAYER_COMMAND_LOG_TEXT.claimReleased,
+            RELEASED_CLAIM_FALLBACK_ACTOR
+          );
         }
       }
       if (changed) {
@@ -1076,7 +1224,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     if (command.type === "dice_roll") {
       if (command.player === "GM") return; // skip echo of our own roll
-      const roller = String(command.payload?.["roller"] || command.player || "Unknown");
+      // `command.player` is deliberately *not* a fallback here: it is the
+      // opaque token, and the player client already sends
+      // `roller: characterName || playerToken`, so an unnamed (or reloaded)
+      // client puts the token in the name slot itself. Both cases land on the
+      // same non-token label.
+      const roller = this.rollerName(
+        command.payload?.["roller"],
+        command.player || "",
+        PLAYER_COMMAND_FALLBACK_ACTOR
+      );
       const rawValues = command.payload?.["values"];
       const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
       if (values.length > 0) {
@@ -1171,6 +1328,101 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // would land after it and the GM would read the two out of order.
     this.assignLogOrder(entry);
     this.sessionSync.appendLog(entry);
+  }
+
+  /**
+   * Shared-log line for something a *player* did through a session command.
+   *
+   * Player commands carry `command.player`, which is an opaque random token
+   * minted client-side (`pl-…`, `player-view.component.ts`) and never a human
+   * name, so it must never reach the log - it would render as
+   * `pl-k3f9a2b1: joined the session`. There is no player-name field anywhere
+   * in the system to use instead.
+   *
+   * The convention the existing player-command handlers already follow
+   * (`roll_submission`, `act`, `delay`, `interrupt`) is to attribute the entry
+   * to the *character* the command acted on - the name a player reading the
+   * log recognises as themselves.
+   *
+   * Scope, precisely: this helper is used by the player-command handlers that
+   * had no attribution of their own (`register_character`, `configure_deck`,
+   * `configure_astral`, `claim_character`, `release_claims`). It is **not** a
+   * choke point for the whole file - `roll_submission`, `act`, `delay`,
+   * `interrupt` and `dice_roll` still build their actor name inline from
+   * `target.name || "Player"`, so a new handler can still write `"GM"` or a
+   * raw name without passing through here. What it does guarantee is that the
+   * branches that do call it never fall back to anything token-shaped.
+   *
+   * Takes a name directly as well as a participant, because several of these
+   * branches swap the participant instance (promote/demote) before the line is
+   * written and the caller has to capture the name first.
+   */
+  private appendPlayerCommandLog(
+    target: IParticipant | string,
+    text: string,
+    fallbackActor: string = PLAYER_COMMAND_FALLBACK_ACTOR
+  ): void {
+    const name = typeof target === "string" ? target : (target.name || "");
+    this.appendSharedLog(name || fallbackActor, text);
+  }
+
+  /**
+   * Read a human-facing name out of a command payload, refusing the value that
+   * is *actually* this player's opaque token.
+   *
+   * The comparison is exact against the authenticated `command.player`, never a
+   * shape heuristic: the token is right there at every call site, and a shape
+   * test would reject a legitimate character name that merely looks token-like
+   * ("PL-2077"). At `register_character` that rejection is not cosmetic - the
+   * value is written straight onto `participant.name`, so a false positive
+   * renames the row permanently and only a GM edit can undo it.
+   */
+  private nameUnlessToken(raw: unknown, token: string, fallback: string): string {
+    const name = String(raw ?? "").trim();
+    if (!name || name === token) {
+      return fallback;
+    }
+    return name;
+  }
+
+  /**
+   * Same idea for `dice_roll`'s `roller` field, which needs one extra guard.
+   *
+   * The player client sends `roller: characterName || playerToken`, so an
+   * unnamed (or reloaded) client puts its own token in the name slot. But a
+   * bare exact match cannot be the whole test here: unlike `register_character`,
+   * a `dice_roll` may legitimately arrive with `roller === command.player` when
+   * the player *is* identified by a human name (see
+   * `combat-log-readability.spec.ts` "classifies a player-submitted roll the
+   * same way as a GM roll"). So the exact match only counts as a leak when the
+   * matched value also has the minted `pl-…` shape - which the client-substituted
+   * token always does, and a human name effectively never does.
+   */
+  private rollerName(raw: unknown, token: string, fallback: string): string {
+    const name = String(raw ?? "").trim();
+    if (!name || (name === token && PLAYER_TOKEN_PATTERN.test(token))) {
+      return fallback;
+    }
+    return name;
+  }
+
+  /**
+   * Log a participant-attributed event that either a player command or a GM
+   * button can raise (astral status, astral projection, jack in/out).
+   *
+   * With a session open the line goes to the shared log only: the server echo
+   * mirrors every non-`"GM"` entry into `LogHandler` (see `attachShareListeners`),
+   * so writing a local line here as well would give the GM the same event
+   * twice. With no session there is no echo and no shared log, so the plain
+   * Action Log is the only place the event can be recorded.
+   */
+  private appendParticipantEventLog(actorName: string, text: string): void {
+    const actor = actorName || PLAYER_COMMAND_FALLBACK_ACTOR;
+    if (this.shareRoomCode) {
+      this.appendSharedLog(actor, text);
+      return;
+    }
+    LogHandler.log(this.currentBTTime, `${actor} ${text}`);
   }
 
   /**
@@ -1470,7 +1722,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     isMatrix = false,
     dataProcessing = 0,
     vrModeStr = "AR"
-  ) {
+  ): IParticipant {
     let target: IParticipant | undefined;
     for (const p of this.combatManager.participants.items) {
       if (this.participantOwners.get(p) === playerName) {
@@ -1550,6 +1802,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       physical: Math.max(0, Number(target.physicalDamage || 0)),
       stun: Math.max(0, Number(target.stunDamage || 0))
     });
+    // Returned so `register_character` can attribute its log entry to the
+    // character rather than the opaque player token.
+    return target;
   }
 
   /**
@@ -2113,6 +2368,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.sort()
   }
 
+  /**
+   * An OOC participant is filtered out of the broadcast list entirely
+   * (`getSharedParticipants`), so without a log line the row simply vanishes
+   * from every player's screen with no explanation. Both handlers log *after*
+   * the state change so the entry describes what actually happened.
+   */
   btnLeaveCombat_Click(sender: IParticipant) {
     LogHandler.log(this.currentBTTime, sender.name + " LeaveCombat_Click");
     UndoHandler.StartActions();
@@ -2121,6 +2382,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // Remove sender from active Actors
       this.combatManager.act(sender);
     }
+    this.appendSharedLog("GM", GM_LOG_TEXT.leftCombat(sender.name));
     this.sort();
   }
 
@@ -2128,6 +2390,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     LogHandler.log(this.currentBTTime, sender.name + " EnterCombat_Click");
     UndoHandler.StartActions();
     sender.enterCombat();
+    // `enterCombat()` only clears the manual `_ooc` flag; the `ooc` getter can
+    // still be true from damage, in which case the participant does *not*
+    // reappear in the player-visible list and "re-entered combat" would be a
+    // lie. Log only when they are genuinely back.
+    if (!sender.ooc) {
+      this.appendSharedLog("GM", GM_LOG_TEXT.reEnteredCombat(sender.name));
+    }
     this.sort();
   }
 
@@ -2555,6 +2824,230 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
+  // ── Linked NPC rows (grunt groups) ──────────────────────────────────────
+  //
+  // All of the rules live in `src/Grunts/`; everything here is plumbing: side
+  // maps, undo batching, logging and panel state. See
+  // briefs/npc-group-initiative.md.
+
+  /** Template guard: is this participant a linked NPC row? */
+  isNpcRow(p: IParticipant): p is NpcRowParticipant {
+    return isNpcRow(p);
+  }
+
+  /** Template cast, mirroring `asMatrix` / `asAstral`. */
+  asNpcRow(p: IParticipant): NpcRowParticipant {
+    return p as NpcRowParticipant;
+  }
+
+  isRowPanelExpanded(p: IParticipant): boolean {
+    return this.expandedRowPanels.has(p);
+  }
+
+  toggleRowPanel(p: IParticipant) {
+    if (this.expandedRowPanels.has(p)) {
+      this.expandedRowPanels.delete(p);
+    } else {
+      this.expandedRowPanels.add(p);
+    }
+  }
+
+  /**
+   * Create an empty linked NPC row. It takes one slot in the initiative order
+   * and rolls one Initiative Test for everybody in it (criteria 1-2, p. 379).
+   *
+   * Its Edge rating is seeded to 0 and left there: a grunt group has no Edge
+   * attribute, so ERIC falls straight through to Reaction, then Intuition, then
+   * the coin toss (criterion 10 / Decision 5, p. 159, p. 380). That is the only
+   * tie-break behaviour this feature adds - the lieutenant/row tie (p. 381) is
+   * manual (criterion 11 / Decision 6).
+   */
+  addNpcRow(selectNewRow = true): NpcRowParticipant {
+    UndoHandler.StartActions();
+    const row = new NpcRowParticipant();
+    row.name = "NPC Row";
+    this.combatManager.addParticipant(row);
+    this.participantClaimable.set(row, false);
+    this.participantEdgeRatings.set(row, NPC_ROW_EDGE_RATING);
+    this.participantReactions.set(row, 3);
+    this.participantIntuitions.set(row, 3);
+    row.baseIni = this.getParticipantBaseInitiative(row);
+    this.participantTieBreakers.set(row, Math.random());
+    this.getParticipantId(row);
+    this.expandedRowPanels.add(row);
+    if (selectNewRow) {
+      this.selectActor(row);
+    }
+    this.syncSharedState();
+    this.sort();
+    return row;
+  }
+
+  /**
+   * Add an NPC to a row. Mid-combat this is the reinforcement case: the new
+   * NPC inherits the row's current shared Initiative Score directly, with no
+   * Initiative Test of its own and no -10-per-elapsed-pass late-entry penalty
+   * (criterion 15 / Decision 7, scenario S7).
+   */
+  addNpcToRow(row: NpcRowParticipant, name?: string, body = 3, willpower = 3): GruntMember {
+    UndoHandler.StartActions();
+    const member = new GruntMember(name ?? `${row.name || "NPC"} ${row.members.length + 1}`, body, willpower);
+    row.addMember(member);
+    this.appendSharedLog(row.name || "NPC Row",
+      `${member.name} joins the row on shared initiative score ${row.getCurrentInitiative()}`);
+    this.syncSharedState();
+    this.sort();
+    return member;
+  }
+
+  /**
+   * Damage one NPC in a row.
+   *
+   * The boxes land on that NPC's own Condition Monitor only (criteria 3-4,
+   * p. 379); any Wound Modifier the hit crosses moves the row's *shared*
+   * Initiative Score (criterion 5 / Decision 1). That second half is a house
+   * rule, so it gets its own log line naming the NPC whose wound caused it -
+   * otherwise a GM watching the whole row slow down at once has no way to tell
+   * the house rule from a bug (scenario S3).
+   */
+  applyRowMemberDamage(
+    row: NpcRowParticipant,
+    member: GruntMember,
+    boxes: number,
+    type: GruntDamageType
+  ) {
+    UndoHandler.StartActions();
+    const result = row.applyDamageToMember(member, boxes, type);
+    if (result.applied > 0) {
+      this.appendSharedLog(row.name || "NPC Row",
+        `${member.name} took ${result.applied} ${type === "stun" ? "Stun" : "Physical"} `
+        + `(${member.damage}/${member.conditionMonitorBoxes})`);
+    }
+    if (result.scoreDelta !== 0) {
+      this.appendSharedLog(row.name || "NPC Row", formatGroupWoundLogText(
+        row.name, member.name,
+        result.woundModifierAfter - result.woundModifierBefore,
+        result.scoreAfter
+      ));
+    }
+    if (result.wentOutOfAction) {
+      this.appendSharedLog(row.name || "NPC Row",
+        `${member.name} is out of action (${member.finalState})`);
+    }
+    // Decision 8: the row leaves the order the moment its last member drops.
+    for (const spent of this.combatManager.removeSpentNpcRows()) {
+      this.appendSharedLog(spent.name || "NPC Row", "every member is out of action - row removed from initiative");
+      this.forgetParticipant(spent);
+    }
+    this.syncSharedState();
+    this.sort();
+    return result;
+  }
+
+  /**
+   * Template shorthands for the two damage buttons. Both types go on the same
+   * combined track (p. 379); the type is still recorded because it decides
+   * alive-or-dead once the NPC drops (p. 379).
+   */
+  hitRowMemberPhysical(row: NpcRowParticipant, member: GruntMember, boxes = 1) {
+    return this.applyRowMemberDamage(row, member, boxes, "physical");
+  }
+
+  hitRowMemberStun(row: NpcRowParticipant, member: GruntMember, boxes = 1) {
+    return this.applyRowMemberDamage(row, member, boxes, "stun");
+  }
+
+  /** Undo a mis-keyed hit / heal an NPC, re-syncing the row's shared score. */
+  healRowMember(row: NpcRowParticipant, member: GruntMember, boxes: number) {
+    UndoHandler.StartActions();
+    const result = row.healMember(member, boxes);
+    if (result.healed > 0) {
+      this.appendSharedLog(row.name || "NPC Row",
+        `${member.name} healed ${result.healed} (${member.damage}/${member.conditionMonitorBoxes})`);
+    }
+    this.syncSharedState();
+    this.sort();
+    return result;
+  }
+
+  /**
+   * Detach an NPC from its row onto its own initiative row (criterion 12).
+   * Required for an augmented specialist or lieutenant acting on its own score
+   * (p. 379-381), for an NPC changing Initiative type (criterion 13), and for
+   * any NPC that needs an Interrupt Action, which row members cannot take
+   * (criterion 17 / Decision 3, scenario S8).
+   *
+   * The detached NPC is a normal participant from here on: it has not rolled,
+   * so the GM rolls its own Initiative Test, and `addParticipant` applies the
+   * ordinary late-entry penalty for elapsed passes (p. 160). Decision 7's "no
+   * penalty" covers joining a row, not leaving one.
+   */
+  detachRowMember(
+    row: NpcRowParticipant,
+    member: GruntMember,
+    factory: () => Participant = () => new Participant()
+  ): Participant | null {
+    UndoHandler.StartActions();
+    const detached = row.detachMember(member, factory);
+    if (!detached) {
+      return null;
+    }
+    this.combatManager.addParticipant(detached);
+    this.participantClaimable.set(detached, false);
+    this.participantEdgeRatings.set(detached, this.getParticipantEdgeRatingValue(row));
+    this.participantReactions.set(detached, this.getParticipantReactionValue(row));
+    this.participantIntuitions.set(detached, this.getParticipantIntuitionValue(row));
+    this.participantTieBreakers.set(detached, Math.random());
+    const id = this.getParticipantId(detached);
+    this.lastKnownDamage.set(id, {
+      physical: Math.max(0, Number(detached.physicalDamage || 0)),
+      stun: Math.max(0, Number(detached.stunDamage || 0))
+    });
+    this.appendSharedLog(row.name || "NPC Row",
+      `${member.name} detached from the row onto their own initiative`);
+    for (const spent of this.combatManager.removeSpentNpcRows()) {
+      this.forgetParticipant(spent);
+    }
+    this.syncSharedState();
+    this.sort();
+    return detached;
+  }
+
+  /** Remove an NPC from a row outright (GM correction, no standalone entry). */
+  removeRowMember(row: NpcRowParticipant, member: GruntMember) {
+    UndoHandler.StartActions();
+    row.removeMember(member);
+    this.syncSharedState();
+    this.sort();
+  }
+
+  /**
+   * Drop every GM-local side-map entry for a participant that has left the
+   * encounter. Side-map bookkeeping is manual and keyed by object identity
+   * (ARCHITECTURE.md §8), so anything that removes a participant outside
+   * `btnDelete_Click` has to do this too.
+   */
+  private forgetParticipant(p: IParticipant) {
+    this.declaredActionSelections.delete(p);
+    const id = this.participantIds.get(p);
+    if (id) {
+      this.lastKnownDamage.delete(id);
+    }
+    this.participantIds.delete(p);
+    this.participantOwners.delete(p);
+    this.participantClaimable.delete(p);
+    this.participantEdgeRatings.delete(p);
+    this.participantReactions.delete(p);
+    this.participantIntuitions.delete(p);
+    this.participantTieBreakers.delete(p);
+    this.expandedRowPanels.delete(p);
+    this.expandedDeckPanels.delete(p);
+    this.expandedAstralPanels.delete(p);
+    if (this.selectedActor === p) {
+      this.selectedActor = null;
+    }
+  }
+
   isDeckPanelExpanded(p: IParticipant): boolean {
     return this.expandedDeckPanels.has(p);
   }
@@ -2601,7 +3094,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   enableAstral(p: IParticipant): void {
     UndoHandler.StartActions();
+    // Name captured before the promote: that swaps the participant instance.
+    const astralName = p.name || "";
     const ap = this.promoteToAstralParticipant(p);
+    this.appendParticipantEventLog(astralName, PLAYER_COMMAND_LOG_TEXT.awakened);
     this.syncSharedState();
     this.sort();
     // Carry the panel expansion to the new instance
@@ -2615,7 +3111,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isAstral(p)) return;
     UndoHandler.StartActions();
     this.expandedAstralPanels.delete(p);
+    // Name captured before the demote: that swaps the participant instance.
+    const astralName = p.name || "";
     this.demoteFromAstralParticipant(p as AstralParticipant);
+    this.appendParticipantEventLog(astralName, PLAYER_COMMAND_LOG_TEXT.awakenedRemoved);
     this.syncSharedState();
     this.sort();
   }
@@ -2657,9 +3156,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // Record what the outbound trip actually achieved (the funnel clamps to the
     // 5D6 cap, so this can be less than requested, or 0); clear it on return.
     ap.projectionDiceGain = ap.astralProjecting ? ap.dices - countBefore : 0;
-    LogHandler.log(
-      this.currentBTTime,
-      `${ap.name} ${ap.astralProjecting ? "entered astral space (INT\xD72 initiative)" : "returned from astral space (REA+INT initiative)"}`
+    this.appendParticipantEventLog(
+      ap.name || "",
+      ap.astralProjecting
+        ? PLAYER_COMMAND_LOG_TEXT.astralProjecting
+        : PLAYER_COMMAND_LOG_TEXT.astralReturned
     );
     this.syncSharedState();
     this.sort();
@@ -2673,10 +3174,20 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.pendingVrModes.set(p, mode);
   }
 
+  /** Human-readable name of a VR mode, for the log. */
+  private vrModeLabel(mode: VRMode): string {
+    return mode === VRMode.HotSim ? "Hot Sim"
+         : mode === VRMode.ColdSim ? "Cold Sim"
+         : "AR";
+  }
+
   gmJackIn(p: IParticipant): void {
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
+    // Same distinction the configure_deck branch makes: this button is both
+    // "Jack In" and "Switch Mode", and only the previous state says which.
+    const wasJackedIn = mp.jackedIn;
     const mode = this.getPendingVrMode(p);
     // Mid-combat jack in: the base stat delta is automatic via baseIni; the
     // dice half rolls only the gained/lost dice and applies the total to the
@@ -2685,8 +3196,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.applyVRMode(mp, mode);
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
     this.pendingVrModes.set(p, mode); // keep pending = active mode so Switch Mode starts disabled
-    const modeLabel = mode === VRMode.HotSim ? 'Hot Sim' : mode === VRMode.ColdSim ? 'Cold Sim' : 'AR';
-    LogHandler.log(this.currentBTTime, `${p.name} jacked in (${modeLabel})`);
+    const modeLabel = this.vrModeLabel(mode);
+    this.appendParticipantEventLog(
+      p.name || "",
+      wasJackedIn
+        ? PLAYER_COMMAND_LOG_TEXT.switchedVrMode(modeLabel)
+        : PLAYER_COMMAND_LOG_TEXT.jackedIn(modeLabel)
+    );
     this.syncSharedState();
     this.sort();
   }
@@ -2707,7 +3223,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
     // 8, p. 160). Outside a running combat the funnel just writes the count.
     this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
-    LogHandler.log(this.currentBTTime, `${p.name} jacked out`);
+    this.appendParticipantEventLog(p.name || "", PLAYER_COMMAND_LOG_TEXT.jackedOut);
     this.syncSharedState();
     this.sort();
   }
@@ -3155,6 +3671,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // intact for the next real GM roll (brief p. 330).
     const rollsGmControlled = targets.some(p => this.isGmControlled(p));
     const hiddenForBatch = rollsGmControlled ? this.consumeGmRollVisibility() : false;
+    // Batch marker, emitted before the rolls so `assignLogOrder` places it
+    // ahead of them and the cascade reads as one GM action rather than as an
+    // organic run of individual rolls. Suppressed when nothing is outstanding.
+    //
+    // It follows the batch's own visibility decision, not a separate one: a
+    // visible "the GM rolled 4 characters" alongside four hidden rolls would
+    // leak the existence of the very rolls the GM opted out of showing
+    // (RULINGS.md, GM roll visibility).
+    if (targets.length > 0) {
+      const summary = includePlayers
+        ? GM_LOG_TEXT.forceRolledBatch(targets.length)
+        : GM_LOG_TEXT.nonPlayerRolledBatch(targets.length);
+      // `this.shareRoomCode` is part of the hidden test, exactly as in
+      // `appendParticipantRollLog`: `appendGmOnlyLog` has no session check of
+      // its own, so without it a GM with no session open and GM rolls set to
+      // hidden would get a "(hidden from players)" marker in their local
+      // Action Log with no players to hide it from. With no session both
+      // branches must produce nothing (AC12), which `appendSharedLog`'s early
+      // return already does.
+      if (hiddenForBatch && this.shareRoomCode) {
+        this.appendGmOnlyLog("GM", summary);
+      } else {
+        this.appendSharedLog("GM", summary);
+      }
+    }
     for (const participant of targets) {
       if (this.participantOwners.has(participant)) {
         rolledPlayer = true;
@@ -3405,7 +3946,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    *
    * The message states the two numbers and does not claim the clamp caused the
    * gap: ordinary pass-boundary decay (-10, p. 160) opens the same gap on its
-   * own, and this function cannot tell the two apart.
+   * own, and this function cannot tell the two apart. It does still state the
+   * mismatch outright - without that clause the line puts two numbers side by
+   * side and leaves the GM to notice the gap for themselves, which is the
+   * silence this log line exists to break.
    *
    * It names the participant's Initiative Dice count, rolled total, Initiative
    * attribute and Score, so for a GM-run participant it is subject to the same
@@ -3422,9 +3966,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const logText =
-      `rolled total clamped to ${clamped} (${p.dices}D6 max); `
-      + `initiative score reads ${effectiveScore} - display and Score do not `
-      + `reconcile (attribute ${p.initiativeAttribute} + rolled total)`;
+      `initiative roll clamped to ${clamped} (max ${p.dices}D6); `
+      + `Score is ${effectiveScore} `
+      + `(attribute ${p.initiativeAttribute} + rolled total do not match)`;
     this.appendParticipantRollLog(p, logText, this.isGmRollHiddenFromPlayers());
   }
 

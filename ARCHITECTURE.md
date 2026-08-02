@@ -483,6 +483,22 @@ active. Session sync is a one-way derived broadcast layered on top:
   gatekeeping only (`ALLOWED_COMMAND_TYPES` allowlist, payload shape/size
   checks, role checks, `player` field must match the authenticated
   socket) — it does not interpret or apply commands itself.
+- `command.player` is a random opaque token minted client-side
+  (`player-view.component.ts`'s `playerToken`), never a human name — it must
+  never reach a log entry's actor or text. Every `handleSessionCommand`
+  branch that logs a player-originated event attributes it to the
+  *character* name instead (`target.name`, falling back to a non-token
+  label when the name is empty or literally equals the sender's token), via
+  `appendPlayerCommandLog`. The equivalent GM-button-triggered events (e.g.
+  jacking a deck in/out, toggling Awakened status) go through
+  `appendParticipantEventLog`, which writes to the shared log when a session
+  is open and to the local Action Log only when it isn't, so shared-log
+  coverage of an event doesn't depend on whether the player or the GM
+  triggered it. Neither helper is the *only* place an actor name is built —
+  `roll_submission`, `act`, `delay`, `interrupt`, and `dice_roll` still
+  construct `target.name || "Player"` inline — so a new handler that logs a
+  player-originated event should follow the same convention rather than
+  falling back to `"GM"` or `command.player`.
 - "Player-owned" (`participantOwners`), "claimable"
   (`participantClaimable`), and the tie-break inputs
   (`participantEdgeRatings`/`participantReactions`/`participantIntuitions`/
