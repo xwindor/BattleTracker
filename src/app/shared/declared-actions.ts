@@ -310,3 +310,115 @@ export const DECLARED_ACTION_DESCRIPTIONS: Record<string, string> = {
   "Erase Mark": "Matrix Variable Action. In this tracker treated as Simple-equivalent for planning.",
   "Set Data Bomb": "Matrix Variable Action. In this tracker treated as Simple-equivalent for planning."
 };
+
+/**
+ * Past-tense, subject-less verb phrase for each declared-action name, used to
+ * assemble the Action Log sentence (`briefs/action-log-readability-spec.md`).
+ * Phrases are label-derived and assert no mechanic, number, duration or
+ * timing rule - only what the action is called.
+ */
+export const DECLARED_ACTION_VERB_PHRASES: Record<string, string> = {
+  // Free
+  "Gesture": "gestured",
+  "Speak / Text / Transmit Phrase": "spoke a phrase",
+  "Run": "started running",
+  "Call a Shot": "called a shot",
+  "Multiple Attacks": "declared multiple attacks",
+  "Change Linked Device Mode": "changed a linked device's mode",
+  "Drop Prone": "dropped prone",
+  "Drop Object": "dropped what they were holding",
+  "Eject Smartgun Clip": "ejected their smartgun clip",
+  // Simple
+  "Ready Weapon": "readied a weapon",
+  "Quick Draw": "quick-drew",
+  "Take Aim": "took aim",
+  "Fire Semi-Auto, Single-Shot, Burst Fire, or Full-Auto": "fired their gun",
+  "Fire Bow": "loosed an arrow",
+  "Throw Weapon": "threw a weapon",
+  "Remove Clip": "removed a clip",
+  "Insert Clip": "inserted a fresh clip",
+  "Observe in Detail": "observed in detail",
+  "Take Cover": "took cover",
+  "Stand Up": "stood up",
+  "Pick Up / Put Down Object": "picked up or put down an object",
+  "Use Simple Device": "used a simple device",
+  "Change Device Mode": "changed a device's mode",
+  "Change Gun Mode": "changed their gun's firing mode",
+  "Activate Focus": "activated a focus",
+  "Call Spirit": "called a spirit",
+  "Command Spirit": "commanded a spirit",
+  "Dismiss Spirit": "dismissed a spirit",
+  "Reckless Spellcasting": "cast a spell recklessly",
+  "Shift Perception": "shifted their perception",
+  // Complex
+  "Melee Attack": "attacked in melee",
+  "Cast Spell": "cast a spell",
+  "Fire Long Burst or Semi-Auto Burst": "fired a long burst",
+  "Fire Full-Auto Weapon": "fired full-auto",
+  "Fire Mounted or Vehicle Weapon": "fired a mounted weapon",
+  "Load and Fire Bow": "nocked and loosed an arrow",
+  "Reload Firearm": "reloaded",
+  "Sprint": "sprinted",
+  "Astral Projection": "projected astrally",
+  "Banish Spirit": "banished a spirit",
+  "Rigger Jump In": "jumped into a rigged vehicle",
+  "Summoning": "summoned a spirit",
+  "Suppressive Fire": "laid down suppressive fire",
+  "Use Skill": "used a skill",
+  // Matrix Free
+  "Load Program": "loaded a program",
+  "Switch Two Matrix Attributes": "switched two Matrix attributes",
+  "Swap Two Programs": "swapped two programs",
+  "Unload Program": "unloaded a program",
+  "Invite Mark": "invited a mark",
+  // Matrix Simple
+  "Call / Dismiss Sprite": "called or dismissed a sprite",
+  "Change Icon": "changed their icon",
+  "Command Sprite": "commanded a sprite",
+  "Jack Out": "jacked out",
+  "Crash Program": "crashed a program",
+  "Hide": "hid on the Matrix",
+  // Matrix Complex
+  "Break File": "broke a file",
+  "Erase Matrix Signature": "erased a Matrix signature",
+  "Snoop": "snooped",
+  "Brute Force": "brute-forced their way in",
+  "Format Device": "formatted a device",
+  "Spoof Command": "spoofed a command",
+  "Check Overwatch Score": "checked their Overwatch Score",
+  "Grid-Hop": "grid-hopped",
+  "Trace Icon": "traced an icon",
+  "Crack File": "cracked a file",
+  "Hack on the Fly": "hacked on the fly",
+  "Compile Sprite": "compiled a sprite",
+  "Decompile Sprite": "decompiled a sprite",
+  // Matrix Variable
+  "Send Message": "sent a message",
+  "Data Spike": "sent a data spike",
+  "Jam Signals": "jammed signals",
+  "Erase Resonance Signature": "erased a Resonance signature",
+  "Control Device": "controlled a device",
+  "Switch Interface Mode": "switched interface mode",
+  "Disarm Data Bomb": "disarmed a data bomb",
+  "Jump Into Rigged Device": "jumped into a rigged device",
+  "Kill Complex Form": "killed a complex form",
+  "Matrix Search": "ran a Matrix search",
+  "Edit File": "edited a file",
+  "Matrix Perception": "scanned with Matrix Perception",
+  "Register Sprite": "registered a sprite",
+  "Enter / Exit Host": "entered or exited a host",
+  "Reboot Device": "rebooted a device",
+  "Thread Complex Form": "threaded a complex form",
+  "Erase Mark": "erased a mark",
+  "Set Data Bomb": "set a data bomb"
+};
+
+/**
+ * Verb phrase for a declared-action name, for the Action Log sentence.
+ * Falls back to `used <name>` for a name absent from the table (an
+ * unrecognised or player-supplied action), so the clause is always readable
+ * and never empty.
+ */
+export function getDeclaredActionVerbPhrase(name: string): string {
+  return DECLARED_ACTION_VERB_PHRASES[name] ?? `used ${name}`;
+}

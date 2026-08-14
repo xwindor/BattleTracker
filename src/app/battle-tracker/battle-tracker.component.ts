@@ -32,8 +32,8 @@ import type { GruntDamageType, GruntMergeResult } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
-import { getInterruptLabel, getInterruptDescription } from "app/shared/interrupt-actions";
-import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
+import { getInterruptLabel, getInterruptDescription, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
+import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
 import {
   buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass,
   formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
@@ -728,6 +728,23 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   expandedAstralPanels = new Set<IParticipant>();
   /** Which linked NPC rows have their member list open (brief p. 379). */
   expandedRowPanels = new Set<IParticipant>();
+  /**
+   * Which participants show their E/R/I/D stats as editable inputs rather than
+   * as the read-only `E2 R5 I4 D2` summary.
+   *
+   * Purely presentational, and the reason it exists is row height: the four
+   * chip+input pairs are ~230px of controls in a `col-lg-3`, which is a quarter
+   * of the row's width spent on values that are typed once at setup and then
+   * essentially never touched again (Xavier: "maybe we need a twirly we can
+   * collapse for stat input"). Collapsed, the same numbers still read at a
+   * glance in ~70px, so nothing is hidden - only made non-editable until asked
+   * for.
+   *
+   * Transient view state, the same class of thing as `expandedRowPanels`, so it
+   * deliberately does NOT go through `Undoable.Set`: it holds no game state and
+   * an undo that reopened a twirly would be noise.
+   */
+  expandedStatEditors = new Set<IParticipant>();
   /**
    * The Damage Value the GM is about to apply to each NPC in a row.
    *
@@ -2038,7 +2055,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (command.type === "act") {
       const playerName = command.player;
       const participantId = String(command.payload?.["participantId"] || "");
-      const declaredAction = String(command.payload?.["declaredAction"] || "Act");
+      const declaredAction = String(command.payload?.["declaredAction"] || NO_DECLARED_ACTION_PHRASE);
       const illegalActions = Array.isArray(command.payload?.["illegalActions"])
         ? (command.payload!["illegalActions"] as string[])
         : [];
@@ -3329,23 +3346,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     });
   }
 
+  /**
+   * Attribution follows the character-name-as-actor convention
+   * (`briefs/action-log-improvements.md`), routed through
+   * `appendParticipantEventLog` so the event is recorded exactly once whether
+   * or not a session is open (see that helper's doc comment - finding D in
+   * `briefs/action-log-readability-spec.md`).
+   */
   private performAct(sender: IParticipant, declaredAction: string | null = null, submitter?: string) {
     UndoHandler.StartActions();
-    if (declaredAction) {
-      LogHandler.log(this.currentBTTime, `${sender.name} Act_Click: ${declaredAction}`);
-      if (submitter) {
-        this.appendSharedLog(submitter, declaredAction);
-      } else {
-        this.appendSharedLog("GM", `${sender.name}: ${declaredAction}`);
-      }
-    } else {
-      LogHandler.log(this.currentBTTime, sender.name + " Act_Click");
-      if (submitter) {
-        this.appendSharedLog(submitter, "Act");
-      } else {
-        this.appendSharedLog("GM", `${sender.name}: Act`);
-      }
-    }
+    const actor = submitter || sender.name || PLAYER_COMMAND_FALLBACK_ACTOR;
+    this.appendParticipantEventLog(actor, declaredAction || NO_DECLARED_ACTION_PHRASE);
     this.combatManager.act(sender);
     this.sort();
   }
@@ -3370,7 +3381,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private performRowMemberAct(row: NpcRowParticipant, member: GruntMember, declaredAction: string | null = null): void {
     UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
-    const text = declaredAction ? `${member.name}: ${declaredAction}` : `${member.name}: Act`;
+    const text = `${member.name} ${declaredAction ?? NO_DECLARED_ACTION_PHRASE}`;
     this.logRowEvent(actor, text);
     member.hasActed = true;
     if (row.activeMembers.every(m => m.hasActed)) {
@@ -3557,12 +3568,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!p.canUseAction(action)) {
       return;
     }
-    LogHandler.log(this.currentBTTime, p.name + " Action_Click: " + action.key);
-    if (submitter) {
-      this.appendSharedLog(submitter, `Interrupt ${this.getActionLabel(action)}`);
-    } else {
-      this.appendSharedLog("GM", `${p.name}: Interrupt ${this.getActionLabel(action)}`);
-    }
+    const actor = submitter || p.name || PLAYER_COMMAND_FALLBACK_ACTOR;
+    this.appendParticipantEventLog(actor, `interrupted, ${getInterruptVerbPhrase(action.key)}.`);
     UndoHandler.StartActions();
     p.doAction(action);
     this.syncSharedState();
@@ -3584,7 +3591,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   getVisibleLogEntries(): LocalLogEntry[] {
     this.ensureLocalLogAnimations();
-    return [ ...this.logHandler.logbook ].reverse();
+    return this.logHandler.logbook;
   }
 
   /**
@@ -4035,9 +4042,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // added - GM bookkeeping, and a straight answer to "how many hits until it
     // drops" that nobody at the table had earned. The GM reads the box count off
     // the Condition Monitor panel, where it always was.
-    this.logRowEvent(grunt.name || STANDALONE_GRUNT_NAME_PREFIX,
-      "added as a standalone grunt (single Condition Monitor) - "
-      + "still to roll their own Initiative Test");
+    this.logRowEvent(grunt.name || STANDALONE_GRUNT_NAME_PREFIX, "added.");
     if (selectNewGrunt) {
       this.selectActor(grunt);
     }
@@ -4249,9 +4254,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
     }
     this.logRowEvent(row.name,
-      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")} - `
-      + "one shared Initiative Score from here on. Their Condition Monitor damage carried over; "
-      + "no wound penalty is applied to the group for damage taken before the merge (house rule).");
+      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")}.`);
     this.selectActor(row);
     this.syncSharedState();
     this.sort();
@@ -4300,13 +4303,30 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * the event twice with only one copy telling the truth about visibility. Same
    * contract as `appendParticipantRollLog`.
    */
-  private logGmOnlyRowEvent(actor: string, text: string): void {
-    this.appendGmOnlyLog(actor, text);
+  private logGmOnlyRowEvent(actor: string, text: string, extra?: Partial<SharedLogEntry>): void {
+    this.appendGmOnlyLog(actor, text, extra);
   }
 
   /** Template guard: is this participant a linked NPC row? */
   isNpcRow(p: IParticipant): p is NpcRowParticipant {
     return isNpcRow(p);
+  }
+
+  /**
+   * Tooltip for the GROUP badge. When the row has been wiped out by damage
+   * (`NpcRowParticipant.isWipedOut`), explains why it is still sitting in the
+   * initiative list - the prose the wiped-out log line used to carry, moved
+   * here so a GM (or a player asking about it) can read it without a new log
+   * entry (`briefs/action-log-readability-spec.md`, B15/B16).
+   */
+  getNpcRowBadgeTooltip(row: NpcRowParticipant): string {
+    const base = "Grunt Group: several NPCs on one shared Initiative Score, "
+      + "acting back-to-back in this slot (p. 379)";
+    if (!row.isWipedOut) {
+      return base;
+    }
+    return `${base} Every NPC in this group is out of action. The row keeps its place `
+      + "in the initiative order until you delete it.";
   }
 
   /** Template cast, mirroring `asMatrix` / `asAstral`. */
@@ -4546,10 +4566,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // loud in the log for a wounded joiner, because that is exactly the case a
     // GM would otherwise expect to see the row slow down.
     const carriedWounds = member.wm > 0
-      ? ` (arrives wounded: -${member.wm} on their own tests only, row's shared score unchanged)`
+      ? `, arrives wounded (-${member.wm})`
       : "";
     this.logRowEvent(this.rowLogActor(row),
-      `${member.name} joins the row on shared initiative score ${row.getCurrentInitiative()}${carriedWounds}`);
+      `${member.name} joined the group${carriedWounds}.`);
     this.syncSharedState();
     this.sort();
     return member;
@@ -4600,17 +4620,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // grunts take no overflow) and must not rewrite the final-attack record.
       // Say so: a silent no-op looks like a broken button to a GM recording a
       // coup de grace, and "nothing happened" is itself the ruling.
-      this.logRowEvent(actor,
-        `${member.name} - no effect, already out of action `
-        + `(${member.damage}, ${member.finalState})`,
-        `${member.name} - no effect, already out of action`);
+      this.logRowEvent(actor, `${member.name} already out of action — hit had no effect.`);
     }
     if (result.scoreDelta !== 0) {
       this.logGmOnlyRowEvent(actor, formatGroupWoundLogText(
-        actor, member.name,
+        member.name,
         result.rowWoundModifierDelta,
         result.scoreAfter
-      ));
+      ), { houseRule: true });
     }
     if (result.wentOutOfAction) {
       this.logRowEvent(actor,
@@ -4668,9 +4685,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   private onSpentNpcRowsFlagged(rows: NpcRowParticipant[]): void {
     for (const spent of rows) {
-      this.logGmOnlyRowEvent(this.rowLogActor(spent),
-        "every member is out of action - flagged out of action; the row keeps its place "
-        + "in the initiative order until you delete it");
+      this.logGmOnlyRowEvent(this.rowLogActor(spent), "every member is out of action.");
     }
     this.syncSharedState();
   }
@@ -4817,10 +4832,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       //
       // GM-only for the same reason the damage path's copy is (Decision 17).
       this.logGmOnlyRowEvent(actor, formatGroupWoundLogText(
-        actor, member.name,
+        member.name,
         result.rowWoundModifierDelta,
         result.scoreAfter
-      ));
+      ), { houseRule: true });
     }
     // A heal can *un*-spend a row (Decision 13 + Decision 14), so the spent flag
     // has to be re-evaluated here too, not only on the damage path.
@@ -4965,6 +4980,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.forgetSetEntry(this.expandedRowPanels, p);
     this.forgetSetEntry(this.expandedDeckPanels, p);
     this.forgetSetEntry(this.expandedAstralPanels, p);
+    this.forgetSetEntry(this.expandedStatEditors, p);
     if (this.selectedActor === p) {
       const previous = this.selectedActor;
       UndoHandler.DoAction(
@@ -5039,6 +5055,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.demoteToParticipant(p as MatrixParticipant);
     this.syncSharedState();
     this.sort();
+  }
+
+  /** Are this participant's E/R/I/D shown as inputs (true) or as a summary? */
+  areStatsExpanded(p: IParticipant): boolean {
+    return this.expandedStatEditors.has(p);
+  }
+
+  toggleStatEditor(p: IParticipant): void {
+    if (this.expandedStatEditors.has(p)) {
+      this.expandedStatEditors.delete(p);
+    } else {
+      this.expandedStatEditors.add(p);
+    }
   }
 
   isAstralPanelExpanded(p: IParticipant): boolean {
@@ -5245,6 +5274,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.expandedDeckPanels.delete(p);
       this.expandedDeckPanels.add(mp);
     }
+    // Carried across the type swap for the same reason the deck panel is: this
+    // keys off the participant instance, and enabling a deck replaces that
+    // instance, so without this an open stat twirly would silently snap shut.
+    if (this.expandedStatEditors.has(p)) {
+      this.expandedStatEditors.delete(p);
+      this.expandedStatEditors.add(mp);
+    }
     if (this.selectedActor === p) this.selectedActor = mp;
     if (this.actModalParticipant === p) this.actModalParticipant = mp;
     this.combatManager.removeParticipant(p);
@@ -5306,6 +5342,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantIntuitions.delete(mp);
     this.participantTieBreakers.delete(mp);
     this.expandedDeckPanels.delete(mp);
+    // Same instance-swap carry-over as promoteToMatrixParticipant, in reverse:
+    // removing the deck must not also collapse an open stat twirly.
+    if (this.expandedStatEditors.has(mp)) {
+      this.expandedStatEditors.delete(mp);
+      this.expandedStatEditors.add(p);
+    }
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
     this.combatManager.removeParticipant(mp);
@@ -5442,12 +5484,20 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * the gained/lost dice are rolled and applied to the running Score (brief
    * F5 / criteria 7-8, p. 160). This handler previously changed the dice count
    * with no roll and no Score effect at all.
+   *
+   * Has no production caller (`briefs/action-log-readability-spec.md` item 3):
+   * the template's "Jack In" and "Switch Mode" buttons both call `gmJackIn`,
+   * which logs via `appendParticipantEventLog`, and the `configure_deck`
+   * jack-in branch logs via `appendPlayerCommandLog`. This method is kept only
+   * for `battle-tracker.component.spec.ts`'s dice-funnel regression suite,
+   * which calls it directly, and writes no log line of its own - VR-mode
+   * events are logged by `gmJackIn` / `gmJackOut` / the `configure_deck`
+   * branch, never here.
    */
   onVRModeChange(p: IParticipant, mode: VRMode): void {
     if (!this.isMatrix(p)) return;
     UndoHandler.StartActions();
     this.applyVRMode(p as MatrixParticipant, mode);
-    LogHandler.log(this.currentBTTime, `${p.name} VR mode → ${mode}`);
     this.syncSharedState();
   }
 
@@ -5759,6 +5809,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.startLocalLogDecode(entry);
     }
     this.observedLocalLogCount = logCount;
+    // Local log now renders oldest-first, same as the shared log, so a new
+    // entry lands at the bottom and needs the same follow-to-bottom scroll.
+    this.pendingLogScroll = true;
   }
 
   private startLocalLogDecode(entry: LocalLogEntry) {

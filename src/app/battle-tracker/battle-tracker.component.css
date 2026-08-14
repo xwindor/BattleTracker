@@ -86,6 +86,25 @@
   padding-right: var(--ui-header-inset);
 }
 
+/* Column labels were `<span class="h5"><b>` — a 1.25rem heading, bold, with a
+   heading's own line-height and bottom margin, for what is a table column
+   label (Xavier: "the column headers could be much smaller to save some
+   space"). A small tracked-out uppercase label reads as a column header at a
+   fraction of the height, and the row is a header strip repeated above a long
+   list, so every pixel here is a pixel off the top of every screen. */
+.gm-col-header {
+  display: block;
+  font-size: var(--ui-control-font-xs);
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Replaces the old bare `div { padding-top/bottom: 2px }`, which applied
    vertical padding to EVERY div in this component and was the single largest
    source of the inconsistent vertical rhythm in the GM view. The rhythm is
@@ -461,6 +480,83 @@
   margin-left: calc(-1 * var(--cd-border-thin));
 }
 
+/* ── Stats twirly ──────────────────────────────────────────────────────────
+   Wrapper for the stats cell in both states: collapsed (one summary button)
+   and expanded (caret button + the four pairs). `min-width: 0` so the
+   input-group inside — which `styles.scss` gives `width: 100%` — can actually
+   shrink to the space left beside the caret instead of overflowing the
+   column. */
+/* Capped well below the cell's own max width, deliberately: the leftover is
+   the breathing room the GROUP / GRUNT badge sits in (Xavier: "i see there is
+   some room for the badge which is good, keep that bit of extra space still").
+   Was 11rem, widened ~30% on Xavier's call. */
+.gm-name-input {
+  max-width: 14.25rem;
+}
+
+.gm-stats-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-gap);
+  min-width: 0;
+  width: 100%;
+}
+
+.gm-stats-cell .gm-stats-roll-group {
+  min-width: 0;
+}
+
+/* Square icon-button geometry, shared by the expanded-state caret and the
+   trailing Deck/Awakened/Private icons. Sized off the same control tokens as
+   every other control in the row, so they line up on a shared baseline
+   instead of being hand-tuned pixel values. */
+.gm-stat-twirl,
+.gm-trailing-icon {
+  flex: 0 0 auto;
+  width: var(--ui-icon-btn-w);
+  min-width: var(--ui-icon-btn-w);
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Collapsed summary: caret + `E2 R5 I4 D2`. A button rather than a span so the
+   numbers are the click target, but it must not look or size like a normal
+   `.btn` — it is a readout first and a control second, so the chrome is
+   minimal and it hugs its content. */
+.gm-stats-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 var(--ui-control-pad-x-xs);
+  height: var(--ui-control-h);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gm-stat-caret {
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+/* Each value keeps the colour its editable chip has (`.gm-chip-*` in
+   styles.scss), so E/R/I/D stay identifiable at a glance in either state and
+   the collapse is not a change of visual language. Sized as a compact pill:
+   four of these plus the caret are ~115px against the ~230px the eight
+   editable controls occupy. */
+.gm-stat-read {
+  font-size: var(--ui-control-font-xs);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0.22rem;
+  border: var(--cd-border-thin) solid transparent;
+  flex: 0 0 auto;
+}
+
 /* An input-group with a wrapped second line needs its own inline sizing so the
    fields do not stretch to the full column width. */
 .gm-inline-input-group {
@@ -494,12 +590,23 @@
   justify-content: center;
 }
 
-/* Widened now that it is not competing with four stat chips and four stat
-   inputs for a single col-lg-3. At 3.6rem a two-digit total plus the number
-   spinner did not fit and the value was clipped. */
+/* Narrowed from min 3.5rem / max 5rem (Xavier: "the rolled initiative column
+   could be much narrower too, the max ini dice is 5 so it really doesn't have
+   to be so wide... now its wide enough for like a 8 digit number"). The value
+   is a rolled Initiative Score: attribute + at most 5D6 (p. 161), so two digits
+   is the ceiling.
+
+   The old 5rem was a reaction to this input being clipped at 3.6rem back when
+   it was the 10th child of the Stats input-group. The clipping was never really
+   about the box width — it was the full `--ui-control-pad-x` of side padding
+   eating the content box. Tightening the padding the way the stat inputs beside
+   it already do buys back more room than the extra 1.4rem of width did, so two
+   digits plus the number spinner fit comfortably in 2.9rem. */
 .gm-dice-input {
-  min-width: 3.5rem;
-  max-width: 5rem;
+  min-width: 2.6rem;
+  max-width: 2.9rem;
+  padding-left: 0.15rem;
+  padding-right: 0.15rem;
 }
 
 /* Square by construction: --ui-icon-btn-w is defined as var(--ui-control-h),
@@ -882,6 +989,13 @@
   color: #991b1b;
 }
 
+/* A table ruling, not a printed rule (brief "Action Log readability"). GM-only
+   presentation, so no player-view counterpart is needed. */
+.log-badge-house-rule {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    player-view.component.css. */
 /* GM narration attached to a glitch (p. 45): indented so the flat list still
@@ -969,6 +1083,117 @@
 /* ── Responsive layout ─────────────────────────────────────────────────────
    One breakpoint family only: Bootstrap's (AC 9). Desktop is the priority, so
    these are corrections at the narrow end, not a mobile-first rebuild. */
+
+/* The ONE min-width query in this file, and the reason for the exception:
+   these six widths must apply at lg and up and nowhere else, and the file's
+   desktop-first convention would mean declaring them unconditionally and then
+   undoing six flex/width pairs inside the 991.98px block below — far more
+   fragile than a single guard.
+
+   Why explicit widths instead of `col-lg-*`: Bootstrap's twelfths could not
+   express this row. One twelfth is ~77px at 1280px, so "Ini" — a two-digit
+   number — was allotted as much room as the entire rolled-Initiative control,
+   while Actions was starved at that same unit and wrapped its buttons to a
+   second line, which is what made every acting row double height (Xavier: "the
+   ini column could be much narrower, its very wide for just a two digit
+   number... the rolled initiative column could be much narrower too").
+
+   Only Name flexes. Everything else is pinned to the width its content
+   actually needs, so the leftover space at wide viewports lands in the one
+   cell that can use it, and the trailing icon strip stays pinned to the right
+   edge. The header cells above carry these same classes, so labels stay over
+   the columns they describe (AC 10).
+
+   The widths are content measurements, not round numbers:
+     ini      2 digits, centred
+     stats    the collapsed `E2 R5 I4 D2` readout (~115px). The EXPANDED
+              editor wraps to four lines here, one chip+input pair per line.
+              Widening this cell does not fix that and was tried: the caret
+              button sits on the same line and takes 28px, so fitting two
+              ~64px pairs beside it needs ~173px — 58px of dead space every
+              time the cell is collapsed, which is nearly always. Four lines
+              on the one row being edited is the better trade.
+     rolled   2.9rem input + a square roll button + the group's borders
+     actions  the worst real case, Seize Initiative + Interrupts (~161px),
+              which is just wider than Act + Delay + Interrupts (~155px)
+     trailing six square icon buttons + five gaps (~196px) */
+@media (min-width: 992px) {
+  /* Basis was 8rem. Cut 25% (Xavier: "the name input box could be reduced by
+     about 25% and i think everything will fit great") - and that is exactly
+     right: this basis is the width the Name cell refuses to shrink below, so
+     it was the last 32px standing between the 1024px row and a single line. */
+  /* Name and Stats are BOTH growable now, and both capped. Name used to be the
+     row's only flexible cell, which meant it swallowed every pixel the fixed
+     cells didn't use and left a lake of empty space beside the input (Xavier:
+     "the name input is still a bit long and the other columns dont flow to
+     take that space"). Capping Name lets the rest flow into Stats instead.
+     18.25rem = the 14.25rem input cap plus the same 4rem of badge room the
+     15rem/11rem pairing had, so widening the input did not eat it. Everything
+     to the right of Name — Ini, Stats, Roll — shifts right with it. */
+  .gm-col-name {
+    flex: 1 1 5.75rem;
+    width: auto;
+    max-width: 18.25rem;
+    min-width: 0;
+  }
+
+  /* 3.25rem left the six cells 4px wider than the 738px list at 1024px with the
+     details panel open, which wrapped the whole trailing strip to a second line
+     and doubled every row there. 3rem leaves 36px of content box, comfortable
+     for the widest value this ever holds: a negative two-digit Score plus the
+     `.edged` marker ("-15e", ~30px). */
+  .gm-col-ini {
+    flex: 0 0 3rem;
+    width: 3rem;
+  }
+
+  /* Grows into the space Name no longer takes, up to the width that fits the
+     EXPANDED editor on two lines instead of four: caret (28px) + two ~64px
+     chip+input pairs per line ≈ 172px of content box, so 11.5rem. Xavier
+     prefers the two-line editor, and this is the width that buys it without
+     any cell being padded out with dead space to get there.
+     It still starts at 8rem, the collapsed `E2 R5 I4 D2` readout's own width,
+     so at 1024px — where there is no slack at all — nothing is stolen from the
+     cells that need it and the editor falls back to four lines. */
+  .gm-col-stats {
+    flex: 1 1 8rem;
+    width: auto;
+    max-width: 11.5rem;
+    min-width: 0;
+  }
+
+  .gm-col-rolled {
+    flex: 0 0 5rem;
+    width: 5rem;
+  }
+
+  /* `margin-left: auto` absorbs whatever is still free once Name and Stats have
+     both hit their caps, which pins Actions + Trailing to the row's right edge.
+     Without it that leftover trails off the right-hand end at wide viewports
+     and the icon strip drifts away from the edge. Auto margins only take free
+     space AFTER flex-grow has had it, so this never competes with Name/Stats
+     growing — at 1024px, where there is no free space at all, it resolves to
+     zero and changes nothing. */
+  .gm-col-actions {
+    flex: 0 0 11rem;
+    width: 11rem;
+    margin-left: auto;
+  }
+
+  .gm-col-trailing {
+    flex: 0 0 13rem;
+    width: 13rem;
+  }
+
+  /* Header spacer: the sum of the two unlabelled cells it stands over, and the
+     same `margin-left: auto` they are pushed right by, so the header strip
+     tracks the row beneath it exactly. */
+  .gm-col-spacer {
+    flex: 0 0 24rem;
+    width: 24rem;
+    margin-left: auto;
+  }
+}
 
 /* Below lg the initiative row falls back to two 12-column lines and the
    details panel drops under the list; keep both readable. */

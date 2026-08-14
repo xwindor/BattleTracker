@@ -6,7 +6,7 @@ import { NgbModal, NgbModalModule, NgbModalRef, NgbTooltip } from "@ng-bootstrap
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
-import { DeclaredActionEngine, DeclaredActionSelection } from "app/shared/declared-action-engine";
+import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
 
@@ -832,7 +832,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   }
 
   private buildDeclaredActionLog(): string {
-    return DeclaredActionEngine.buildDeclaredActionLog(this.declaredActionSelection) ?? "Act";
+    return DeclaredActionEngine.buildDeclaredActionLog(this.declaredActionSelection) ?? NO_DECLARED_ACTION_PHRASE;
   }
 
   private clampInitiativeRoll(value: number, initiativeDice: number | undefined): number {

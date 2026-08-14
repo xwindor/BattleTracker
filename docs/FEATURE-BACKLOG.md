@@ -213,11 +213,16 @@ out of that change's scope. All in
   `gmJackOut`) along with every other `appendSharedLog` caller. Accepted as
   consistent with the existing convention; a fix means local-first writes plus
   echo de-duplication by entry `id`.
-- **N5 — `appendParticipantRollLog` double-logs.** The visible branch writes the
-  line locally *and* sends it, and the server echo then mirrors it again for any
-  actor other than `"GM"`. Predates the attribution change (not a regression),
-  but it means participant-attributed roll lines can appear twice in the GM's
-  Action Log.
+- **N5 — `appendParticipantRollLog` and `logRowEvent` double-log.** The visible
+  branch writes the line locally *and* sends it, and the server echo then
+  mirrors it again for any actor other than `"GM"`. Predates the attribution
+  change (not a regression), but it means participant-attributed roll lines and
+  every NPC-row event (declared actions, damage/heal, "joined the group",
+  "formed from…") can appear twice in the GM's Action Log while a session is
+  running. Confirmed still present by `briefs/action-log-readability-spec.md`
+  (Finding D, 2026-08-14): fixing it would require de-duplicating by entry `id`
+  and would churn the row-log test suite (`src/Grunts/npc-row.spec.ts`), so it
+  was left alone again rather than folded into that wording-only pass.
 - **N7 — a participant literally named "GM" suppresses its own log mirror.**
   The echo handler in `attachShareListeners` gates the local `LogHandler` mirror
   on `entry.actor !== "GM"`, a magic string. A combatant the GM names "GM"

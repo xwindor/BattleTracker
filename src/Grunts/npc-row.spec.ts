@@ -1108,7 +1108,7 @@ describe('NPC group initiative - GM workflow', () => {
     expect(lines.find(t => /G 1 healed 4/.test(t))).withContext('heal line').toBeTruthy();
     expect(lines.find(t => /G 1 is back in action/.test(t)))
       .withContext('revival line').toBeTruthy();
-    expect(lines.find(t => /no effect, already out of action/.test(t)))
+    expect(lines.find(t => /hit had no effect/.test(t)))
       .withContext('the old refusal must be gone').toBeFalsy();
   });
 
@@ -1256,7 +1256,7 @@ describe('NPC group initiative - GM workflow', () => {
     let before = LogHandler.logbook.length;
     component.applyRowMemberDamage(row, g1, 6, 'physical');
     let lines = LogHandler.logbook.slice(before).map(e => e.text);
-    expect(lines.find(t => /house rule/.test(t) && /Ganger 1/.test(t) && /-2/.test(t)))
+    expect(lines.find(t => /group wound/.test(t) && /Ganger 1/.test(t) && /-2/.test(t)))
       .withContext('wound line').toBeTruthy();
     expect(row.getCurrentInitiative()).toBe(13);
 
@@ -1265,7 +1265,7 @@ describe('NPC group initiative - GM workflow', () => {
     lines = LogHandler.logbook.slice(before).map(e => e.text);
     // The row speeding back up is just as surprising as it slowing down, and
     // needs the same explanation.
-    expect(lines.find(t => /house rule/.test(t) && /Ganger 1/.test(t) && /\+2/.test(t)))
+    expect(lines.find(t => /group recovery/.test(t) && /Ganger 1/.test(t) && /\+2/.test(t)))
       .withContext('recovery line').toBeTruthy();
     expect(row.getCurrentInitiative()).toBe(15);
   });
@@ -1279,9 +1279,8 @@ describe('NPC group initiative - GM workflow', () => {
     component.addNpcToRow(row, 'Veteran');
 
     const joinLine = LogHandler.logbook.slice(before).map(e => e.text)
-      .find(t => /Veteran joins the row/.test(t));
+      .find(t => /Veteran joined the group/.test(t));
     expect(joinLine).withContext('join line').toBeTruthy();
-    expect(joinLine).toContain('5');            // the score they inherit
     expect(row.getCurrentInitiative()).toBe(5); // and it did not move
   });
 });
@@ -1914,9 +1913,8 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
       const grunt = component.addGrunt('Ganger A', 9, 3); // 13 boxes
 
       const line = LogHandler.logbook.slice(before).map(e => e.text)
-        .find(t => /added as a standalone grunt/.test(t))!;
+        .find(t => /^Ganger A added\.$/.test(t))!;
       expect(line).withContext('creation line').toBeTruthy();
-      expect(line).toContain('single Condition Monitor');
       expect(line).not.toContain(String(grunt.physicalHealth));
       expect(line).not.toContain('boxes');
     });
@@ -2393,11 +2391,12 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
 
       component.applyRowMemberDamage(row, row.members[0], 6, 'physical');
 
-      expect(sent.some(e => /house rule/.test(e.text)))
+      expect(sent.some(e => /group wound/.test(e.text)))
         .withContext('must not reach players').toBeFalse();
-      const entry = component.sharedLogEntries.find(e => /house rule/.test(e.text))!;
+      const entry = component.sharedLogEntries.find(e => /group wound/.test(e.text))!;
       expect(entry).withContext('GM entry').toBeTruthy();
       expect(entry.hiddenFromPlayers).toBeTrue();
+      expect(entry.houseRule).toBeTrue();
     });
 
     it('sends the recovery direction of that line to the GM only as well', () => {
@@ -2407,8 +2406,8 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
 
       component.healRowMember(row, row.members[0], 6);
 
-      expect(sent.some(e => /house rule/.test(e.text))).toBeFalse();
-      expect(component.sharedLogEntries.filter(e => /house rule/.test(e.text))
+      expect(sent.some(e => /group wound|group recovery/.test(e.text))).toBeFalse();
+      expect(component.sharedLogEntries.filter(e => /group wound|group recovery/.test(e.text))
         .every(e => e.hiddenFromPlayers === true)).toBeTrue();
     });
 
@@ -2793,7 +2792,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       expect(component.actModalParticipant).toBe(row);
       expect(component.actModalRowMember).toBe(row.members[0]);
 
-      component['declaredActionSelections'].set(row, { free: 'Pick Up/Put Down Object', simple: [], complex: null });
+      component['declaredActionSelections'].set(row, { free: 'Drop Prone', simple: [], complex: null });
       const before = LogHandler.logbook.length;
 
       component.submitActModal();
@@ -2801,7 +2800,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       expect(row.members[0].hasActed).toBeTrue();
       expect(row.members[1].hasActed).withContext('only the declaring member is marked').toBeFalse();
       const lines = LogHandler.logbook.slice(before).map(e => e.text);
-      expect(lines.find(t => /G 1:.*Pick Up\/Put Down Object/.test(t)))
+      expect(lines.find(t => /G 1 dropped prone \(free\)/.test(t)))
         .withContext('attributed to the NPC, not the row').toBeTruthy();
       // Not everyone in the row has gone yet, so it keeps the current-actor
       // slot - a group does not finish its Action Phase after one member.
@@ -2861,7 +2860,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       component.applyRowMemberDamage(row, row.members[0], 1, 'physical');
 
       const line = LogHandler.logbook.slice(before).map(e => e.text)
-        .find(t => /no effect, already out of action/.test(t))!;
+        .find(t => /hit had no effect/.test(t))!;
       expect(line).toBeTruthy();
       expect(line).not.toContain('/');
     });

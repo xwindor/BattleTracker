@@ -131,40 +131,47 @@
            the labels. Below md the row cells stack full width, so the header
            describes nothing and is hidden rather than drawn as three orphaned
            labels. -->
+      <!-- At lg and up the cells below are sized by `.gm-col-*` (see the
+           `min-width: 992px` block in battle-tracker.component.css), NOT by the
+           `col-lg-*` twelfths they used to carry. The grid could not express
+           what this row needs: a twelfth is ~77px at 1280px, so "Ini" — a
+           two-digit number — was as wide as the whole rolled-Initiative
+           control, while the Actions cell was starved at the same 77px unit and
+           wrapped to two lines. Xavier: "the ini column could be much narrower,
+           its very wide for just a two digit number". `col-12`/`col-md-*` are
+           kept: below lg the twelfths are still exactly right. -->
       <div class="row bg-dark text-light d-none d-md-flex">
-        <div class="col-md-4 col-lg-2">
-          <span class="h5">
-            <b>Name</b>
-          </span>
+        <div class="col-md-4 gm-col-name">
+          <span class="gm-col-header">Name</span>
         </div>
-        <div class="col-md-2 col-lg-1 text-center">
-          <span class="h5">
-            <b>Ini</b>
-          </span>
+        <div class="col-md-2 text-center gm-col-ini">
+          <span class="gm-col-header">Ini</span>
         </div>
-        <div class="col-md-6 col-lg-3 text-center">
-          <span class="h5">
-            <b>Stats / Dice Pool</b>
-          </span>
+        <div class="col-md-6 text-center gm-col-stats">
+          <span class="gm-col-header">Stats / Dice Pool</span>
         </div>
         <!-- The rolled Initiative total has its own column: it used to be the
              10th child of the Stats input-group, where it was the first thing
              to be squeezed off and was routinely clipped. Only labelled at lg —
              below that the column sits on the row's second 12-column line,
-             which this header does not describe. -->
-        <div class="d-none d-lg-block col-lg-2 text-center">
-          <span class="h5">
-            <b>Rolled Initiative</b>
-          </span>
+             which this header does not describe. Now that it is sized to its
+             own content rather than to a twelfth, the long label no longer
+             fits, so it is abbreviated to "Roll" with the full wording in the
+             tooltip. -->
+        <div class="d-none d-lg-block text-center gm-col-rolled">
+          <span class="gm-col-header" title="Rolled Initiative">Roll</span>
         </div>
-        <div class="d-none d-lg-block col-lg-4"></div>
+        <!-- Spacer over the unlabelled Actions + Trailing cells. Sized to the
+             sum of those two `.gm-col-*` widths so the labels above stay over
+             the columns they describe. -->
+        <div class="d-none d-lg-block gm-col-spacer"></div>
       </div>
 
       <div cdkDropList (cdkDropListDropped)="drop($event)">
         @for(p of combatManager.participants.items; track $index; let i = $index; let last = $last) {
         <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
           (click)="selectActor(p)" [class]="getParticipantStyles(p)" cdkDrag>
-          <div class="col-12 col-md-4 col-lg-2 d-flex align-items-center gap-1">
+          <div class="col-12 col-md-4 gm-col-name d-flex align-items-center gap-1">
             <!-- Merge tick (addendum Decision 10): only a standalone grunt can
                  be folded into a group, so only a grunt gets the box. -->
             @if (isMergeableGruntCandidate(p)) {
@@ -175,24 +182,64 @@
               (change)="toggleMergeSelection(p)"
               title="Select for merging into a Grunt Group (only before this grunt has rolled Initiative this Combat Turn)">
             }
-            <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
+            <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control gm-name-input"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
             <!-- Identification badges (addendum Decision 12): presentation only.
                  A group row and a lone grunt both read differently from a PC or
                  an ordinary NPC and have to be tellable apart at a glance. -->
             @if (isNpcRow(p)) {
             <span class="participant-badge participant-badge-group" data-testid="badge-npc-row"
-              title="Grunt Group: several NPCs on one shared Initiative Score, acting back-to-back in this slot (p. 379)">GROUP</span>
+              [attr.title]="getNpcRowBadgeTooltip(asNpcRow(p))">GROUP</span>
             }
             @else if (hasGruntConditionMonitor(p)) {
             <span class="participant-badge participant-badge-grunt" data-testid="badge-grunt"
               title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (p. 379)">GRUNT</span>
             }
           </div>
-          <div class="col-12 col-md-2 col-lg-1 text-center d-flex align-items-center justify-content-center">
+          <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
           </div>
-          <div class="col-12 col-md-6 col-lg-3 text-center gm-stats-col d-flex align-items-center">
+          <!-- E/R/I/D collapse behind a twirly (Xavier: "maybe we need a twirly
+               we can collapse for stat input"). Rationale is row height: these
+               eight controls are ~230px of a `col-lg-3` - a quarter of the
+               row's width - spent on values typed once at setup and then
+               essentially never touched again, while the every-pass controls
+               (Act / Delay / Interrupts / roll) were the ones being forced to
+               wrap. Collapsed still SHOWS the numbers rather than hiding them,
+               so init dice can still be sanity-checked mid-fight at a glance;
+               only editing costs a tap. State lives in `expandedStatEditors`
+               (battle-tracker.component.ts) and is per-participant.
+               No `$event.stopPropagation()`: every other button in this row
+               (Deck, Awakened, Delete...) lets the click through to the row's
+               `selectActor`, and selecting the actor you are editing is the
+               desired behaviour anyway. -->
+          <div class="col-12 col-md-6 gm-col-stats text-center gm-stats-col d-flex align-items-center">
+            <div class="gm-stats-cell">
+            @if (!areStatsExpanded(p)) {
+            <!-- Collapsed: caret and the four values are ONE control, so the
+                 numbers themselves are the click target (clicking a value to
+                 edit it is the instinct) without adding a second focusable
+                 element to the row. -->
+            <button type="button" class="btn btn-outline-secondary gm-stats-summary"
+              data-testid="stat-twirl"
+              (click)="toggleStatEditor(p)"
+              [attr.aria-expanded]="false"
+              title="Edit Edge / Reaction / Intuition / Initiative Dice">
+              <i class="fa fa-caret-right gm-stat-caret" aria-hidden="true"></i>
+              <span class="gm-stat-read gm-chip-edge" title="Edge">E{{ getParticipantEdgeRatingValue(p) }}</span>
+              <span class="gm-stat-read gm-chip-reaction" title="Reaction">R{{ getParticipantReactionValue(p) }}</span>
+              <span class="gm-stat-read gm-chip-intuition" title="Intuition">I{{ getParticipantIntuitionValue(p) }}</span>
+              <span class="gm-stat-read gm-chip-initdice" title="Initiative Dice">D{{ p.dices }}</span>
+            </button>
+            }
+            @else {
+            <button type="button" class="btn btn-secondary gm-stat-twirl"
+              data-testid="stat-twirl"
+              (click)="toggleStatEditor(p)"
+              [attr.aria-expanded]="true"
+              title="Done editing Edge / Reaction / Intuition / Initiative Dice">
+              <i class="fa fa-caret-down gm-stat-caret" aria-hidden="true"></i>
+            </button>
             <div class="input-group gm-stats-roll-group">
               <!-- Each chip+input is an atomic, unbreakable pair (Xavier: "D
                    should stick with its right most box if it gets shrunken
@@ -226,13 +273,15 @@
                   title="Initiative Dice">
               </div>
             </div>
+            }
+            </div>
           </div>
           <!-- Rolled Initiative: its own column (header "Rolled Initiative"
                above). The input and the roll-die button are one input-group so
                they stay adjacent and the same height; they used to be the last
                two children of the Stats group, where the input was the first
                thing squeezed and was clipped at any laptop width. -->
-          <div class="col-12 col-md-3 col-lg-2 text-center gm-rolled-ini-col d-flex align-items-center">
+          <div class="col-12 col-md-3 gm-col-rolled text-center gm-rolled-ini-col d-flex align-items-center">
             <div class="input-group gm-rolled-ini-group">
               <!-- One-way binding + explicit handler (same shape as the dice-count
                    box above): the typed value must be clamped *before* it reaches
@@ -260,7 +309,7 @@
                from 1024 to 1920px whenever more than two buttons were
                present. `.gm-action-buttons` (below) wraps instead. `role`
                kept for the same grouping semantics. -->
-          <div class="col-12 col-md-5 col-lg-2 gm-action-buttons" role="group">
+          <div class="col-12 col-md-5 gm-col-actions gm-action-buttons" role="group">
             @if (!p.edge
             && (!combatManager.started || (combatManager.passEnded && p.getCurrentInitiative() > 10)))
             {
@@ -306,7 +355,21 @@
             <div class="btn-group p-0" #interruptDropdown ngbDropdown autoClose="outside">
               <button ngbDropdownToggle id="interruptDropdownButton" type="button" class="btn btn-secondary"
                 dropdownToggle>
-                Interrupts <span class="caret"></span>
+                <!-- Short form (Xavier: "make a short form for interrupts").
+                     At 113px the full word was the widest control in the row's
+                     tightest cell and single-handedly forced Act + Delay +
+                     Interrupts onto two lines at every width below 1920px. A
+                     shield reads for the group because the interrupts that get
+                     used at the table are the defensive ones (Full Defense,
+                     Dodge, Block, Parry, p. 167); the full word stays in the
+                     tooltip and in the screen-reader label, and the dropdown
+                     itself is headed "Core" / "Optional" once open.
+                     The `<span class="caret">` that used to sit here was a
+                     Bootstrap 3 leftover: `.caret` is styled nowhere in this
+                     app, and `ngbDropdownToggle` draws its own caret through
+                     `.dropdown-toggle::after`. -->
+                <i class="fas fa-shield-halved fa-lg" aria-hidden="true"></i>
+                <span class="visually-hidden">Interrupts</span>
               </button>
               <div ngbDropdownMenu aria-labelledby="interruptDropdownButton">
                 <h6 class="dropdown-header">Core</h6>
@@ -362,7 +425,10 @@
                comes from `justify-content: flex-end` on `.gm-trailing-actions`
                below. Dropped rather than fixed to `text-end`, since there is no
                text content directly in this column to align. -->
-          <div class="col-12 col-md-4 col-lg-2">
+          <!-- Sized at lg to the six icon buttons plus their gaps (~196px), so
+               the strip sits on one line instead of the two it wrapped to at
+               every width, 1024px included. -->
+          <div class="col-12 col-md-4 gm-col-trailing">
             <!-- Deck(or Group)/Awakened/Claimable/Claimed/Duplicate/Enter-or-
                  Leave/Delete: ONE wrapping flex row, not two hard-stacked rows
                  (text buttons above, icon buttons below). The two-row split was
@@ -380,21 +446,42 @@
                  in the prior pass that introduced this column). -->
             <div class="gm-trailing-actions">
               @if (isNpcRow(p)) {
-              <button type="button" class="btn"
+              <!-- The word "Group" is gone but the count deliberately is NOT:
+                   it says how many of the row's NPCs still owe an action this
+                   pass (brief "NPC Group Initiative" Decision 18), which is
+                   live combat state the GM reads at a glance, not a label. So
+                   this is the one trailing control that is icon + text rather
+                   than icon-only, and `.gm-trailing-icon` is deliberately not
+                   applied - it would clamp the button to a square and clip the
+                   count. It still drops from ~95px to ~60px. -->
+              <button type="button" class="btn gm-group-btn"
                 [class.btn-info]="isRowPanelExpanded(p)"
                 [class.btn-outline-info]="!isRowPanelExpanded(p)"
                 (click)="toggleRowPanel(p)"
-                title="The NPCs in this row and their Condition Monitors">
-                Group ({{ asNpcRow(p).activeMembers.length }}/{{ asNpcRow(p).members.length }})
+                data-testid="group-btn"
+                title="Group — the NPCs in this row and their Condition Monitors">
+                <i class="fas fa-users" aria-hidden="true"></i>
+                <span class="visually-hidden">Group</span>
+                {{ asNpcRow(p).activeMembers.length }}/{{ asNpcRow(p).members.length }}
               </button>
               }
               @else {
-              <button type="button" class="btn"
+              <!-- Icon-only (Xavier: keep clone/delete as buttons, compact the
+                   rest). "Deck"/"Awakened"/"Private" were ~230px of text
+                   buttons in a `col-lg-2` that is ~296px wide even at 1920px,
+                   which is why this column wrapped to two lines at EVERY width.
+                   As icons the same three controls are ~90px and the column
+                   fits one line. Each keeps its `title` for the tooltip and its
+                   filled/outline variant for state, so nothing is lost but the
+                   word. -->
+              <button type="button" class="btn gm-trailing-icon"
                 [class.btn-secondary]="isDeckPanelExpanded(p)"
                 [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
                 (click)="toggleDeckPanel(p)"
-                title="Cyberdeck configuration">
-                Deck
+                data-testid="deck-btn"
+                title="Deck — cyberdeck configuration">
+                <i class="fas fa-microchip fa-lg" aria-hidden="true"></i>
+                <span class="visually-hidden">Deck</span>
               </button>
               }
               <!-- A row is a group, not a character: it cannot project or jack
@@ -402,22 +489,30 @@
                    detached onto its own row first (criterion 13, pp. 159-160)
                    - the Detach control in the Group panel below. -->
               @if (!isNpcRow(p)) {
-              <button type="button" class="btn"
+              <button type="button" class="btn gm-trailing-icon"
                 [class.btn-warning]="isAstralPanelExpanded(p)"
                 [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
                 [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
                 (click)="toggleAstralPanel(p)"
+                data-testid="awakened-btn"
                 title="Awakened — astral projection">
-                Awakened
+                <i class="fas fa-ghost fa-lg" aria-hidden="true"></i>
+                <span class="visually-hidden">Awakened</span>
               </button>
               }
+              <!-- Lock / open-lock rather than a generic glyph: the icon itself
+                   carries the Private-vs-Claimable state, so dropping the word
+                   costs no legibility here. -->
               <button type="button"
-                class="btn"
+                class="btn gm-trailing-icon"
                 [class.btn-outline-info]="!isParticipantClaimable(p)"
                 [class.btn-info]="isParticipantClaimable(p)"
-                [attr.title]="isParticipantClaimable(p) ? 'Character can be claimed by players' : 'Character cannot be claimed by players'"
+                data-testid="claimable-btn"
+                [attr.title]="isParticipantClaimable(p) ? 'Claimable — character can be claimed by players' : 'Private — character cannot be claimed by players'"
                 (click)="btnToggleClaimable_Click(p)">
-                {{ isParticipantClaimable(p) ? "Claimable" : "Private" }}
+                <i class="fas fa-lg" [class.fa-lock-open]="isParticipantClaimable(p)"
+                  [class.fa-lock]="!isParticipantClaimable(p)" aria-hidden="true"></i>
+                <span class="visually-hidden">{{ isParticipantClaimable(p) ? "Claimable" : "Private" }}</span>
               </button>
               <!-- A claim can outlive the client that made it (a player who
                    reloaded during a server restart comes back with a new
@@ -431,20 +526,30 @@
                 Claimed <i class="fas fa-unlock"></i>
               </button>
               }
-              <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
+              <!-- These three were already icon-only but sized themselves off
+                   `.btn`'s text padding, so they sat wider than the icon needed
+                   and wider than the three above. `.gm-trailing-icon` makes all
+                   six the same square, off the same `--ui-icon-btn-w` token as
+                   the roll-die button, so the whole trailing strip reads as one
+                   even row of icons. -->
+              <button type="button" class="btn btn-primary gm-trailing-icon" (click)="btnDuplicate_Click(p)"
+                title="Duplicate this participant">
                 <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
               </button>
               @if(p.ooc){
-              <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
+              <button type="button" class="btn btn-success gm-trailing-icon" (click)="btnEnterCombat_Click(p)"
+                title="Enter combat">
                 <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
               </button>
               }
               @else {
-              <button type="button" class="btn btn-warning" (click)="btnLeaveCombat_Click(p)">
+              <button type="button" class="btn btn-warning gm-trailing-icon" (click)="btnLeaveCombat_Click(p)"
+                title="Leave combat">
                 <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
               </button>
               }
-              <button type="button" class="btn btn-danger" (click)="btnDelete_Click(p)">
+              <button type="button" class="btn btn-danger gm-trailing-icon" (click)="btnDelete_Click(p)"
+                title="Delete this participant">
                 <i class="fa fa-trash fa-lg"></i>
               </button>
             </div>
@@ -485,7 +590,7 @@
               </span>
               <button type="button" class="btn btn-sm btn-outline-primary ms-auto npc-row-add-member"
                 (click)="addNpcToRow(asNpcRow(p))"
-                title="Add an NPC to this row — it inherits the row's current shared Initiative Score">
+                title="Add an NPC to this row — it inherits the row's current shared Initiative Score. A wounded arrival's penalty applies to their own tests only; the group's shared score does not move.">
                 Add NPC
               </button>
             </div>
@@ -754,7 +859,7 @@
           <button type="button" class="btn btn-outline-info" data-testid="merge-grunts-btn"
             [disabled]="!canMergeSelectedGrunts()"
             (click)="mergeSelectedGrunts()"
-            title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn.">
+            title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn. Their Condition Monitor damage carries over; no wound penalty is applied to the group for damage taken before the merge (house rule).">
             <i class="fa fa-object-group"></i>
             Merge {{ getMergeSelectionCount() }} into a Grunt Group
           </button>
@@ -795,6 +900,10 @@
               @if (entry.hiddenFromPlayers) {
               <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
               }
+              @if (entry.houseRule) {
+              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
+                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
+              }
               @if (entry.npc) {
               <span class="log-badge log-badge-npc" data-testid="log-badge-npc"
                     ngbTooltip="You rolled these dice on behalf of this non-player combatant (p. 44).">NPC</span>
@@ -806,7 +915,8 @@
               <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
               }
               <strong>{{ entry.actor }}</strong>:
-              <span [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
+              <span class="log-text" [class]="getLogTextClass(getSharedLogDisplayText(entry, $index))"
+                    [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
               @if (canAnnotateGlitch(entry)) {
                 @if (isGlitchNoteOpen(entry)) {
                 <div class="glitch-note-visibility"
@@ -844,6 +954,10 @@
                 [class.log-entry-gm-note]="entry.gmNote"
                 data-testid="retained-hidden-entry">
               <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              @if (entry.houseRule) {
+              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
+                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
+              }
               @if (entry.npc) {
               <span class="log-badge log-badge-npc" data-testid="log-badge-npc">NPC</span>
               }
@@ -854,7 +968,8 @@
               <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
               }
               <strong>{{ entry.actor }}</strong>:
-              <span [innerHTML]="formatLogText(entry.text)"></span>
+              <span class="log-text" [class]="getLogTextClass(entry.text)"
+                    [innerHTML]="formatLogText(entry.text)"></span>
             </li>
             }
             }

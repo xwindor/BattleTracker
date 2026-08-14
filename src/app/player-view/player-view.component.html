@@ -232,7 +232,8 @@
         <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
         }
         <strong>{{ entry.actor }}</strong>:
-        <span [innerHTML]="formatLogText(getLogDisplayText(entry, $index))"></span>
+        <span class="log-text" [class]="getLogTextClass(getLogDisplayText(entry, $index))"
+              [innerHTML]="formatLogText(getLogDisplayText(entry, $index))"></span>
       </li>
       }
     </ul>

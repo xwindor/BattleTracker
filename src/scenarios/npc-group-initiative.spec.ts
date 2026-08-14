@@ -259,7 +259,7 @@ describe('S3 - mid-Combat-Turn wound: the house rule under test (Decision 1)', (
     component.applyRowMemberDamage(row, row.members[2], 6, 'physical');
 
     const lines = LogHandler.logbook.slice(before).map(e => e.text);
-    const houseRuleLine = lines.find(t => /house rule/i.test(t));
+    const houseRuleLine = lines.find(t => /group wound/i.test(t));
     expect(houseRuleLine).withContext('group wound log line').toBeTruthy();
     expect(houseRuleLine).toContain('Ganger 3'); // which NPC's wound did it
     expect(houseRuleLine).toContain('13');       // the new shared score

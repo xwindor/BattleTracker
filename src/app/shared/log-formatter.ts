@@ -157,7 +157,11 @@ export function formatInitiativeDeltaLogText(values: readonly number[], delta: n
  * wound-debuff house rule fired and *which* NPC's wound triggered it, because
  * the visible effect (every member of the row slowing down at once) is not
  * what the printed rules would produce and a GM reading back the log would
- * otherwise have no way to tell it from a bug.
+ * otherwise have no way to tell it from a bug. This entry is GM-only and
+ * carries `SharedLogEntry.houseRule` (brief "Action Log readability"
+ * `briefs/action-log-readability-spec.md`), which is what tells the GM apart
+ * without the words "house rule" appearing in the text itself; the row's name
+ * is not repeated here because it is already the entry's actor.
  *
  * `woundModifierDelta` is **signed**, as the house rule runs in both
  * directions: a positive delta is a wound (the row's Wound Modifier grew, its
@@ -167,20 +171,16 @@ export function formatInitiativeDeltaLogText(values: readonly number[], delta: n
  * shared Score went *up* just as much as why it went down.
  */
 export function formatGroupWoundLogText(
-  rowName: string,
   memberName: string,
   woundModifierDelta: number,
   scoreAfter: number
 ): string {
-  const row = (rowName || "").trim() || "NPC row";
   const member = (memberName || "").trim() || "a member";
   const magnitude = Math.abs(woundModifierDelta);
   const healing = woundModifierDelta < 0;
-  const cause = healing
-    ? `${member}'s recovery (+${magnitude})`
-    : `${member}'s wound (-${magnitude})`;
-  return `group wound (house rule): ${cause} applies to `
-    + `all of ${row} → shared initiative score: ${scoreAfter}`;
+  return healing
+    ? `group recovery from ${member} (+${magnitude}) → shared score ${scoreAfter}`
+    : `group wound from ${member} (-${magnitude}) → shared score ${scoreAfter}`;
 }
 
 /**
@@ -199,7 +199,7 @@ export function getLogTextClass(text: string): string {
   if (new RegExp(`${CRITICAL_GLITCH_LABEL}|${GLITCH_LABEL}`).test(text)) {
     return "log-text-glitch";
   }
-  if (/Act_Click:|Action_Click:|Interrupt|Free:|Simple:|Complex:|\bAct\b/i.test(text)) {
+  if (/Act_Click:|Action_Click:|Interrupt|\((?:free|simple|complex)\)|passed their action|Free:|Simple:|Complex:|\bAct\b/i.test(text)) {
     return "log-text-action";
   }
   if (/roll/i.test(text)) {
@@ -239,21 +239,13 @@ function formatLogTextCore(text: string): string {
   if (hitsPattern.test(formatted)) {
     formatted = formatted.replace(hitsPattern, `<span class="log-keyword-roll">$1</span>`);
   }
-  const interruptPattern = /^(Interrupt\s+)(.+)$/i;
+  const interruptPattern = /^(interrupted,\s+)(.+)$/i;
   if (interruptPattern.test(formatted)) {
     return formatted.replace(interruptPattern, `$1<span class="log-keyword-action">$2</span>`);
   }
-  const categoryPattern = /(Free|Simple|Complex):\s*([^|]+)/gi;
+  const categoryPattern = /([^,.;]+?)\s\((free|simple|complex)\)/gi;
   if (categoryPattern.test(formatted)) {
-    return formatted.replace(categoryPattern, (_match, label: string, actions: string) => {
-      const highlightedActions = actions
-        .split(",")
-        .map((a: string) => a.trim())
-        .filter((a: string) => a.length > 0)
-        .map((a: string) => `<span class="log-keyword-action">${a}</span>`)
-        .join(", ");
-      return `${label}: ${highlightedActions}`;
-    });
+    return formatted.replace(categoryPattern, `<span class="log-keyword-action">$1</span> ($2)`);
   }
   formatted = formatted.replace(/(healed\s+Physical\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
   formatted = formatted.replace(/(healed\s+Stun\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);

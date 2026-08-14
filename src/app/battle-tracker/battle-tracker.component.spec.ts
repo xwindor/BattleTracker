@@ -414,9 +414,22 @@ describe('BattleTrackerComponent', () => {
     fixture.detectChanges();
   }
 
-  /** The Initiative Dice *count* box on participant row `index`. */
+  /**
+   * The Initiative Dice *count* box on participant row `index`.
+   *
+   * The row's E/R/I/D now collapse behind a twirly and render as a read-only
+   * `E2 R5 I4 D2` summary until expanded, so the input does not exist in the
+   * DOM at rest. This opens that row's twirly through its real control - the
+   * same click the GM makes - rather than reaching into `expandedStatEditors`,
+   * so these stay end-to-end DOM tests of the box the GM actually types in.
+   */
   function rowDiceCountInput(index: number): HTMLInputElement {
     const row = fixture.nativeElement.querySelector('#participant' + index) as HTMLElement;
+    if (!row.querySelector('input.gm-dice-count-input')) {
+      const twirl = row.querySelector('[data-testid="stat-twirl"]') as HTMLButtonElement;
+      twirl.click();
+      fixture.detectChanges();
+    }
     return row.querySelector('input.gm-dice-count-input') as HTMLInputElement;
   }
 

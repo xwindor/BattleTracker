@@ -901,6 +901,21 @@ describe('Action Log attribution, wording and coverage', () => {
         expect(getLogTextClass(text)).toBe('log-text-roll');
       });
     }
+
+    // AC14 (briefs/action-log-readability-spec.md): declared-action and
+    // interrupt sentences classify as action lines.
+    const actionTexts = [
+      'dropped prone (free) and took aim twice (simple).',
+      'interrupted, going full defense.',
+      'passed their action.',
+      'G 1 reloaded (complex).'
+    ];
+
+    for (const text of actionTexts) {
+      it(`classifies "${text}" as an action line (AC14)`, () => {
+        expect(getLogTextClass(text)).toBe('log-text-action');
+      });
+    }
   });
 
   // ── Gameplay scenarios ─────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS } from "app/shared/declared-actions";
+import { DeclaredActionItem, REPEATABLE_SIMPLE_ACTIONS, getDeclaredActionVerbPhrase } from "app/shared/declared-actions";
 
 export interface DeclaredActionSelection {
   free: string | null;
@@ -48,6 +48,30 @@ const actionConflicts: Record<string, string[]> = {
 };
 
 const repeatableSimpleActions = new Set<string>(REPEATABLE_SIMPLE_ACTIONS);
+
+/** Action Log text for an Act submission with nothing selected. */
+export const NO_DECLARED_ACTION_PHRASE = "passed their action.";
+
+/**
+ * Suffix naming how many times a repeated Simple action was taken
+ * (`buildDeclaredActionLog`, `briefs/action-log-readability-spec.md`).
+ */
+function repeatSuffix(count: number): string {
+  if (count <= 1) return "";
+  if (count === 2) return " twice";
+  if (count === 3) return " three times";
+  return ` ${count} times`;
+}
+
+/**
+ * Join sentence clauses in natural-language order, with an Oxford comma for
+ * three or more (`buildDeclaredActionLog`).
+ */
+function joinDeclaredActionClauses(clauses: string[]): string {
+  if (clauses.length <= 1) return clauses[0] ?? "";
+  if (clauses.length === 2) return `${clauses[0]} and ${clauses[1]}`;
+  return `${clauses.slice(0, -1).join(", ")}, and ${clauses[clauses.length - 1]}`;
+}
 
 export class DeclaredActionEngine {
 
@@ -139,27 +163,36 @@ export class DeclaredActionEngine {
     return next;
   }
 
-  static formatActionListWithCounts(actions: string[]): string[] {
+  /** Distinct Simple-action names in first-appearance order, with their counts. */
+  private static countSimpleSelections(actions: string[]): { name: string; count: number }[] {
     const counts = new Map<string, number>();
     const ordered: string[] = [];
     for (const action of actions) {
       if (!counts.has(action)) ordered.push(action);
       counts.set(action, (counts.get(action) ?? 0) + 1);
     }
-    return ordered.map(action => {
-      const count = counts.get(action) ?? 0;
-      return count > 1 ? `${action} x${count}` : action;
-    });
+    return ordered.map(name => ({ name, count: counts.get(name) ?? 0 }));
   }
 
+  /**
+   * Assemble the Action Log sentence for a declared-action selection: a Free
+   * clause, then one Simple clause per distinct action (naming repeats), then
+   * a Complex clause, joined into natural-language prose with a trailing full
+   * stop (`briefs/action-log-readability-spec.md`).
+   */
   static buildDeclaredActionLog(selection: DeclaredActionSelection): string | null {
-    const parts: string[] = [];
-    if (selection.free) parts.push(`Free: ${selection.free}`);
-    if (selection.simple.length > 0) {
-      parts.push(`Simple: ${DeclaredActionEngine.formatActionListWithCounts(selection.simple).join(", ")}`);
+    const clauses: string[] = [];
+    if (selection.free) {
+      clauses.push(`${getDeclaredActionVerbPhrase(selection.free)} (free)`);
     }
-    if (selection.complex) parts.push(`Complex: ${selection.complex}`);
-    return parts.length === 0 ? null : parts.join(" | ");
+    for (const { name, count } of DeclaredActionEngine.countSimpleSelections(selection.simple)) {
+      clauses.push(`${getDeclaredActionVerbPhrase(name)}${repeatSuffix(count)} (simple)`);
+    }
+    if (selection.complex) {
+      clauses.push(`${getDeclaredActionVerbPhrase(selection.complex)} (complex)`);
+    }
+    if (clauses.length === 0) return null;
+    return `${joinDeclaredActionClauses(clauses)}.`;
   }
 
   static getValidationResult(selection: DeclaredActionSelection): { valid: boolean; message: string } {

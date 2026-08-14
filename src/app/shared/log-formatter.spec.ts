@@ -96,13 +96,13 @@ describe('log-formatter: initiative entries', () => {
   });
 
   // NPC group initiative, scenario S3: the log has to say both that the
-  // group-wide wound house rule fired and which NPC's wound fired it.
-  it('names the house rule, the NPC and the new shared score on a group wound', () => {
-    const text = formatGroupWoundLogText('Gangers', 'Ganger 3', 2, 13);
+  // group-wide house rule fired and which NPC triggered it. The row's own
+  // name is not repeated in the text (it is already the entry's actor); the
+  // words "house rule" now live on the entry's `houseRule` flag, not the text.
+  it('names the NPC and the new shared score on a group wound', () => {
+    const text = formatGroupWoundLogText('Ganger 3', 2, 13);
 
-    expect(text).toContain('house rule');
     expect(text).toContain('Ganger 3');
-    expect(text).toContain('Gangers');
     expect(text).toContain('-2');
     expect(text).toContain('13');
   });
@@ -111,7 +111,7 @@ describe('log-formatter: initiative entries', () => {
     // A healed / mis-keyed-hit-corrected NPC gives the row its shared penalty
     // back, so the entry has to be able to say "+N" and a higher score. A
     // one-way "-N" rendering would report a speed-up as a slow-down.
-    const text = formatGroupWoundLogText('Gangers', 'G1', -2, 15);
+    const text = formatGroupWoundLogText('G1', -2, 15);
 
     expect(text).toContain('+2');
     expect(text).not.toContain('-2');
@@ -119,9 +119,8 @@ describe('log-formatter: initiative entries', () => {
     expect(text).toContain('15');
   });
 
-  it('falls back to generic names when the row or NPC is unnamed', () => {
-    const text = formatGroupWoundLogText('', '', 1, 5);
-    expect(text).toContain('NPC row');
+  it('falls back to a generic name when the NPC is unnamed', () => {
+    const text = formatGroupWoundLogText('', 1, 5);
     expect(text).toContain('a member');
   });
 });

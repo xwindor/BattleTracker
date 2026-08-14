@@ -642,7 +642,12 @@ Condition Monitor total for the GM and drop it entirely for players (the
 2026-08-13 "Condition Monitor maximums never appear in any log" — a hit still
 reads `(6)`, never `(6/10)`); `logGmOnlyRowEvent` (→ `appendGmOnlyLog`) carries
 the group-wound house-rule line and the "every member is out of action" line,
-which are bookkeeping about NPCs rather than events the table witnesses.
+which are bookkeeping about NPCs rather than events the table witnesses. Since
+`briefs/action-log-readability-spec.md` the group-wound line also carries
+`SharedLogEntry.houseRule`, which drives a GM-only "house rule" badge in the
+log pane (the words "house rule" no longer appear in the text itself, only on
+the badge) — `logGmOnlyRowEvent`/`appendGmOnlyLog` take an `extra?:
+Partial<SharedLogEntry>` for this and any future per-entry flag.
 
 GM-component-side, a row is created by `addNpcRow()` and is given an Edge
 rating of `NPC_ROW_EDGE_RATING` (0), which is what makes the existing

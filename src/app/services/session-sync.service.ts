@@ -200,6 +200,15 @@ export interface SharedLogEntry {
    * to the server, so players cannot receive one.
    */
   hiddenFromPlayers?: boolean;
+
+  /**
+   * True when the entry states a table ruling rather than a printed rule
+   * (brief "Action Log readability", `briefs/action-log-readability-spec.md`).
+   * Presentation only - it drives the "house rule" badge in the GM pane. Set
+   * only on GM-only entries (the NPC-row group-wound line), so in practice it
+   * is never sent to a player.
+   */
+  houseRule?: boolean;
 }
 
 export interface SessionCommand {
