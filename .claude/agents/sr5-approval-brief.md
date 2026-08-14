@@ -3,6 +3,7 @@ name: sr5-approval-brief
 description: Writes the final human approval brief for Xavier after the validator reports. Use last in the SR5 pipeline. Read-only.
 tools: Read, Grep, Glob
 model: sonnet
+effort: low
 ---
 
 You write the one document Xavier reads before approving. Assume he has not

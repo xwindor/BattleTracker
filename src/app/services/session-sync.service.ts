@@ -2,6 +2,27 @@ import { Injectable } from "@angular/core";
 import { io, Socket } from "socket.io-client";
 import { GlitchLevel } from "app/shared/roll-utils";
 
+/**
+ * One NPC inside a linked NPC row on the wire (`GruntMemberSnapshot` in
+ * transport form; see `src/Grunts/GruntMember.ts`).
+ *
+ * Broadcast so a GM rejoining a shared session gets their rows back with their
+ * NPCs, each with its own Condition Monitor (brief "NPC Group Initiative"
+ * criteria 3-4, 7, p. 379) rather than as an empty plain participant. Rows are
+ * GM-side bookkeeping: the player view renders participants, not row members,
+ * so nothing here is surfaced to players today.
+ */
+export interface SharedGruntMemberState {
+  name: string;
+  body: number;
+  willpower: number;
+  /** Boxes filled on the single combined Physical + Stun track (p. 379). */
+  damage: number;
+  /** 'physical' | 'stun' - the final attack's type, for alive/dead (p. 379). */
+  lastDamageType?: string | null;
+  lastDamageValue?: number;
+}
+
 export interface SharedParticipantState {
   id: string;
   name: string;
@@ -27,6 +48,29 @@ export interface SharedParticipantState {
   edgeRating?: number;
   reaction?: number;
   intuition?: number;
+
+  // Linked-NPC-row-specific (populated when isNpcRow(participant)).
+  // Without these a rejoining GM's row came back as a plain Participant: no
+  // members, no shared wound accumulator, and canInterrupt flipping back to
+  // true - handing the row the Interrupt Actions Decision 3 forbids it.
+  isNpcRow?: boolean;
+  /**
+   * True for a standalone / detached grunt - one grunt-shaped NPC on its own
+   * Initiative Score, with the single combined Condition Monitor of p. 379
+   * (brief addendum Decisions 9 and 12).
+   *
+   * Presentation only: it exists so the player view can badge a lone grunt the
+   * way it badges a group, and carries no rules content. It is deliberately
+   * **not** used to reconstruct the participant class on a GM rejoin - a
+   * detached grunt still comes back as a plain participant, which is a known,
+   * accepted gap tracked outside this change.
+   */
+  isDetachedGrunt?: boolean;
+  rowMembers?: SharedGruntMemberState[];
+  /** The row's shared wound accumulator (criterion 5 / Decision 1, p. 169). */
+  rowWoundModifier?: number;
+  /** Distinguishes an emptied row from one the GM has not filled in yet. */
+  rowEverPopulated?: boolean;
 
   // Astral-specific (populated when participant instanceof AstralParticipant).
   isAstral?: boolean;
@@ -74,6 +118,24 @@ export interface SharedCombatState {
   passEnded?: boolean;
   currentInitiative?: number;
   participants: SharedParticipantState[];
+
+  /**
+   * How many participants the GM's encounter holds that are **not** in
+   * `participants` because they are out of action.
+   *
+   * `getSharedParticipants()` filters OOC participants out of the broadcast
+   * (spec Open Decision 4 - restoring them is a known, accepted gap), which
+   * means an encounter where everybody has been dropped serialises as
+   * `participants: []` and is indistinguishable on the wire from a room that
+   * never had an encounter at all. A GM joining that code was therefore never
+   * warned, and the join's empty-snapshot branch pushed local state over a real
+   * saved fight (round-3 fix 5).
+   *
+   * Persistence/overwrite-guard use only. Nothing renders it, and no
+   * "active participants" logic reads it - those exclusions of OOC are
+   * deliberate and unchanged.
+   */
+  oocParticipantCount?: number;
 
   // Matrix extensions (Phase 4 wires broadcasting; defined here so the
   // shared types are stable from Phase 1 onward).
@@ -153,6 +215,8 @@ export class SessionSyncService {
   currentRoom = "";
   private readonly requestTimeoutMs = 6000;
   private lastServerUrl = "";
+  private hasConnectedOnce = false;
+  private reconnectListener: (() => void) | null = null;
 
   connect(url = this.getDefaultServerUrl()) {
     this.lastServerUrl = url;
@@ -262,15 +326,72 @@ export class SessionSyncService {
     this.socket?.on("session:command", handler);
   }
 
-  onSessionClosed(handler: (payload: { room: string }) => void) {
+  onSessionClosed(handler: (payload: { room: string; persisted?: boolean }) => void) {
     this.socket?.off("session:closed");
     this.socket?.on("session:closed", handler);
   }
 
+  /**
+   * Server-side rejection of something this client emitted.
+   *
+   * Nothing listened for `session:error` before durable rooms: after a server
+   * restart the GM's socket reconnects with no role, every `session:update-state`
+   * is rejected, and the GM kept running combat while players' screens were
+   * frozen (spec, "The silent-death path" / AC 10). A rejected broadcast must
+   * surface.
+   */
+  onError(handler: (payload: { event: string; reason: string }) => void) {
+    this.socket?.off("session:error");
+    this.socket?.on("session:error", handler);
+  }
+
+  /** Transport dropped. Socket.IO reconnects on its own; this is the notice. */
+  onDisconnect(handler: (reason: string) => void) {
+    this.socket?.off("disconnect");
+    this.socket?.on("disconnect", handler);
+  }
+
+  /**
+   * Transport came back after a drop (a server restart, a flaky link).
+   *
+   * The reconnected socket is a *new* socket with empty `socket.data`, so it
+   * has no role until it re-authenticates - which is the caller's job. See
+   * `BattleTrackerComponent.handleSessionReconnected` for why the GM must then
+   * PUSH rather than pull.
+   */
+  onReconnect(handler: () => void) {
+    const socket = this.socket;
+    if (!socket) {
+      return;
+    }
+    if (this.reconnectListener) {
+      socket.off("connect", this.reconnectListener);
+    }
+    this.reconnectListener = () => {
+      // The very first `connect` is the initial connection, not a reconnect.
+      if (!this.hasConnectedOnce) {
+        this.hasConnectedOnce = true;
+        return;
+      }
+      handler();
+    };
+    this.hasConnectedOnce = socket.connected;
+    socket.on("connect", this.reconnectListener);
+  }
+
+  /** GM presence in the joined room changed (spec Open Decision 7). */
+  onGmPresence(handler: (payload: { room: string; connected: boolean }) => void) {
+    this.socket?.off("session:gm-presence");
+    this.socket?.on("session:gm-presence", handler);
+  }
+
   async createSession(): Promise<{ room: string }> {
-    const res = await this.emitWithAck<{ ok: boolean; room: string }>("gm:create-session");
+    const res = await this.emitWithAck<{ ok: boolean; room: string; reason?: string }>("gm:create-session");
     if (!res?.ok || !res?.room) {
-      throw new Error("Unable to create session.");
+      // The server refuses a create when the room-creation rate limit is hit
+      // (spec AC 16). Its reason names the wait, which is more use at the table
+      // than a flat "unable to create".
+      throw new Error(res?.reason || "Unable to create session.");
     }
     this.currentRoom = res.room;
     return { room: res.room };
@@ -285,19 +406,38 @@ export class SessionSyncService {
     return { state: res.state, log: res.log || [] };
   }
 
-  async joinAsPlayer(room: string, playerName: string): Promise<{ state: SharedCombatState | null; log: SharedLogEntry[] }> {
-    const res = await this.emitWithAck<{ ok: boolean; reason?: string; state: SharedCombatState | null; log: SharedLogEntry[] }>("player:join", { room, playerName });
+  async joinAsPlayer(room: string, playerName: string): Promise<{ state: SharedCombatState | null; log: SharedLogEntry[]; gmConnected: boolean }> {
+    const res = await this.emitWithAck<{ ok: boolean; reason?: string; state: SharedCombatState | null; log: SharedLogEntry[]; gmConnected?: boolean }>("player:join", { room, playerName });
     if (!res?.ok) {
       throw new Error(res?.reason || "Join failed.");
     }
     this.currentRoom = room;
-    return { state: res.state, log: res.log || [] };
+    // Older servers do not report presence; assume connected rather than
+    // showing a false "GM not connected" warning.
+    return { state: res.state, log: res.log || [], gmConnected: res.gmConnected !== false };
   }
 
+  /**
+   * Leave the room. The room and its persisted record survive and can be
+   * rejoined by code later (spec Open Decision 3). To destroy it, see
+   * `endSession`.
+   */
   async closeSession(room: string): Promise<void> {
     const res = await this.emitWithAck<{ ok: boolean; reason?: string }>("gm:close-session", { room });
     if (!res?.ok) {
       throw new Error(res?.reason || "Unable to close GM session.");
+    }
+  }
+
+  /**
+   * Destroy the room: in-memory session and persisted file both go, and the
+   * code stops resolving. Destructive and irreversible - the caller is
+   * responsible for confirming with the GM first (spec AC 8).
+   */
+  async endSession(room: string): Promise<void> {
+    const res = await this.emitWithAck<{ ok: boolean; reason?: string }>("gm:end-session", { room });
+    if (!res?.ok) {
+      throw new Error(res?.reason || "Unable to end GM session.");
     }
   }
 
@@ -331,5 +471,7 @@ export class SessionSyncService {
     this.socket?.disconnect();
     this.socket = null;
     this.currentRoom = "";
+    this.hasConnectedOnce = false;
+    this.reconnectListener = null;
   }
 }

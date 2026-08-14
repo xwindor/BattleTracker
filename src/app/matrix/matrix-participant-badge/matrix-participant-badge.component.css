@@ -1,3 +1,7 @@
+/* DUPLICATED, deliberately (same reasoning as Open Decision 4): this chip
+   idiom also exists in magic/astral-badge/astral-badge.component.css. Emulated
+   view encapsulation means neither component can see the other's copy, so the
+   two are kept byte-identical by hand rather than hoisted to styles.scss. */
 .matrix-badge {
   display: inline-flex;
   align-items: center;
@@ -79,18 +83,25 @@
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
 }
 
+/* Not a .btn, and it keeps its own dark pill palette on purpose — but its
+   geometry comes from the shared chip-tier tokens (AC 7) so it is the same
+   height as the IC-alert dismiss and any other in-badge control. */
 .os-adj-btn {
-  font-size: 0.68rem;
-  padding: 1px 6px;
+  font-size: var(--ui-control-font-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ui-control-h-xs);
+  padding: 0 var(--ui-control-pad-x-xs);
   border: 1px solid #4a4a4a;
   border-radius: 10px;        /* pill shape */
   background: #2c2c2c;
   color: #bbb;
   cursor: pointer;
-  line-height: 1.5;
+  line-height: 1.2;
   font-family: inherit;
   font-weight: 600;
-  min-width: 1.7rem;
+  min-width: calc(var(--ui-icon-btn-w-xs) * 1.26);
   text-align: center;
   transition: background 0.1s, color 0.1s;
 }

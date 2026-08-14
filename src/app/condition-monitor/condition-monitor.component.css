@@ -6,9 +6,12 @@
   display: inline-block;
 }
 
+/* Open Decision 7: 32px on desktop, shrinking to a ~24px floor below md. The
+   size lives in one token (--ui-cm-cell, styles.scss) so this file and the
+   cyberdeck re-skin of .cmCell in styles.scss cannot drift apart. */
 .cmCell {
-  width: 32px;
-  height: 32px;
+  width: var(--ui-cm-cell);
+  height: var(--ui-cm-cell);
   position: relative;
   background: rgba(0, 255, 0, 0.9);
   border-radius: 5px;
@@ -47,8 +50,10 @@
   text-align: center;
   font-weight: bold;
   vertical-align: text-bottom;
-  padding: 5px;
-  padding-left: 10px;
+  /* Proportional to the cell so the box number still fits at the 24px floor.
+     5px / 10px of a 32px cell. */
+  padding: calc(var(--ui-cm-cell) * 0.16);
+  padding-left: calc(var(--ui-cm-cell) * 0.31);
   display: flex;
   align-items: flex-end;
   user-select: none;

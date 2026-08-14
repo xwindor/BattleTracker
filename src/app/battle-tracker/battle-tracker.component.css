@@ -1,4 +1,9 @@
-tr { background: white; }
+/* NOTE — the blocks marked "DUPLICATED (Open Decision 4)" below also exist,
+   byte-for-byte, in player-view.component.css. Angular's emulated view
+   encapsulation means neither copy can see the other's component, so the
+   duplication is deliberate and must be kept in sync by hand. Do not "fix" it
+   by hoisting either copy into styles.scss without re-deciding Open Decision 4
+   — that changes encapsulation and specificity and leaks into the other view. */
 
 .interrupt-badges {
   display: flex;
@@ -30,63 +35,96 @@ tr { background: white; }
   border-color: rgba(220, 38, 38, 0.55);
 }
 
-div {
+/* Seize Initiative / Act / Delay / Interrupts: up to four controls that used
+   to share a Bootstrap `.btn-group`, which assumes one line and does not
+   wrap. At any width from 1024 to 1920px, whenever more than two of these
+   were visible at once the group's true content width exceeded its
+   col-lg-2 and the overflow painted directly over the trailing
+   Deck/Awakened/Private column beside it (buttons were never clipped or
+   truncated — they were just rendered on top of the next column). A plain
+   flex row that wraps fixes it, and reads as one visual group the same way
+   the trailing Deck/Awakened/Claimable/Duplicate/Leave/Delete column does
+   (`.gm-trailing-actions` below). `align-self: flex-start` keeps the column
+   pinned to its own content height rather than stretching to the row's full
+   height (the taller right-hand column, wrapping to multiple button lines
+   more often than this one) — this used to also need
+   `align-items: flex-start` while the group only ever laid out on one line;
+   now that it can wrap to two, `align-content: flex-start` does the
+   equivalent job for the wrapped lines. */
+.gm-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
+  align-self: flex-start;
+  gap: var(--ui-gap);
+  /* NOT width: 100% — this element IS the Bootstrap grid column
+     (`col-12 col-md-5 col-lg-2`), so a width override here fights
+     Bootstrap's own column width instead of just sizing the flex row inside
+     it, and forces the column onto a full-width line of its own. */
+  min-width: 0;
+}
+
+/* The participant row carries a --ui-participant-border border (it doubles as
+   the .selected highlight), so its cells sit one border-width right of the
+   header's. Matching padding on the header puts
+   the labels back over the columns they describe (AC 10). Padding rather than
+   a transparent border, so the cyberdeck skin's own border-left/right on this
+   row is not clobbered.
+   The amount is --ui-header-inset, NOT --ui-participant-border directly: under
+   cyberdeck this row is given its own 1px border by the skin, which already
+   insets it by the row's border width, so that skin sets the token to 0 and
+   the header lines up exactly instead of being 2px in against a 1px row. */
+/* Bootstrap's default row/column gutter (1.5rem) is generous for a two- or
+   three-column form row; across the initiative list's six columns it read as
+   "too much padding" between cells (Xavier). Scoped to the header row and
+   `.participant` (below) only, via the token, so nothing else in the app's
+   grid — the toolbar row, the add-participant row — is affected. */
+.row.bg-dark.text-light {
+  --bs-gutter-x: var(--ui-row-gutter-x);
+  padding-left: var(--ui-header-inset);
+  padding-right: var(--ui-header-inset);
+}
+
+/* Replaces the old bare `div { padding-top/bottom: 2px }`, which applied
+   vertical padding to EVERY div in this component and was the single largest
+   source of the inconsistent vertical rhythm in the GM view. The rhythm is
+   only actually wanted on initiative-list cells, so that is all it targets
+   now. */
+.participant > [class*="col-"],
+.row.bg-dark.text-light > [class*="col-"] {
   padding-top: 2px;
   padding-bottom: 2px;
 }
 
-#btnLogToggle { margin-top: 5vh; }
+/* Open Decision 2: a real grid column, not a fixed overlay. `position: fixed`
+   meant the panel overlaid the initiative list at any width where col-3 was
+   narrower than its content.
 
+   It is still a normal-flow grid column — this does NOT revert Open Decision 2
+   — but at `lg` and up it is ALSO `position: sticky`, so a GM who taps a row
+   near the bottom of a long scrolled participant list does not have the panel
+   open off-screen above them. `align-self: flex-start` is what makes sticky
+   possible: Bootstrap's `.row` is a flex container, and a column stretched to
+   the row's full height has no slack to slide within.
+
+   Sticky is deliberately confined to `lg`+. The column is `col-12 col-lg-3`
+   (battle-tracker.component.html:828), so below 992px it stacks UNDER the list
+   at full width, where pinning it would cover the list instead of flanking it.
+   The un-stick lives in the existing `max-width: 991.98px` block below rather
+   than in a new `min-width` query, keeping this file's desktop-first
+   max-width-only convention. */
 .detailsBar {
-  right: 0;
-  top: 10vh;
-  position: fixed;
-  height: 80vh;
-  overflow: auto
-}
-
-#btnRedo {
-  background-image: url("../../assets/undo.svg");
-  -moz-transform: scaleX(-1);
-  -o-transform: scaleX(-1);
-  -webkit-transform: scaleX(-1);
-  transform: scaleX(-1);
-  filter: FlipH;
-  -ms-filter: "FlipH";
-}
-
-#btnUndo { background-image: url("../../assets/undo.svg"); }
-
-#btnUndo, #btnRedo {
-  background-size: 80% auto;
-  background-position: center;
-  background-repeat: no-repeat;
-  fill: black;
-  height: 100%;
-  color: rgba(0, 0, 0, 0.0);
-  user-select: none;
-}
-
-.btn-diceroll {
-  height: 34px;
-  width: 40px;
-  padding: 0;
-  display: inline-block;
-  cursor: pointer;
+  align-self: flex-start;
+  position: sticky;
+  top: 0.5rem;
 }
 
 .participant {
-  border: 3px solid white;
+  --bs-gutter-x: var(--ui-row-gutter-x);
+  border: var(--ui-participant-border) solid white;
   border-radius: 5px;
   background-color: white;
-}
-
-.icon-shield {
-  background-image: url("../../assets/shield.svg");
-  background-repeat: no-repeat;
-  background-size: contain;
-  height: 100%;
-  width: 32px;
 }
 
 .right {
@@ -104,8 +142,10 @@ div {
 
 .negativeIni, .negativeIni > * { background: rgba(160, 160, 160, 1); }
 
+/* Same width as .participant's own border, from the same token — a .selected
+   row must only change colour, never re-flow by a border-width difference. */
 .selected {
-  border: 3px solid cornflowerblue;
+  border: var(--ui-participant-border) solid cornflowerblue;
   border-radius: 5px;
 }
 
@@ -120,25 +160,13 @@ div {
 
 .ooc, .ooc > * { background: rgba(255, 0, 0, 1); }
 
-.innertable {
-  background: transparent;
-  padding: 0;
-  margin: 0;
-}
-
-.innertable thead { display: none; }
-
-.innertable td, .innertable th { border: none; }
-
-.smcol { max-width: 10vw; }
-
 /* The switch - the box around the slider */
 
 .switch {
   position: relative;
   display: inline-block;
-  width: 54px;
-  height: 26px;
+  width: var(--ui-switch-w);
+  height: var(--ui-switch-h);
 }
 
 /* Hide default HTML checkbox */
@@ -171,11 +199,11 @@ div {
   transition: .4s;
 }
 
-input:checked + .slider { background-color: #2196F3; }
+.switch input:checked + .slider { background-color: #2196F3; }
 
-input:focus + .slider { box-shadow: 0 0 1px #2196F3; }
+.switch input:focus + .slider { box-shadow: 0 0 1px #2196F3; }
 
-input:checked + .slider:before {
+.switch input:checked + .slider:before {
   -webkit-transform: translateX(26px);
   -ms-transform: translateX(26px);
   transform: translateX(26px);
@@ -187,12 +215,10 @@ input:checked + .slider:before {
 
 .slider.round:before { border-radius: 50%; }
 
-.btn-toolbar-right .btn, .btn-toolbar-right .btn-group, .btn-toolbar-right .input-group { float: right; }
-
-.no-border-radius { border-radius: 0; }
-
+/* Was `min-width: 10vw`, so the interrupt menu's width tracked the browser
+   window. A menu of fixed-length action labels wants a fixed measure. */
 .dropdown-menu {
-  min-width: 10vw;
+  min-width: 14rem;
   padding: 1px;
 }
 
@@ -213,14 +239,16 @@ input:checked + .slider:before {
   flex: 1 1 auto;
 }
 
+/* Standard tier, not -sm: the interrupt dropdown is a primary combat control,
+   and its twirl sits in the same visual group as the interrupt action button
+   beside it, which is also standard tier (AC 6). */
 .interrupt-twirl {
-  min-width: 2rem;
-  padding: 0 0.4rem;
-  line-height: 1.2;
+  min-width: var(--ui-icon-btn-w);
+  padding-left: 0;
+  padding-right: 0;
 }
 
-.interrupt-twirl[aria-expanded="true"] .fa-circle-info,
-.action-item-twirl[aria-expanded="true"] .fa-circle-info {
+.interrupt-twirl[aria-expanded="true"] .fa-circle-info {
   color: #1e40af;
 }
 
@@ -236,12 +264,17 @@ input:checked + .slider:before {
   white-space: normal;
 }
 
-.action-dropdown-menu {
-  max-height: 22rem;
-  overflow-y: auto;
-  min-width: 16rem;
-}
+/* `.action-dropdown-menu` and `.action-state` were deleted here (AC 2). Both
+   were leftovers from an older ngbDropdown-based action picker; the Act modal
+   now renders its actions as a `.list-group` (battle-tracker.component.html:994
+   onwards) with no dropdown and no per-action state chip, so neither selector
+   has a plausible live target. `.action-dropdown-menu` was NOT re-attached to
+   the modal's `.list-group`: its `max-height`/`overflow-y` would turn the modal
+   body into a nested scroll region, which is a behavioural change this pass is
+   not allowed to make. */
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-category-toggle {
   display: flex;
   align-items: center;
@@ -249,22 +282,17 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
-.action-state {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #495057;
-  cursor: default;
-}
-
-.action-item {
-  padding-left: 1.9rem;
-}
-
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. Both views bind [class.action-item-selected], so
+   the rule has to exist in both stylesheets or the Default skin shows no
+   highlight on the selected action in whichever view is missing it. */
 .action-item-selected {
   font-weight: 700;
   background-color: #dbeafe;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-validation {
   font-size: 0.85rem;
   border: 1px solid #166534;
@@ -286,6 +314,10 @@ input:checked + .slider:before {
   color: #b91c1c;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. The `padding-left` on `.action-item` indents an
+   action under the category header that discloses it; it used to live only in
+   this file, which left the identical player-view markup un-indented. */
 .action-modal-group .action-item {
   border-top: none;
 }
@@ -303,13 +335,23 @@ input:checked + .slider:before {
 
 .action-item {
   flex: 1 1 auto;
+  padding-left: 1.9rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-item-twirl {
-  min-width: 2rem;
-  padding: 0 0.4rem;
+  min-width: var(--ui-icon-btn-w-sm);
+  padding-left: 0;
+  padding-right: 0;
 }
 
+.action-item-twirl[aria-expanded="true"] .fa-circle-info {
+  color: #1e40af;
+}
+
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-item-details {
   margin: 0 0.65rem 0.5rem 0.65rem;
   padding: 0.45rem 0.55rem;
@@ -321,6 +363,8 @@ input:checked + .slider:before {
   line-height: 1.3rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-economy-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -353,30 +397,74 @@ input:checked + .slider:before {
   font-weight: 700;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-item-disabled {
   opacity: 0.45;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .twirly {
   width: 0.9rem;
   display: inline-flex;
   justify-content: center;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-check {
   color: #15803d;
   font-weight: 800;
   margin-right: 0.4rem;
 }
 
+/* `min-width: 0` is the real fix for a flex/grid child that would otherwise
+   refuse to shrink. It used to be `overflow: hidden`, which clipped
+   library-positioned popovers (ngbDropdown / the Matrix OS editor) that
+   legitimately escape the column. */
 .gm-stats-col {
-  overflow: hidden;
+  min-width: 0;
 }
 
 .gm-stats-roll-group {
   flex-wrap: wrap;
-  row-gap: 0.2rem;
+  column-gap: 0;
+  row-gap: var(--ui-gap);
   width: 100%;
+}
+
+/* Atomic chip+input pair (E/R/I/D). `.gm-stats-roll-group` above may only
+   ever wrap BETWEEN pairs, never inside one, so a stat label can never land
+   on a different line from its own input (Xavier: "D should stick with its
+   right most box if it gets shrunken horizontally"). `flex: 0 0 auto` keeps
+   a pair sized to its own content instead of stretching or being asked to
+   shrink below it. */
+.gm-stat-pair {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+}
+
+/* Recreates the merged single-border look Bootstrap's `.input-group` gives
+   its children via `.input-group > :not(:first-child) { margin-left: -1px }`
+   — that rule only fires on DIRECT children of `.input-group`, and the chip
+   and input are now grandchildren (nested one level inside `.gm-stat-pair`),
+   so it no longer applies to them. Restored by hand at the same offset, off
+   the theme's own border-width token, so a pair reads as one merged control
+   exactly as it did before the wrapper existed. Border-radius needs no
+   equivalent fix: the theme already zeroes it on `.form-control` /
+   `.input-group-text` everywhere (see `:root body .form-control` etc. in
+   styles.scss), so there was never a corner to square here. */
+.gm-stat-pair .gm-stat-input,
+.gm-stat-pair .gm-dice-count-input {
+  margin-left: calc(-1 * var(--cd-border-thin));
+}
+
+/* An input-group with a wrapped second line needs its own inline sizing so the
+   fields do not stretch to the full column width. */
+.gm-inline-input-group {
+  width: auto;
 }
 
 .gm-stat-input {
@@ -393,24 +481,63 @@ input:checked + .slider:before {
   padding-right: 0.2rem;
 }
 
+/* Rolled Initiative column. Its input-group holds only the rolled-total input
+   and the roll-die button, so unlike .gm-stats-roll-group it neither needs to
+   wrap nor to stretch to the full column width. */
+.gm-rolled-ini-col {
+  min-width: 0;
+}
+
+.gm-rolled-ini-group {
+  width: auto;
+  flex-wrap: nowrap;
+  justify-content: center;
+}
+
+/* Widened now that it is not competing with four stat chips and four stat
+   inputs for a single col-lg-3. At 3.6rem a two-digit total plus the number
+   spinner did not fit and the value was clipped. */
 .gm-dice-input {
-  min-width: 3rem;
-  max-width: 3.6rem;
+  min-width: 3.5rem;
+  max-width: 5rem;
 }
 
+/* Square by construction: --ui-icon-btn-w is defined as var(--ui-control-h),
+   so the two can never drift apart, in any skin, at any width (AC 5). This
+   used to be `height: 31px` here and `1.9rem` again in the cyberdeck skin,
+   with a 1400px query here and a 1500px one there stretching it to 100% wide
+   — i.e. deliberately NOT square on a laptop, which is where it is used most. */
 .gm-roll-btn {
-  min-width: 2.2rem;
-  height: 31px;
+  width: var(--ui-icon-btn-w);
+  min-width: var(--ui-icon-btn-w);
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  padding-left: 0;
+  padding-right: 0;
+  flex: 0 0 auto;
 }
 
-@media (max-width: 1400px) {
-  .gm-stats-roll-group .input-group-append {
-    width: 100%;
-  }
-
-  .gm-roll-btn {
-    width: 100%;
-  }
+/* Trailing Deck(or Group)/Awakened/Claimable/Claimed/Duplicate/Enter-or-Leave/
+   Delete controls: ONE wrapping flex row (same shape as `.gm-action-buttons`
+   beside it), not two hard-stacked rows. Right-aligned via
+   `justify-content: flex-end` so the row is sized to its own content rather
+   than stretched to the column. `min-width: 0` is what lets this flex child
+   shrink to the column's actual width in the first place — the same fix
+   already applied to `.gm-stats-col` above. Without the width cap below, a
+   right-aligned row whose buttons don't fit the column (e.g. Deck + Awakened
+   + Private together) is not clamped — it grows to its full content width
+   and overflows LEFTWARD, painting over the Actions column beside it
+   (confirmed at every width from 1024 to 1920px in the prior pass that
+   introduced this column). Wrapping, contained to the column's own width,
+   keeps the stack inside its own column instead. */
+.gm-trailing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--ui-gap);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .cm {
@@ -422,6 +549,8 @@ input:checked + .slider:before {
   overflow-y: auto;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .log-entry-new {
   animation: logEntryFlash 1.5s ease-out;
 }
@@ -439,6 +568,8 @@ input:checked + .slider:before {
   margin-right: 0.35rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .log-text {
   display: inline-block;
   padding: 0.05rem 0.25rem;
@@ -460,6 +591,8 @@ input:checked + .slider:before {
   color: #334155;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 :host ::ng-deep .log-keyword-action {
   background: #dbeafe;
   color: #1e3a8a;
@@ -503,8 +636,99 @@ input:checked + .slider:before {
   border-radius: 0 4px 4px 0;
 }
 
+/* Linked NPC row (grunt group) panel */
+.npc-row-panel {
+  background: rgba(13, 202, 240, 0.07);
+  border-left: 3px solid #0dcaf0;
+  border-radius: 0 4px 4px 0;
+}
+
+.npc-row-member-down {
+  opacity: 0.55;
+}
+
+/* An NPC that has already gone this Initiative Pass (brief Decision 18).
+   Dimmed rather than hidden - the GM still needs to be able to damage or heal
+   it - and distinguishable at a glance from the heavier "down" dimming above. */
+.npc-row-member-acted:not(.npc-row-member-down) {
+  opacity: 0.75;
+}
+
+.npc-row-cm,
+.npc-row-wm {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+}
+
+.npc-row-down-badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(220, 53, 69, 0.15);
+  color: #842029;
+  white-space: nowrap;
+}
+
+/* Damage Value entry for one NPC in a row: narrow enough that the member line
+   still fits on one row at the table, wide enough for a two-digit DV. */
+.npc-row-dv {
+  width: 3.2rem;
+  min-width: 3.2rem;
+}
+
+/* Identification badges in the initiative list (brief "NPC Group Initiative"
+   addendum Decision 12). Presentation only: they say what KIND of entry the
+   line is - a grunt group sharing one Initiative Score, or a single grunt with
+   one combined Condition Monitor - so neither can be mistaken for a PC or an
+   ordinary NPC at a glance. Deliberately small and non-interactive so they
+   cannot be mis-tapped mid-combat. */
+.participant-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.participant-badge-group {
+  background: rgba(13, 202, 240, 0.18);
+  color: #087990;
+  border: 1px solid rgba(13, 202, 240, 0.45);
+}
+
+.participant-badge-grunt {
+  background: rgba(108, 117, 125, 0.18);
+  color: #495057;
+  border: 1px solid rgba(108, 117, 125, 0.45);
+}
+
+/* Merge tick box: big enough to hit on a tablet, out of the way of the name.
+   Geometry from the shared token (AC 7) so it tracks the rest of the app. */
+.merge-select-box {
+  flex: 0 0 auto;
+  width: var(--ui-check-size);
+  height: var(--ui-check-size);
+  cursor: pointer;
+}
+
+.merge-grunts-message {
+  color: #664d03;
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+
 
 /* Matrix action group styles */
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .action-category-matrix-parent {
   background: #f0f4ff;
   border-left: 3px solid #6366f1;
@@ -560,17 +784,19 @@ input:checked + .slider:before {
   flex: 1 1 auto;
 }
 
+/* Not a .btn, and deliberately keeps its own colour — but it takes its
+   GEOMETRY from the shared chip-tier tokens like every other control (AC 7). */
 .ic-alert-dismiss {
   flex-shrink: 0;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: var(--ui-icon-btn-w-xs);
+  height: var(--ui-control-h-xs);
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: 1px solid rgba(120, 53, 15, 0.35);
   border-radius: 50%;
-  font-size: 0.9rem;
+  font-size: var(--ui-control-font-xs);
   line-height: 1;
   color: #92400e;
   cursor: pointer;
@@ -601,6 +827,8 @@ input:checked + .slider:before {
 
 /* ── Combat log readability ─────────────────────────────────────────────── */
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 /* Glitch = more than half the dice showed a 1 (p. 45). */
 :host ::ng-deep .log-keyword-glitch {
   background: #fef08a;
@@ -624,6 +852,8 @@ input:checked + .slider:before {
   color: #713f12;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .log-badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -652,6 +882,8 @@ input:checked + .slider:before {
   color: #991b1b;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 /* GM narration attached to a glitch (p. 45): indented so the flat list still
    reads as one entry commenting on another. The entry names its parent roll
    in .log-entry-ref, because the list is flat and the roll it is about may be
@@ -675,6 +907,8 @@ input:checked + .slider:before {
   border-left: 3px dashed #64748b;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   player-view.component.css. */
 .glitch-note-toggle {
   padding: 0;
   font-size: 0.75rem;
@@ -713,6 +947,73 @@ input:checked + .slider:before {
 .gm-roll-visibility {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: var(--ui-gap);
   padding: 0.4rem 0.6rem 0;
+}
+
+/* ── Classes replacing template inline styles ──────────────────────────── */
+
+/* Was style="padding-left: 0" on the toolbar column. */
+.gm-toolbar-col {
+  padding-left: 0;
+}
+
+/* Was style="width: 10rem". Allowed to shrink now so the member line still
+   fits when the group panel is open in the laptop band. */
+.npc-row-member-name {
+  flex: 0 1 10rem;
+  width: 10rem;
+  min-width: 6rem;
+}
+
+/* ── Responsive layout ─────────────────────────────────────────────────────
+   One breakpoint family only: Bootstrap's (AC 9). Desktop is the priority, so
+   these are corrections at the narrow end, not a mobile-first rebuild. */
+
+/* Below lg the initiative row falls back to two 12-column lines and the
+   details panel drops under the list; keep both readable. */
+@media (max-width: 991.98px) {
+  .detailsBar {
+    margin-top: 0.75rem;
+    /* Un-stick: below lg the panel is a full-width block UNDER the list, so
+       pinning it would park it over the list instead of beside it. */
+    position: static;
+  }
+}
+
+/* Below md every cell in a participant row is full width, so the column
+   header above them describes nothing and is hidden rather than drawn as a
+   stack of three orphaned labels. The row itself keeps every control. */
+@media (max-width: 767.98px) {
+  .gm-stats-roll-group {
+    width: 100%;
+  }
+
+  /* Full-width stacked cell below md, so the rolled-total input and its roll
+     button spread across the row instead of huddling in the centre. */
+  .gm-rolled-ini-group {
+    width: 100%;
+  }
+
+  .gm-inline-input-group {
+    width: 100%;
+  }
+
+  .npc-row-member-name {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
+
+/* At the very narrow end (Open Decision 6 puts the GM view's supported floor
+   at 1024px; this is best-effort so nothing overflows on a phone). */
+@media (max-width: 575.98px) {
+  .participant .btn-group,
+  .participant .btn-group > .btn {
+    width: 100%;
+  }
+
+  .participant .btn-group {
+    flex-wrap: wrap;
+  }
 }

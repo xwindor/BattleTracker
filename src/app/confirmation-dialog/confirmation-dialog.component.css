@@ -1,0 +1,8 @@
+/* Intentionally empty.
+
+   The confirmation dialog is built entirely from Bootstrap's modal classes and
+   plain `.btn`s (confirmation-dialog.component.html:14-19). It therefore
+   inherits the shared --ui-* sizing tokens declared on `body` in
+   src/styles.scss like every other control, and needs no rules of its own.
+   Anything added here would be a second, competing sizing mechanism — which is
+   the exact defect the responsive/visual design pass removed. */

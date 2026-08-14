@@ -1,3 +1,19 @@
+// ── Palette ────────────────────────────────────────────────────────────────
+// This component used to hard-code #00ff41 on #000 everywhere, so under the
+// vintage (cream/brown parchment) skin it rendered as a black terminal box
+// dropped onto a page of parchment. Open Decision 3: the green terminal stays
+// as an INTENTIONAL cyberdeck motif, and the default and vintage skins get
+// their own variants. The values live on `body` in styles.scss (--dice-*) and
+// inherit in here. Every --dice-* reference below carries the DEFAULT skin's
+// value as a `var(--x, fallback)` fallback, so the roller still renders as a
+// legible neutral card if this component is ever mounted without styles.scss
+// (a lone-component test harness, or a future lazy-loaded shell). The
+// fallbacks are inert today: styles.scss always defines all fifteen tokens on
+// `body`, so the fallback branch is never taken in the app.
+// The --ui-* sizing tokens referenced further down deliberately have NO
+// fallback: control geometry is a whole-app system (see the token block at the
+// top of styles.scss) and a local guess at it would be wrong by definition.
+
 // ── Container ──────────────────────────────────────────────────────────────
 .dice-roller-panel {
   padding: 0.6rem 0.75rem;
@@ -18,11 +34,16 @@
   font-weight: 600;
   margin: 0;
   white-space: nowrap;
-  color: #00ff41;
+  color: var(--dice-fg, #1f2937);
 }
 
+// Flexible rather than fixed: these three sat at 4.5/11/9rem and overflowed
+// the GM's narrow right-hand card. They still prefer their old width and now
+// give it up instead of pushing a scrollbar.
 .dice-count-input {
+  flex: 0 1 4.5rem;
   width: 4.5rem;
+  min-width: 3.25rem;
 }
 
 // ── Roll as (GM only) ─────────────────────────────────────────────────────
@@ -31,27 +52,33 @@
 }
 
 .roll-as-select {
+  flex: 1 1 11rem;
   width: 11rem;
+  min-width: 8rem;
+  max-width: 100%;
 }
 
 .roll-as-other-input {
+  flex: 1 1 9rem;
   width: 9rem;
+  min-width: 7rem;
+  max-width: 100%;
 }
 
 .roll-as-hint {
   font-size: 0.7rem;
-  color: rgba(0, 255, 65, 0.65);
+  color: var(--dice-fg-dim, rgba(31, 41, 55, 0.55));
   font-style: italic;
   flex-basis: 100%;
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────
 .dice-section {
-  border: 1px solid #00ff41;
+  border: 1px solid var(--dice-border, #94a3b8);
   border-radius: 0.375rem;
   padding: 0.5rem 0.65rem;
-  background: #000;
-  box-shadow: 0 0 6px rgba(0, 255, 65, 0.2);
+  background: var(--dice-bg, #ffffff);
+  box-shadow: var(--dice-glow, none);
 }
 
 .dice-section-label {
@@ -59,14 +86,14 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #00ff41;
+  color: var(--dice-fg, #1f2937);
   margin-bottom: 0.4rem;
 }
 
 // The tray label still names the roll that was made, but the attribution has
 // since changed - greyed so it does not compete with the "next roll" hint.
 .dice-section-label--stale {
-  color: rgba(0, 255, 65, 0.4);
+  color: var(--dice-fg-faint, rgba(31, 41, 55, 0.4));
   font-weight: 500;
 }
 
@@ -77,7 +104,7 @@
   font-style: italic;
   text-transform: none;
   letter-spacing: normal;
-  color: #ffb300;
+  color: var(--dice-accent, #b45309);
 }
 
 .dice-attribution-stale-note {
@@ -89,40 +116,46 @@
 }
 
 .dice-section-remote {
-  background: #000;
-  border-color: #00ff41;
+  background: var(--dice-bg, #ffffff);
+  border-color: var(--dice-border, #94a3b8);
 }
 
+// Not a .btn (it is `all: unset` then rebuilt), and it keeps its own flat
+// look — but its geometry comes from the shared compact-tier tokens like every
+// other control (AC 7).
 .dice-section-toggle {
   all: unset;
   cursor: pointer;
+  // Font size deliberately matches its sibling .dice-section-label (the two
+  // read as one pair of section headings); only the geometry is tokenised.
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #00ff41;
+  color: var(--dice-fg, #1f2937);
   display: flex;
   align-items: center;
   gap: 0.3rem;
   margin-bottom: 0.4rem;
-  padding: 0.1rem 0.25rem;
+  min-height: var(--ui-control-h-sm);
+  padding: 0 var(--ui-control-pad-x-sm);
   border-radius: 0.2rem;
 
   &:hover {
-    background: rgba(0, 255, 65, 0.12);
+    background: var(--dice-toggle-hover, rgba(31, 41, 55, 0.08));
   }
 }
 
 .dice-section-empty {
   font-size: 0.75rem;
-  color: rgba(0, 255, 65, 0.4);
+  color: var(--dice-fg-faint, rgba(31, 41, 55, 0.4));
   font-style: italic;
   padding: 0.2rem 0;
 }
 
 .dice-roller-attribution {
   font-size: 0.75rem;
-  color: #00ff41;
+  color: var(--dice-fg, #1f2937);
   margin-bottom: 0.25rem;
   font-weight: 600;
 }
@@ -133,11 +166,11 @@
   display: inline-block;
   margin-left: 0.35rem;
   padding: 0 0.3rem;
-  border: 1px solid #ff4d4d;
+  border: 1px solid var(--dice-hit, #b91c1c);
   border-radius: 0.2rem;
   font-size: 0.6rem;
   letter-spacing: 0.05em;
-  color: #ff4d4d;
+  color: var(--dice-hit, #b91c1c);
 }
 
 // Each stacked remote roll entry
@@ -145,7 +178,7 @@
   padding: 0.35rem 0;
 
   & + .remote-roll-entry {
-    border-top: 1px solid rgba(0, 255, 65, 0.3);
+    border-top: 1px solid var(--dice-border-soft, rgba(148, 163, 184, 0.5));
     padding-top: 0.5rem;
   }
 }
@@ -205,10 +238,10 @@
   position: absolute;
   width: 2.8rem;
   height: 2.8rem;
-  border: 1px solid #00ff41;
+  border: 1px solid var(--dice-border, #94a3b8);
   border-radius: 0.3rem;
-  background: #000;
-  box-shadow: 0 0 5px rgba(0, 255, 65, 0.4), inset 0 0 8px rgba(0, 255, 65, 0.05);
+  background: var(--dice-bg, #ffffff);
+  box-shadow: var(--dice-face-glow, none);
   // Pip grid: 3 columns × 3 rows
   display: grid;
   grid-template: repeat(3, 1fr) / repeat(3, 1fr);
@@ -231,8 +264,8 @@
   width: 0.32rem;
   height: 0.32rem;
   border-radius: 50%;
-  background: #00ff41;
-  box-shadow: 0 0 4px #00ff41;
+  background: var(--dice-fg, #1f2937);
+  box-shadow: var(--dice-glow, none);
   place-self: center;
   // Default position: center cell (overridden by position classes below)
   grid-column: 2;
@@ -242,8 +275,8 @@
 // 5s and 6s get red pips — hits
 .die-face--5 .pip,
 .die-face--6 .pip {
-  background: #ff3030;
-  box-shadow: 0 0 4px #ff3030;
+  background: var(--dice-hit, #b91c1c);
+  box-shadow: var(--dice-hit-glow, none);
 }
 
 // Grid position classes (col, row)
@@ -275,30 +308,30 @@
 }
 
 .die-result-hit {
-  background: #000;
-  color: #ff3030;
-  border: 1px solid #ff3030;
-  box-shadow: 0 0 5px rgba(255, 48, 48, 0.5);
+  background: var(--dice-bg, #ffffff);
+  color: var(--dice-hit, #b91c1c);
+  border: 1px solid var(--dice-hit, #b91c1c);
+  box-shadow: var(--dice-hit-glow, none);
 }
 
 .die-result-miss {
-  background: #000;
-  color: #00ff41;
-  border: 1px solid rgba(0, 255, 65, 0.4);
+  background: var(--dice-bg, #ffffff);
+  color: var(--dice-fg, #1f2937);
+  border: 1px solid var(--dice-border-soft, rgba(148, 163, 184, 0.5));
 }
 
 /* A 1 - the face that counts toward a glitch (brief p. 45). */
 .die-result-one {
-  background: #000;
-  color: #ffb000;
-  border: 1px solid #ffb000;
-  box-shadow: 0 0 5px rgba(255, 176, 0, 0.45);
+  background: var(--dice-bg, #ffffff);
+  color: var(--dice-one, #b45309);
+  border: 1px solid var(--dice-one, #b45309);
+  box-shadow: var(--dice-one-glow, none);
 }
 
 .dice-hits-summary {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #00ff41;
+  color: var(--dice-fg, #1f2937);
   margin-left: 0.35rem;
   white-space: nowrap;
 }
@@ -306,7 +339,7 @@
 .dice-ones-summary {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #ffb000;
+  color: var(--dice-one, #b45309);
   margin-left: 0.35rem;
   white-space: nowrap;
 }
@@ -315,8 +348,8 @@
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: #000;
-  background: #ffb000;
+  color: var(--dice-glitch-fg, #ffffff);
+  background: var(--dice-one, #b45309);
   border-radius: 0.25rem;
   padding: 0.05rem 0.35rem;
   margin-left: 0.35rem;
@@ -324,7 +357,7 @@
 }
 
 .dice-glitch-badge--critical {
-  background: #ff3030;
+  background: var(--dice-hit, #b91c1c);
   color: #fff;
 }
 

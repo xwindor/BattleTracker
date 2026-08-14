@@ -335,7 +335,18 @@ Interrupts and declared actions apply an initiative cost by pushing an
 `getCurrentInitiative()` call. `canUseAction()` blocks an action whose
 `|iniMod|` exceeds current initiative, and blocks re-selecting a `persist`
 action already in history (e.g. Full Defense, which is meant to apply once
-and hold). **Note:** `InterruptTable` currently defines 14 entries (full
+and hold).
+
+A **second, separate** Score gate covers the ordinary Act modal (declared Free /
+Simple / Complex actions, which never touch `canUseAction`): at an Initiative
+Score of 0 or below a participant has no Action Phase, so
+`BattleTrackerComponent.hasLiveActionPhase()` refuses the Simple and Complex
+categories while leaving Free open, and `isDeclaredActionSelectionValid()`
+refuses to submit a Simple/Complex selection made before the Score dropped
+(`MIN_ACTION_PHASE_INITIATIVE_SCORE`, `RULINGS.md` 2026-08-07). It applies to
+every participant type. Defense Tests are not modelled as gated actions at all
+and are unaffected. This lives in the GM component because that is where action
+declaration lives; there is no engine-side action-economy model to put it in. **Note:** `InterruptTable` currently defines 14 entries (full
 defense, block, intercept, counterstrike, dive for cover, dodge, parry,
 reversal, right back at ya, run for your life, dive on the grenade,
 sacrifice throw, riposte, protecting the principle, shadow block, "I am the
@@ -449,12 +460,404 @@ OS thresholds UI, IC spawning — see `docs/MATRIX_MODULE_PLAN.md`). The
 domain classes, initiative integration, and badge/session-sync plumbing for
 Phase 1 already exist and are live in the tracker.
 
+### Linked NPC rows (grunt groups)
+
+`NpcRowParticipant` (`src/Grunts/NpcRowParticipant.ts`) is the third
+`Participant` subclass and follows the same principle as the two above: it is
+**one entry in `CombatManager.participants`**, with one running Initiative
+Score, one slot in the derived order, and one -10 at each pass boundary. The
+NPCs in it are `GruntMember` objects (`src/Grunts/GruntMember.ts`) hanging off
+the row — deliberately *not* participants, so they never appear in the order
+and the engine loops in §2/§5 stay untouched. Members act back-to-back inside
+the row's single slot; the row exposes `members` / `activeMembers` for the UI to
+step through. There is no per-member turn state.
+
+Three overrides carry the rules (see `briefs/npc-group-initiative.md` and the
+2026-08-01 entry in `RULINGS.md`):
+
+- `wm` = the row's **own accumulated shared wound modifier**
+  (`_rowWoundModifier`), which is the house rule: any member's wound moves the
+  row's shared Score, for everybody, through the existing
+  `initiativeAttribute` → `syncInitiativeAttribute()` delta path (§1). No new
+  Score plumbing was added for this feature. It is an **event accumulator, not
+  a sum over the current members**: only `applyDamageToMember` / `healMember`
+  move it, so adding, removing or detaching a member is Score-neutral (a
+  reinforcement inherits the row's score per Decision 7; scenario S4 says the
+  members left behind keep the row's score untouched). It is floored at 0 and
+  carried across Combat Turn boundaries via `resetInitiativeScore()` (p. 159:
+  wound modifiers may affect Initiative Score "on this and any subsequent
+  Combat Turns").
+- `ooc` = manual flag OR every member out of action. A row has no Condition
+  Monitor of its own — each member has a grunt-style single combined track
+  (8 + ceil(max(Body, Willpower)/2) boxes, no overflow), and the row's own
+  inherited damage tracks are unused and stay at zero. Because those tracks are
+  meaningless, the GM details panel renders **no Condition Monitor tab at all**
+  for a selected row (the members' monitors are edited in the row panel), and
+  renders a *single* combined bar for a selected `DetachedGruntParticipant`; the
+  PC two-track display is for everyone else. `hasGruntConditionMonitor()` is the
+  guard, `isNpcRow()` the exclusion.
+- A member who is out of action **can** be healed back up: `healDamage` has no
+  `outOfAction` gate, `GruntMember.outOfAction` is re-derived from the box count
+  on every read, and the row's shared accumulator is paid back exactly as it is
+  for a member who was never fully down (`RULINGS.md` 2026-08-07, reversing the
+  2026-08-02 refusal — the "use global Undo instead" correction path it relied
+  on stopped being workable once Undo was slated for removal). The final-attack
+  `lastDamageType`/`lastDamageValue` record is untouched by a heal, so p. 379's
+  alive/dead read stays correct history. Same for a
+  `DetachedGruntParticipant`, whose `ooc` was always live-derived.
+- `canUseAction()` always returns `false`: row members cannot take Interrupt
+  Actions at all (the GM component also reports `canInterrupt: false` for a row
+  in the shared state, §7). `detachMember(member, factory)` is the way out — by
+  default it hands back a `DetachedGruntParticipant`
+  (`src/Grunts/DetachedGruntParticipant.ts`), a `Participant` subclass that
+  keeps the grunt Condition Monitor shape after the detach: `wm` and `ooc` are
+  overridden to work off `physicalDamage + stunDamage` against a single box
+  count, and the final-attack record (`lastDamageType` / `lastDamageValue` /
+  `gruntBody`) travels with it so p. 379's alive/dead comparison still resolves.
+  A caller-supplied factory (`AstralParticipant` / `MatrixParticipant`, for an
+  initiative-type change) gets the boxes and damage but PC-shaped two-track
+  semantics — a known limit, recorded in `RULINGS.md` (2026-08-01, "A detached
+  grunt keeps its single Condition Monitor").
+- `DetachedGruntParticipant` also carries its own `applyDamage(boxes, type)` /
+  `healDamage(boxes)` (brief Decision 20, `RULINGS.md` 2026-08-13 "A killing
+  blow's Damage Value can exceed the boxes left on the track"), mirroring
+  `GruntMember`'s methods of the same name rather than duplicating their logic:
+  the boxes actually **written** onto `physicalDamage`/`stunDamage` are capped
+  at the track's remaining capacity (no overflow, p. 379), but the DV
+  **recorded** for the p. 379 alive/dead comparison is the attack's full DV,
+  uncapped. Before this, a standalone or detached grunt's Condition Monitor
+  widget could only ever apply as many boxes as were left on the track — a
+  killing blow bigger than the remaining boxes was unrecordable — so this gives
+  the standalone/detached panel the same `DV` + `P`/`S`/`-1` GM controls the row
+  panel already had (`getGruntDamageValue`/`setGruntDamageValue`/
+  `hitGruntPhysical`/`hitGruntStun`/`healGrunt` in the GM component, all thin
+  plumbing over the two domain methods).
+
+`NpcRowParticipant.isSpent` covers **both** a row whose every member is out of
+action and a row *emptied* by removal or detach (`everPopulated` is what
+distinguishes an emptied row from a brand-new one the GM has not filled in yet,
+which is left alone) — either way nobody is left to act, so `isSpent` is what
+`flagSpentNpcRows()` uses to decide whether the row has to give up the
+current-actor slot. But since brief Decision 21 (`RULINGS.md` 2026-08-13,
+"Emptying a row by hand is not the same as wiping it out", narrowing the
+2026-08-07 entry below) the **red flag itself** — `spentFlagged`, `ooc`, the
+downed-participant styling — is driven by the narrower
+`NpcRowParticipant.isWipedOut` (every member present, all of them out of
+action), not by `isSpent`. A row emptied by hand — its last member removed or
+detached — satisfies `isSpent` (it cannot act, it has nobody) but not
+`isWipedOut`, and is left as a plain, unstyled empty row for the GM to delete
+whenever convenient. This means an empty-by-hand row can in principle still be
+selected by `getNextActors()` if its Score is still above 0 and its `status`
+is `Waiting` — the same latent corner case the "brand-new, not yet populated"
+row already tolerated (`isSpent` false there too, for the same reason); in
+practice the GM is prompted to delete the row in the same tap that empties it
+(see `removeRowMember` below), so the window is normally momentary.
+
+A row wiped out **by damage** is **flagged, not deleted** (`RULINGS.md`
+2026-08-07, reversing the 2026-08-01 auto-delete ruling): it keeps its slot in
+the order, reads `ooc === true` so `getNextActors()` skips it and the GM list
+gives it the ordinary out-of-action styling, and leaves only when the GM taps
+the per-row trash icon (`btnDelete_Click`, the only path that removes a row
+still holding members). `CombatManager.flagSpentNpcRows()` is the single place
+this is decided; it runs at the top of `goToNextActors()` and again from the GM
+component's damage/heal/detach/remove handlers (`flagSpentNpcRows()`) so the
+flag lands on the tap that caused it, and it now keys the flag/log/`ooc`
+consequence off `isWipedOut` while still pulling *any* `isSpent` row (wiped or
+merely emptied) out of `currentActors` if it was acting. The flag is remembered
+on the row (`spentFlagged`, undoable) so it is announced once, and cleared
+again if a heal brings a member back (Decision 13), or if a wiped-out row's
+downed members are later removed by hand until none are left (it reads as a
+plain empty row from that point, not a wiped-out one) — either way a later
+collapse is announced afresh. If the row that just went spent was the
+participant currently acting it is pulled out of `currentActors` and that
+method advances the order itself — the same pattern as `btnDelay_Click` —
+behind the `advancingActors` re-entrancy flag, so it never re-enters
+`goToNextActors()` from inside that method's own pre-step. Without the advance,
+emptying the acting row (by damage or by hand) left `currentActors` holding a
+participant that could no longer act with `passEnded` still false, which
+renders neither an Act button nor a Next Pass button.
+
+The GM component's `removeRowMember()` (the per-member trash icon) is the one
+row mutation that **prompts** (brief Decision 21): it always confirms first,
+the same `confirmationDialog.simpleConfirm` pattern `btnDelete_Click` uses, and
+when the NPC being removed is the row's last, the same single Yes/No answers
+both "remove this NPC" and "delete the now-empty row" — there is no second
+prompt. Deleting the row this way runs the identical undoable side-map cleanup
+`btnDelete_Click` does (`forgetParticipant`, plus
+`forgetMapEntry(rowMemberDamageValues, member)` for the member's own queued
+Damage Value), all in the same undo chapter as the removal. `detachRowMember`
+is unchanged in this respect — detaching is not destructive (the NPC goes on to
+its own initiative row), so it does not gain a new prompt, only the
+`isWipedOut` narrowing above.
+
+Each `GruntMember` also carries a per-NPC `hasActed` marker (brief Decision 18)
+— the row-member equivalent of a participant's Act state, since the row is one
+participant and its `status` cannot say which of six gangers has gone. It gates
+nothing in the engine, is cleared by `nextIniPass()` and by
+`NpcRowParticipant.softReset()`, and is deliberately **not** on the session-sync
+wire (GM bookkeeping; it does not survive a rejoin). Since brief Decision 22
+the row has **no whole-row Act button** at all (`isNpcRow(p)` hides it in the
+template; ordinary participants are unaffected) — a group does not take one
+action, its members each take their own. Since Decision 23 the per-member
+control is the real declare-action path, not a silent toggle: tapping "Act" on
+a still-standing member (`btnRowMemberAct_Click`) opens the same Act modal an
+ordinary participant's `btnAct_Click` opens, scoped to that NPC via a new
+`actModalRowMember` field (`actModalParticipant` stays the row itself, since
+the row is what holds the shared Score and Action Phase the modal gates on);
+`submitActModal()` branches on `actModalRowMember` and, for a row member, calls
+`performRowMemberAct()` instead of the ordinary `performAct()` — it logs the
+declared action attributed to the NPC (`logRowEvent`, actor = the row, NPC
+named in the text, same convention as every other row log line), sets that
+member's `hasActed`, and only calls `CombatManager.act(row)` — finishing the
+row's Action Phase and advancing the order, exactly what `performAct` does for
+an ordinary participant — once every member in `row.activeMembers` has acted.
+Decision 24 gates the per-member Act button on `canRowMemberAct(row)`:
+`currentActors.contains(row)` (the row's turn) and `hasLiveActionPhase(row)`
+(Decision 16 — Score above 0). `toggleRowMemberActed()` (Decision 18's original
+silent toggle) is kept, but the template now only reaches it in the **un-mark**
+direction — tapping an already-"Acted" pill flips it back off in one tap with
+no modal and no second log line, Xavier's Round 3 mis-tap-correction
+requirement — and that direction is deliberately **never** gated by
+`canRowMemberAct`, so a mis-tap can always be corrected regardless of whose
+turn it is.
+
+Member-list mutations go through `UndoHandler.DoAction`, so adding, removing,
+damaging and detaching are all undoable like any other mutation; the GM
+component's handlers open a chapter first (§4) so each tap is one undo step.
+The GM-local side-map cleanup that goes with a removal (`forgetParticipant()`)
+is undoable too, via `forgetMapEntry` / `forgetSetEntry` — otherwise undo would
+restore the row with a new participant id, a defaulted Reaction/Intuition and a
+fresh coin-toss tie-breaker, and re-announce it to players as a new participant.
+Since Decision 14 that cleanup runs from `btnDelete_Click`, and since Decision
+21 also from `removeRowMember()` when confirming the last member's removal
+deletes the now-empty row in the same tap; a merely-flagged (not deleted) row
+keeps every side-map entry either way, because it is still in the encounter and
+its NPCs can still be healed back up.
+
+Row/grunt **log routing** splits three ways (`RULINGS.md` 2026-08-07, brief
+Decision 17): `logRowEvent(actor, gmText, playerText?)` writes the GM's line and
+a possibly-different player line — damage and heal lines keep the running
+Condition Monitor total for the GM and drop it entirely for players (the
+*maximum* is dropped from **both** copies, brief Decision 25, `RULINGS.md`
+2026-08-13 "Condition Monitor maximums never appear in any log" — a hit still
+reads `(6)`, never `(6/10)`); `logGmOnlyRowEvent` (→ `appendGmOnlyLog`) carries
+the group-wound house-rule line and the "every member is out of action" line,
+which are bookkeeping about NPCs rather than events the table witnesses.
+
+GM-component-side, a row is created by `addNpcRow()` and is given an Edge
+rating of `NPC_ROW_EDGE_RATING` (0), which is what makes the existing
+`initiativeTieBreakComparator` resolve a row's ties by Reaction, then
+Intuition, then the coin toss. Rows inherit every side-map obligation in §7 /
+"Known rough edges"; `forgetParticipant()` is the shared cleanup helper for
+participants removed outside `btnDelete_Click`.
+
+**Session sync for rows.** `restoreFromSharedState()` reconstructs
+`MatrixParticipant` and `AstralParticipant` from the `isMatrix`/`isAstral` flags
+on the wire, and now `NpcRowParticipant` from an `isNpcRow` flag alongside them
+(see §7 for what a restore does and does not rebuild generally). The row
+payload on `SessionSyncService.SharedParticipantState` is `isNpcRow`,
+`rowMembers` (`SharedGruntMemberState[]` — name, Body, Willpower, filled boxes,
+and the final-attack type/DV p. 379 settles alive-or-dead from),
+`rowWoundModifier` (the shared accumulator, Decision 1) and `rowEverPopulated`.
+`NpcRowParticipant.toRowSnapshot()` / `restoreRowSnapshot()` and
+`GruntMember.toSnapshot()` / `GruntMember.fromSnapshot()` are the domain-side
+halves, so the component never pokes member internals. The accumulator is
+restored verbatim rather than re-derived from member damage: its trigger is a
+wound *event*, not the current roster, so a pre-wounded joiner (Decision 7) or a
+detached-while-wounded member would both be mis-scored by a re-derivation.
+Because the row comes back as a row, `canUseAction()` keeps refusing Interrupt
+Actions and the next broadcast keeps `canInterrupt: false` (criterion 17 /
+Decision 3), which the plain-`Participant` restore silently broke.
+
+Row members' Condition Monitors are therefore the **one** kind of damage that
+survives a rejoin — they are row state, not the participant-level
+`physicalDamage`/`stunDamage` fields, which are still not on the wire for
+anybody (§7). `buildRestoreWarning()` says so.
+
+Still not reconstructed on rejoin: `DetachedGruntParticipant` (no grunt flag on
+the wire, so a detached grunt returns as a plain `Participant` with PC-shaped
+two-track semantics and no `gruntBody`/final-attack record) and `ICParticipant`
+(returns as a `MatrixParticipant`). Both are the same shape of gap the row flag
+just closed and would be fixed the same way. Panel-expansion `Set`s
+(`expandedRowPanels` and friends) are keyed by participant object and are not
+cleared by a restore, so a restored row's member panel starts collapsed.
+
 ## 7. Session sync and its effect on combat state
 
 Transport: `server.js` (Express + Socket.IO) relays events between one GM
 socket and any number of player sockets in a room; combat state itself
 never lives on the server beyond a last-known snapshot
-(`sessions: Map<room, { state, log }>`, in-memory, lost on restart).
+(`sessions: Map<room, { state, log, lastActivity }>`).
+
+That snapshot is now **durable**: `server/session-store.js` persists one JSON
+file per room under `SR5E_DATA_DIR` (default `data/rooms/`), written atomically
+(temp file + rename) ~1s after the last change, flushed immediately on
+`gm:close-session` / `gm:end-session` and on `SIGINT`/`SIGTERM`. Every room is
+loaded back into the Map *before* `server.listen`, so a room survives a
+`pm2 restart` and a multi-day gap. **Retention is indefinite, with one
+exception** (spec Open Decision 5 as amended 2026-08-05; exception reconciled
+into AC 11 as round-4 defect D7): no room is ever removed for age, and a room
+dies only when a GM uses End Room — except that at the hard room cap
+(`TOTAL_ROOM_CAP`), the single oldest room nobody is connected to may be
+evicted to make room for a new `gm:create-session` (see "Room-creation bounds"
+below). Unlike End Room, an eviction leaves a tombstone: it happens to a GM who
+was not there to see it, so their next `gm:join-session` for that code explains
+why via `roomNotFoundReason()` rather than a bare "Room not found". `lastActivity`
+is still stamped on every write. A housekeeping sweep still runs at startup and
+every 24h, but all it does now is clear legacy `<ROOM>.expired.json` markers -
+both the ones the previous 30-day build wrote and any corrupt one - after
+`DEFAULT_TOMBSTONE_RETENTION_MS`; it removes no live rooms.
+Three server-side sites mutate a session — the two emit
+handlers plus the in-place `ownerName` strip in the disconnect handler — and all
+three go through the single `touchSession(room)` helper. See
+`briefs/persistent-rooms.md`.
+
+### The room-ownership choke point
+
+Every event that acts on a room has to answer one question: *does this socket
+belong to the room it named?* That was answered per handler, and it drifted —
+`session:update-state` and `session:append-log` grew the check, `session:command`
+never did, so any socket that had called the credential-free
+`gm:create-session` could aim `act` / `delay` / `interrupt` /
+`register_character` / `claim_character` at another room's code and have that
+room's GM tab apply it.
+
+There is now **one rule in one function**: `authorizeRoomPacket()` in
+`server/room-guards.js`. It is reached two ways, and a handler cannot skip it:
+
+1. `server.js` installs it as a `socket.use` middleware, so it runs before every
+   handler on the socket, including handlers nobody has written yet. A refused
+   packet is answered (`session:error` plus the ack callback, so a client
+   awaiting `closeSession`/`endSession` gets a reason rather than a timeout) and
+   dropped; it is deliberately *not* raised as a middleware error, which would
+   disconnect the GM over one bad emit.
+2. `guardLifecycle()` calls the same function directly, for its ack contract.
+
+Default-deny is by payload **shape**, not by registration: any event whose first
+argument carries a `room` string is treated as room-scoped even if it is absent
+from `ROOM_SCOPED_EVENTS`. Only `ROOM_ENTRY_EVENTS` — `gm:create-session`,
+`gm:join-session`, `player:join`, the three events that *assign* membership — are
+exempt. A future handler therefore cannot reintroduce the hole by forgetting to
+opt in; it would have to opt out on purpose. Individual handlers no longer repeat
+the role/room checks, on purpose: duplicated copies of the rule are what drifted.
+
+Order of refusal is `invalid-room-code` → (lifecycle only) `room-not-found` →
+`role-required: …` → `room-mismatch`. Lifecycle events answer "room not found"
+*ahead* of the membership check so an End Room retry after a lost ack still reads
+as the terminal success it is (defect D5), even though the end has by then
+cleared the issuing socket's own membership. The write paths deliberately do
+**not** require an existing room, or the contentless reaper's self-healing
+recreate would break.
+
+`gm:close-session` and `gm:end-session` both run `evacuateRoom()`, which clears
+`socket.data.room` / `socket.data.role` / `socket.data.playerName` on every
+socket attached to that room, then `socketsLeave()`. `socketsLeave()` alone was
+not enough: it clears Socket.IO membership but not `socket.data.room`, which is
+what the ownership rule authorises against — so a second GM tab still logically
+in an *ended* room passed every check afterwards and recreated the room through
+`getOrCreateSession` on its next broadcast. With indefinite retention that
+resurrection is permanent, i.e. "End Room" did not end the room.
+
+### Room-creation bounds
+
+A **brand-new room is never written to disk**. `gm:create-session` takes no room
+code, no role and no credential, so persisting at create time would let anyone
+fill the disk by calling it in a loop — and the room-ownership rule cannot help,
+since it only guards rooms that already exist. A
+created room lives in the Map until the GM's first real state broadcast or log
+entry; `store.touch` refuses a room with no content (`hasPersistableContent`).
+
+That refusal is a **backstop, not the bound**: a create-loop that gives each new
+room content one `session:append-log` later produces writes that are individually
+legitimate. The bound is `server/room-guards.js` (spec AC 16): creation is
+rate-limited per origin (10/60s) and per socket connection (25 lifetime), the
+total number of rooms held is capped (`TOTAL_ROOM_CAP`, 500 — a rate limit
+bounds the rate, not the accumulation, and retention is indefinite), and a
+room that never acquires content is dropped from the `sessions` Map after 10
+minutes by a reaper separate from the store's file housekeeping. Reaping is
+self-healing — `session:update-state` goes through `getOrCreateSession`, so a GM
+still in a reaped room recreates it on the next broadcast, with content.
+
+The cap is **not** a permanent lockout. At the cap, a create first tries
+`findEvictableRoom()`: the single least-recently-active room (`lastActivity`)
+that has **nobody connected** — by either Socket.IO membership or
+`socket.data.room` — is evicted, in memory and on disk (leaving a tombstone;
+see "Retention is indefinite, with one exception" above), and the create
+proceeds. One room per create, never a batch, and never a room with a live
+socket, however idle it looks. If all 500 are occupied the create is refused as
+before, with the reason saying so. Every eviction is logged with the room code
+and its idle time. Eviction is destructive and not undoable.
+
+The cap check runs **last**, after the per-connection lifetime limit and the
+per-origin rate limit (round-4 defect D3): eviction deletes a real persisted
+room, so it must only fire once every other refusal reason has already been
+cleared and the create is actually about to proceed. It used to run before the
+rate limit, so a request that was going to be refused anyway — for an unrelated
+reason — could still evict a room for a create that then never happened.
+
+The per-origin key is `creationOriginKey()`. Trusting `X-Forwarded-For` is
+**opt-in** (`SR5E_TRUST_PROXY=1`). When it is trusted, the key is the entry
+`SR5E_PROXY_HOPS` back from the **right**: nginx's
+`$proxy_add_x_forwarded_for` prepends the client's own value, so the leftmost
+entry is attacker-chosen and keying on it made the limiter free to bypass. When
+it is *not* trusted the header is ignored entirely and the key is the raw socket
+remote address — because counting back from the right is only sound if a proxy
+is really appending an entry. Reached directly (a dev box, an exposed port, a
+misconfigured nginx) nothing is appended, so the rightmost entry is the caller's
+again: 20 spoofed origins bought 60 rooms with zero refusals, verified live.
+Operators behind nginx must set `SR5E_TRUST_PROXY=1`, or every socket shares the
+127.0.0.1 key and one busy GM rate-limits another.
+
+`gm:create-session` and `gm:join-session` both reassign `socket.data.room`, and
+both call `detachFromPreviousRoom()` first (`server/room-guards.js`) so the
+socket leaves the old Socket.IO room and its `gmPresence` entry. Without that a
+GM tab that switched rooms stayed a member of both: a player still in the
+abandoned room could send commands that were relayed to — and applied by — the
+GM tab now running a *different* room, and the abandoned room reported
+`gmConnected: true` forever. The abandoned room itself is untouched: still in
+the Map, still persisted, still joinable by code. `player:join` does **not**
+detach (it reassigns `socket.data.room` the same way); that is a known gap, not
+a decision.
+
+What is still *not* on the server: the GM's undo/redo history, GM-local hidden
+log entries, and everything `getSharedParticipants()` does not broadcast
+(damage/health, OOC participants, `actionHistory`). Durability does not widen
+the snapshot — it only makes the same snapshot outlive the process.
+
+`gm:close-session` and `gm:end-session` are different actions: close *leaves*
+the room (still persisted, still joinable by code), end *destroys* it (in-memory
+session and file both deleted). The GM-local hidden-log discard belongs to end,
+not close — and only to an end that **actually succeeded** (spec AC 17). A
+rejected or timed-out `endSession()` leaves the room code, the hidden entries and
+the live-encounter association exactly as they were, so a network blip cannot destroy
+the only copy of those entries; the GM sees the error and retries. The one
+failure reason that is *not* treated as a failure is "Room not found" (or the
+legacy removed-room message): that means the end already succeeded and only the
+ack was lost, so the retry performs the local teardown instead of leaving the GM
+holding a room that no longer exists behind an error banner with no way out.
+`btnCreateShareSession_Click` discards those entries too, and its confirmation
+now counts `getHiddenLogEntries()` directly - it used to ask
+`hasRetainedHiddenLogEntries()`, which is empty whenever `shareRoomCode` is set,
+so the one case that had entries to lose was the one case that never prompted.
+Creating a session while a room is already live also abandons that room (see the
+socket detach above), so the same dialog names the code to rejoin to get it back.
+
+That promise is enforced by `liveEncounterRooms`, a **set** of room codes this
+tab's `CombatManager` is the live source of truth for — not a single code. It is
+what decides push-vs-pull on the Join button (`holdsLiveEncounterFor()`), and it
+is additive: creating or joining another room does not stop this tab being the
+truth for the one it just left. It was a single code, reassigned by Create, which
+made the dialog's "rejoin code X to bring it back" false the moment it was
+printed — the rejoin took the destructive pull path and discarded the very
+encounter the dialog had promised was safe. Entries leave on exactly two events:
+the room is destroyed (End Room, or an external end), or this tab's encounter is
+genuinely *replaced* by a pull, at which point every earlier association is
+stale and the set resets to the joined room alone. The private
+`liveEncounterRoomCode` accessor is a most-recent-entry view over the set.
+Consequence to know: after a mis-tapped Create, rejoining the old code pushes
+this tab's *current* encounter into that room, overwriting the room's stored
+snapshot. That is the promised behaviour (the local encounter is the one that
+was there), but it is a push, not a merge.
 
 **The GM's local `CombatManager` is the single source of truth.** Nothing
 about turn/pass advancement, undo, or initiative computation is
@@ -473,16 +876,27 @@ active. Session sync is a one-way derived broadcast layered on top:
   never appear in the shared list at all, not just hidden) and recomputes
   `order` as the post-filter array index every time — this is the only
   place an explicit "order" number exists in the state model, and it's
-  derived, not authoritative.
+  derived, not authoritative. Because of that filter, an encounter where
+  *everyone* is out of action serialises as `participants: []` and used to be
+  indistinguishable on the wire from a room that never had an encounter — so a
+  GM joining that code hit the empty-snapshot branch and pushed their own
+  encounter straight over a real saved fight. `SharedCombatState` therefore also
+  carries `oocParticipantCount`, a plain count of what the filter withheld. It
+  exists **only** for the persistence/overwrite guard
+  (`snapshotHasEncounter()`); nothing renders it, and every UI notion of "active
+  participants" still excludes OOC on purpose.
 - Players never mutate combat state directly. Player-initiated actions
   (`register_character`, `configure_deck`, `claim_character`,
   `release_claims`, `roll_submission`, `act`, `delay`, `interrupt`) are sent
   as a `session:command` and handled exclusively by the GM tab's
   `handleSessionCommand()`, which mutates the real `CombatManager` and its
   side-maps, then re-broadcasts. The server's role is authorization/schema
-  gatekeeping only (`ALLOWED_COMMAND_TYPES` allowlist, payload shape/size
-  checks, role checks, `player` field must match the authenticated
-  socket) — it does not interpret or apply commands itself.
+  gatekeeping only — it does not interpret or apply commands itself. What it
+  gatekeeps, exactly: **room ownership** (the shared choke point above; this is
+  the check `session:command` was missing, so a guessed room code was a live
+  cross-room injection into another table's encounter), the
+  `ALLOWED_COMMAND_TYPES` allowlist, payload shape and size, the role, and the
+  `player` field matching the authenticated socket.
 - `command.player` is a random opaque token minted client-side
   (`player-view.component.ts`'s `playerToken`), never a human name — it must
   never reach a log entry's actor or text. Every `handleSessionCommand`
@@ -512,7 +926,21 @@ active. Session sync is a one-way derived broadcast layered on top:
 - On disconnect, the server itself does one piece of state surgery
   server-side: it strips `ownerName` from any participant the disconnecting
   player owned (if `claimable`), and rebroadcasts — this is the one place
-  combat-adjacent state is touched outside the GM tab's own logic.
+  combat-adjacent state is touched outside the GM tab's own logic. That strip
+  can be *undone* by the GM's own reconnect push: if the GM's socket was down
+  when it happened, the GM tab still holds the old owner in
+  `participantOwners` and pushes it back. The claim then belongs to a token no
+  client holds, so `handleSessionCommand`'s `claim_character` branch replies
+  with a `claim_denied` command naming the reason (shown only to the token in
+  `payload.requester`), logs it GM-only, and the GM can clear the claim in one
+  undoable tap via `btnReleaseClaim_Click`. Push-not-pull is unchanged; this is
+  reconciliation *after* the push. The player end of that tap is
+  `findReleasedOwnCharacters()` in the player view: a character the player owned
+  in the previous state that is still present with no `ownerName` produces a
+  one-line notice that the GM released it and it can be re-claimed. Without it
+  the player's whole character panel simply vanished — the same silence
+  `claim_denied` fixed for a refused claim. A participant that has *left* the
+  encounter is deliberately not reported: that is a removal, not a release.
 - Reconnect/rejoin (`joinAsGm`, `joinAsPlayer`) replays the last broadcast
   `state` and `log` from the server's in-memory snapshot. **Combat state is
   replayed verbatim with no reconciliation. The log is not.** A GM rejoin runs
@@ -525,9 +953,12 @@ active. Session sync is a one-way derived broadcast layered on top:
   (`reseedLogOrder`) to the merged order. Consequences worth knowing before
   changing this: hidden entries are retained (not cleared) when a session drops
   unexpectedly (`handleSessionClosedExternally`) so a rejoin can merge them
-  back, while a deliberate `btnCloseShareSession_Click` discards them, and
-  `btnCreateShareSession_Click` discards them only behind an explicit GM
-  confirmation. Entry `timestamp` is therefore load-bearing for ordering, not
+  back. A deliberate `btnCloseShareSession_Click` now *also* retains them —
+  close leaves the room rejoinable, so discarding the only copy of those entries
+  at close time would destroy data the GM could still have merged back; the
+  discard belongs to the destructive `btnEndShareSession_Click`, behind a
+  confirmation, and `btnCreateShareSession_Click` likewise discards them only
+  behind an explicit GM confirmation. Entry `timestamp` is therefore load-bearing for ordering, not
   just display. `restoreFromSharedState()` sets the turn/pass
   counters *before* rebuilding participants and then assigns each restored
   participant's `currentInitiativeScore` directly from the broadcast
@@ -547,7 +978,52 @@ active. Session sync is a one-way derived broadcast layered on top:
   whatever was last successfully broadcast, and local undo history is not
   part of that snapshot (undo history is never sent to the server at all,
   so a page refresh loses undo/redo even though combat state survives via
-  the snapshot).
+  the snapshot). `restoreFromSharedState()` opens its own undo chapter and then
+  calls `UndoHandler.Initialize()` at the end, so the rebuild is not itself
+  undoable and cannot leave an open chapter for a later Ctrl+Z to walk into.
+  It reconstructs the *correct participant class* from the broadcast
+  `isMatrix`/`isAstral` flags (`MatrixParticipant` with its deck stats and VR
+  mode, `AstralParticipant` with its projection flag) rather than rebuilding
+  everyone as a plain `Participant`; health, damage and OOC participants are
+  still not on the wire and still do not come back, and the GM is told so at
+  restore time (`restoreWarning`). `ICParticipant` has no wire flag of its own
+  and comes back as a `MatrixParticipant`.
+- **Transport reconnect is push, not pull, on the GM side.** A reconnected
+  socket is a new socket with no role, so every guarded emit is refused until it
+  re-authenticates; nothing used to notice, and the GM ran combat against frozen
+  player screens. The GM tab now listens for `session:error` and for the
+  transport `connect` after a drop, re-emits `gm:join-session`, and then
+  **pushes** its state with `syncSharedState()` — it must never call
+  `restoreFromSharedState()` there, which would replace a live encounter with
+  the lossier server copy. Players always pull (they hold no authoritative
+  state).
+- **The explicit Join button follows the same push-not-pull rule.** Whether
+  `btnJoinShareSession_Click` pulls is decided by one question: *does this tab
+  still hold the live encounter for that room code?* The GM component records
+  the room its `CombatManager` belongs to in `liveEncounterRoomCode` (set on
+  create and on join, kept across a Close, cleared only by an End), and pushes
+  with `syncSharedState()` when that code matches the one being joined and the
+  participant list is non-empty. This is what makes Close Room's own advice
+  ("rejoin with code ABC123") safe: a mis-tapped Close followed by a rejoin from
+  the same tab restores nothing and loses nothing. A fresh tab, a reloaded tab,
+  or a join of a *different* code all still pull — the field is in-memory only,
+  so a page load starts blank. The log is merged either way
+  (`mergeHiddenLogEntries` is additive). **A pull that would overwrite something
+  is confirmed first** (spec AC 15): if the tab does not hold the live encounter
+  for that code but its `CombatManager` still has participants,
+  `confirmDestructiveJoin()` names the count and what goes with it (damage,
+  condition monitors, out-of-action participants, committed interrupts, undo
+  history) before `restoreFromSharedState()` runs. Cancelling aborts before the
+  `joinAsGm` call, so nothing local is touched. A tab with no participants is
+  never prompted.
+- **Undo/redo re-broadcast.** `btnUndo_Click`/`btnRedo_Click` call
+  `syncSharedState()` after `UndoHandler.Undo()`/`Redo()`. Undo reverses
+  player-visible state (a released claim being the case that made this a
+  defect: reverted locally but not on the wire, so the GM and the players
+  disagreed about who owned a character). They deliberately call
+  `syncSharedState()` and *not* `sort()`: `sort()` runs
+  `enforceSingleCurrentActor()`, whose `status` writes auto-open an undo chapter
+  (§4) and so would clear the redo stack the undo just created.
 
 ## 8. Known rough edges
 
@@ -612,7 +1088,10 @@ scenarios (S1-S3, p. 160/167/191, plus the recompute-from-base divergence
 test) for the running-Initiative-Score feature, pulled out of
 `CombatManager.spec.ts` into their own file so they read as a standalone
 regression suite for that brief. `src/scenarios/` is the convention for any
-future feature's promoted scenario tests, for the same reason.
+future feature's promoted scenario tests, for the same reason —
+`src/scenarios/npc-group-initiative.spec.ts` (S1-S8 of the linked-NPC-row
+brief) follows it, with that feature's per-criterion tests in
+`src/Grunts/npc-row.spec.ts`.
 Tie-breaking (`initiativeTieBreakComparator`), the undo/redo chapter
 mechanics, and the session-sync command-handling path
 (`handleSessionCommand`) have no dedicated spec files as of this writing —

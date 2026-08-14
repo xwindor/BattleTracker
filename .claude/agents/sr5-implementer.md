@@ -2,7 +2,8 @@
 name: sr5-implementer
 description: Implements a feature in the SR5 tracker from an approved rules brief. Use only after sr5-rules-analyst has produced a brief. Writes code and tests.
 tools: Read, Write, Edit, Grep, Glob, Bash
-model: opus
+model: sonnet
+effort: high
 ---
 
 You implement against a rules brief. The brief is the spec. You do not

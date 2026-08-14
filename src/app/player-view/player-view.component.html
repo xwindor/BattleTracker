@@ -2,11 +2,11 @@
   <div class="card mb-3">
     <div class="card-body">
       <div class="row g-2">
-        <div class="col-md-3">
+        <div class="col-12 col-sm-6 col-md-3">
           <label class="form-label">Room</label>
           <input type="text" class="form-control" [(ngModel)]="room" [disabled]="connected" placeholder="Room code">
         </div>
-        <div class="col-md-3 d-flex align-items-end">
+        <div class="col-12 col-sm-6 col-md-3 d-flex align-items-end">
           <button type="button" class="btn btn-primary w-100" (click)="join()" [disabled]="connected || !room">
             Join Session
           </button>
@@ -17,6 +17,11 @@
       }
       @if (info) {
       <div class="text-info mt-2">{{ info }}</div>
+      }
+      @if (connected && !gmConnected) {
+      <div class="text-warning mt-2" data-testid="gm-not-connected">
+        GM not connected. This is the room's last saved state; it will update when the GM rejoins.
+      </div>
       }
     </div>
   </div>
@@ -44,37 +49,37 @@
       }
       <div class="cli-create-grid mb-2">
         <div class="row g-0 mb-0 cli-create-row">
-          <div class="col-md-3 cli-create-cell">
+          <div class="col-12 col-sm-6 col-md-3 cli-create-cell">
             <label class="form-label cli-field-label cli-label-character">Character</label>
             <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
           </div>
-          <div class="col-md-1 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-1 cli-create-cell">
             <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
             <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
           </div>
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-edge">Edge</label>
             <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
           </div>
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
             <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
           </div>
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
             <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
           </div>
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-overflow">Overflow</label>
             <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
           </div>
         </div>
         <div class="row g-0 mb-0 cli-create-row">
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-physical">Physical</label>
             <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
           </div>
-          <div class="col-md-2 cli-create-cell">
+          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
             <label class="form-label cli-field-label cli-label-stun">Stun</label>
             <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
           </div>
@@ -117,8 +122,8 @@
             [min]="0"
             [max]="getPrimaryCharacterManualRollMax()"
             placeholder="Manual roll total">
-          <button class="btn btn-outline-primary btn-sm" type="button" (click)="submitManualRoll()">Submit Manual Roll</button>
-          <button class="btn btn-primary btn-sm" type="button" (click)="submitAutoRoll()">Auto Roll</button>
+          <button class="btn btn-outline-primary" type="button" (click)="submitManualRoll()">Submit Manual Roll</button>
+          <button class="btn btn-primary" type="button" (click)="submitAutoRoll()">Auto Roll</button>
         </div>
       </div>
       }
@@ -129,8 +134,8 @@
           <input type="number" class="form-control roll-input" [(ngModel)]="manualDeltaRoll"
             [min]="pendingDeltaDice" [max]="pendingDeltaDice * 6"
             placeholder="Manual roll total">
-          <button class="btn btn-outline-primary btn-sm" type="button" (click)="submitDeltaRoll()">Submit</button>
-          <button class="btn btn-primary btn-sm" type="button" (click)="submitAutoDeltaRoll()">Auto Roll</button>
+          <button class="btn btn-outline-primary" type="button" (click)="submitDeltaRoll()">Submit</button>
+          <button class="btn btn-primary" type="button" (click)="submitAutoDeltaRoll()">Auto Roll</button>
         </div>
       </div>
       }
@@ -153,6 +158,17 @@
             @if (canControl(participant)) {
             <span class="badge text-bg-primary ms-1">You</span>
             }
+            <!-- Identification badges (brief "NPC Group Initiative" addendum
+                 Decision 12): presentation only, so a grunt group and a lone
+                 grunt read differently from a PC or an ordinary NPC here too. -->
+            @if (participant.isNpcRow) {
+            <span class="badge text-bg-info ms-1" data-testid="player-badge-npc-row"
+              title="A group of grunts acting back-to-back on one shared Initiative Score">GROUP</span>
+            }
+            @else if (participant.isDetachedGrunt) {
+            <span class="badge text-bg-secondary ms-1" data-testid="player-badge-grunt"
+              title="A grunt: a single NPC on its own Initiative Score">GRUNT</span>
+            }
           </div>
         </div>
         <div class="col-2 col-lg-1 text-center d-flex align-items-center justify-content-center">
@@ -160,15 +176,15 @@
         </div>
         <div class="col-6 col-lg-8 participant-actions-wrap">
           <div class="participant-actions">
-          <button type="button" class="btn btn-sm btn-primary"
+          <button type="button" class="btn btn-primary"
             [disabled]="!canControl(participant) || !participant.canAct" (click)="openActPlanner(participant, actModalContent)">Act</button>
-          <button type="button" class="btn btn-sm btn-warning"
+          <button type="button" class="btn btn-warning"
             [disabled]="!canControl(participant) || !participant.canDelay" (click)="sendDelay(participant)">Delay</button>
           <details class="interrupt-list" [class.disabled]="!canControl(participant) || !participant.canInterrupt">
             <summary>Interrupts</summary>
             <div class="interrupt-menu">
               @for (action of getInterruptActions(); track action.key) {
-              <button type="button" class="btn btn-sm btn-outline-secondary interrupt-item"
+              <button type="button" class="btn btn-outline-secondary interrupt-item"
                 [disabled]="!canControl(participant) || !participant.canInterrupt"
                 (click)="sendInterrupt(participant, action.key)">
                   {{ action.label }}
@@ -291,8 +307,8 @@
             {{ primaryCharacter.isAstralProjecting ? "Return to Body" : "Astral Project" }}
           </button>
           @if (primaryCharacter.isAstralProjecting) {
-          <span class="badge ms-1" style="background-color:#6f42c1">ASTRAL</span>
-          <span class="small" style="color:#a78bfa">PROJECTING — INT×2 initiative</span>
+          <span class="badge ms-1 astral-projecting-chip">ASTRAL</span>
+          <span class="small astral-projecting-note">PROJECTING — INT×2 initiative</span>
           }
         </div>
         }

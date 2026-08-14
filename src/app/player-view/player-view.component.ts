@@ -42,6 +42,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   pendingDeltaDice = 0;
   manualDeltaRoll = "";
   connected = false;
+  /**
+   * False while the room exists but no GM socket is in it. Durable rooms make
+   * this ordinary - a player can open the link before the GM is back, or long
+   * after they closed their laptop - so it is shown rather than refused
+   * (spec briefs/persistent-rooms.md, Open Decision 7 / AC 6).
+   */
+  gmConnected = true;
   error = "";
   state: SharedCombatState | null = null;
   log: SharedLogEntry[] = [];
@@ -159,8 +166,9 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.info = "";
     try {
       this.session.connect();
-      const { state, log } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
+      const { state, log, gmConnected } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
       this.connected = true;
+      this.gmConnected = gmConnected;
       this.applyIncomingState(state);
       this.log = log || [];
       this.clearLogDecodeAnimations();
@@ -186,6 +194,15 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           this.manualRoll = "";
           this.closeActPlanner();
           this.info = "GM ended combat.";
+        } else if (command.type === "claim_denied") {
+          // Broadcast like every command, so it must be filtered down to the
+          // player who actually asked. A refused claim used to be silent on
+          // both screens - the player just kept seeing "Claim request sent."
+          if (command.payload?.["requester"] !== this.playerToken) return;
+          const reason = String(command.payload?.["reason"] || "the GM refused it");
+          const name = String(command.payload?.["characterName"] || "That character");
+          this.info = "";
+          this.error = `Could not claim ${name}: ${reason}. Ask the GM to clear the claim, then try again.`;
         } else if (command.type === "dice_roll") {
           if (command.player === this.playerToken) return; // skip echo of our own roll
           const roller = String(command.payload?.["roller"] || command.player || "Unknown");
@@ -196,11 +213,31 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           }
         }
       });
-      this.session.onSessionClosed(() => {
+      this.session.onGmPresence((payload) => {
+        this.gmConnected = payload.connected;
+      });
+      // A player's socket reconnects on its own after a server restart, but the
+      // new socket has no room membership until it re-joins. Players hold no
+      // authoritative state, so they always PULL (unlike the GM tab, which
+      // pushes - see BattleTrackerComponent.handleSessionReconnected).
+      this.session.onReconnect(() => void this.rejoinAfterReconnect());
+      this.session.onDisconnect(() => {
+        this.gmConnected = false;
+        this.info = "Reconnecting to the session server...";
+      });
+      this.session.onSessionClosed((payload) => {
         this.connected = false;
         this.state = null;
         this.promptRoll = false;
-        this.error = "Session was closed by GM.";
+        // Close and End are different actions with different consequences for
+        // the player (spec Open Decision 3 / AC 8): a closed room is still on
+        // the server under the same code, an ended one is gone. Telling a
+        // player "closed" for both sends them hunting for a new code that does
+        // not exist, or gives up on a room that is still there.
+        const persisted = payload?.persisted !== false;
+        this.error = persisted
+          ? `GM closed the session. Room ${payload?.room || this.room} is still saved - rejoin with the same code once the GM reopens it.`
+          : "GM ended this room. It has been deleted and the code no longer works.";
         this.clearLogDecodeAnimations();
       });
       if (this.ownParticipants.length === 0) {
@@ -208,6 +245,26 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       }
     } catch (err) {
       this.error = err instanceof Error ? err.message : "Unable to join room.";
+    }
+  }
+
+  /**
+   * Re-join the room after the transport came back. Pull, not push: the player
+   * view has no authoritative combat state of its own.
+   */
+  private async rejoinAfterReconnect() {
+    if (!this.connected || !this.room) {
+      return;
+    }
+    try {
+      const { state, log, gmConnected } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
+      this.gmConnected = gmConnected;
+      this.applyIncomingState(state);
+      this.log = log || [];
+      this.error = "";
+      this.info = "Reconnected.";
+    } catch (err) {
+      this.error = err instanceof Error ? err.message : "Lost connection to the room.";
     }
   }
 
@@ -470,6 +527,9 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   claimSelectedCharacter() {
     this.info = "";
+    // Clear any previous denial so a retry after the GM cleared the claim does
+    // not leave a stale "could not claim" on screen.
+    this.error = "";
     if (!this.selectedClaimParticipantId) {
       this.info = "Select a character to claim.";
       return;
@@ -893,6 +953,34 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.activeLogDecodeText.clear();
   }
 
+  /**
+   * Characters this player owned in the *previous* state that are still in the
+   * encounter but no longer owned by anybody.
+   *
+   * The GM can clear a claim (`btnReleaseClaim_Click`, and its undo/redo), and
+   * the server clears one when a player's socket drops. Until now the only
+   * symptom on the player's screen was their whole character panel vanishing
+   * with no explanation - the same silence `claim_denied` fixed for a refused
+   * claim. A participant that has *left* the encounter is deliberately not
+   * reported here: that is a removal, not a release, and this message would tell
+   * the player to re-claim something that no longer exists.
+   */
+  private findReleasedOwnCharacters(next: SharedCombatState | null): string[] {
+    const previouslyOwned = this.ownParticipants;
+    if (previouslyOwned.length === 0) {
+      return [];
+    }
+    const incoming = next?.participants || [];
+    const released: string[] = [];
+    for (const mine of previouslyOwned) {
+      const now = incoming.find(p => p.id === mine.id);
+      if (now && !now.ownerName) {
+        released.push(now.name || mine.name || "your character");
+      }
+    }
+    return released;
+  }
+
   private applyIncomingState(next: SharedCombatState | null) {
     const started = Boolean(next?.started);
     if (this.lastKnownCombatStarted && !started) {
@@ -910,7 +998,14 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       }
     }
     const isFirstState = this.state === null;
+    const releasedNames = this.findReleasedOwnCharacters(next);
     this.state = next;
+    if (releasedNames.length > 0) {
+      this.error = "";
+      const names = releasedNames.join(", ");
+      this.info = `The GM released ${names} - ${releasedNames.length === 1 ? "it is" : "they are"} `
+        + "free again. Claim from the list to take control back.";
+    }
     this.lastKnownCombatStarted = started;
     // Restore deck fields from server state (survives reconnect/claim).
     const pc = this.primaryCharacter;

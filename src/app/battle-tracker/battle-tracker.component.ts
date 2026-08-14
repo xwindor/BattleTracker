@@ -23,8 +23,12 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
-import { GruntMember, NpcRowParticipant, isNpcRow } from "Grunts";
-import type { GruntDamageType } from "Grunts";
+import {
+  DetachedGruntParticipant, GruntMember, NpcRowParticipant,
+  hasGruntConditionMonitor, isNpcRow, createStandaloneGrunt, mergeGruntsIntoRow,
+  DEFAULT_GRUNT_ATTRIBUTE, MIN_MERGEABLE_GRUNTS
+} from "Grunts";
+import type { GruntDamageType, GruntMergeResult } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
@@ -64,6 +68,89 @@ interface LocalLogEntry {
  * group's Professional Rating / Group Edge pool, which Decision 5 rules out.
  */
 const NPC_ROW_EDGE_RATING = 0;
+
+/**
+ * Name prefix for a grunt created with the "Add Grunt" button (brief addendum
+ * Decision 9). Numbered per encounter so two grunts never share a name - the
+ * combat log names the grunt whose wound or death it records (p. 379).
+ */
+const STANDALONE_GRUNT_NAME_PREFIX = "Grunt";
+
+/**
+ * Name prefix for a row formed by merging standalone grunts (Decision 10).
+ * Same default as the "Grunt Group" button's row, and editable in place - the
+ * merged grunts keep their own names as the row's members.
+ *
+ * Numbered from the second merge onwards ("Grunt Group", "Grunt Group 2", ...)
+ * by `nextMergedGruntRowName`, for the same reason
+ * `STANDALONE_GRUNT_NAME_PREFIX` is numbered: the log's row-level lines (wounds
+ * taken by the group, members removed, the row emptying) name the row, and two
+ * rows answering to one name make those lines unattributable.
+ */
+const MERGED_GRUNT_ROW_NAME = "Grunt Group";
+
+/**
+ * Matches a row name this app generated rather than one the GM typed:
+ * `"Grunt Group"`, `"Grunt Group 2"`, ... Used to decide whether the row's own
+ * name is a sensible prefix for its NPCs' default names (brief Decision 19 -
+ * an unrenamed row must not produce log lines that say its name twice).
+ */
+const DEFAULT_ROW_NAME_PATTERN = new RegExp(`^${MERGED_GRUNT_ROW_NAME}(?: (\\d+))?$`);
+
+/**
+ * Default name prefix for an NPC added to a row the GM has not renamed yet.
+ *
+ * Deliberately not the row's own name (which would read "Grunt Group: Grunt
+ * Group 1 is out of action", brief Decision 19) and deliberately not
+ * `STANDALONE_GRUNT_NAME_PREFIX` either, which is already the namespace of the
+ * "Add Grunt" button's standalone NPCs - two combatants answering to "Grunt 1"
+ * would make the log's per-NPC lines unattributable (p. 379 records
+ * alive-or-dead per NPC).
+ */
+const DEFAULT_ROW_MEMBER_NAME_PREFIX = "NPC";
+
+/**
+ * Lowest Initiative Score that still buys an Action Phase.
+ *
+ * A participant needs a Score **above** this to take a Simple or Complex
+ * action; at or below it they still get one Free Action per pass and still
+ * defend normally (brief "NPC Group Initiative" Decision 16, `RULINGS.md`
+ * 2026-08-07, p. 159-160). Applies to every participant type - PC, ordinary
+ * NPC, standalone grunt and linked row alike.
+ */
+const MIN_ACTION_PHASE_INITIATIVE_SCORE = 0;
+
+/** Why the Simple / Complex categories are shut at Score 0 or below. */
+const NO_ACTION_PHASE_MESSAGE =
+  "Initiative Score 0 or below: no Action Phase this pass — one Free Action only "
+  + "(defending is unaffected).";
+
+/**
+ * How long a merge result stays on screen before it clears itself, in
+ * milliseconds.
+ *
+ * The message answers a question the GM asked one tap ago ("did that merge, and
+ * if not why not"). Left up, it reads as current state minutes later, next to a
+ * selection that no longer has anything to do with it. Long enough to read a
+ * three-line refusal, short enough that it is gone by the next thing the GM
+ * does.
+ */
+export const MERGE_MESSAGE_DISMISS_MS = 12000;
+
+/**
+ * Damage Value the row panel's damage controls start on: one box, so an
+ * ordinary chip of damage is still a single tap.
+ */
+const DEFAULT_ROW_MEMBER_DAMAGE_VALUE = 1;
+
+/**
+ * Upper bound on a typed Damage Value. Nothing in the rules caps DV, but a
+ * grunt's track is at most 8 + ceil(max(Body, Willpower)/2) boxes and takes no
+ * overflow (brief "NPC Group Initiative" criterion 7, p. 379), so anything past
+ * this is discarded on application anyway; the cap only stops a fat-fingered
+ * entry (a stray extra digit) reaching the log and the alive/dead comparison.
+ */
+const MAX_ROW_MEMBER_DAMAGE_VALUE = 99;
 
 /**
  * Marker appended to every GM-local log line the players never received.
@@ -156,6 +243,26 @@ const PLAYER_COMMAND_LOG_TEXT = {
 } as const;
 
 /**
+ * Why a `claim_character` command was refused, sent back to the requesting
+ * player as a `claim_denied` command and written to the GM's own log.
+ *
+ * A refused claim used to be a silent `return` on the GM side and a "Claim
+ * request sent." that never resolved on the player side. That is unrecoverable
+ * at the table in the one case that matters: a player who reloads during a
+ * server restart comes back with a new token while the GM's pushed state still
+ * carries the old one, so their own character is permanently unclaimable and
+ * neither screen says why.
+ */
+const CLAIM_DENIED_REASON = {
+  owned: "already claimed by another player",
+  notClaimable: "not marked claimable by the GM",
+  missing: "no longer in the encounter"
+} as const;
+
+/** Shared-log wording for the GM releasing a claim by hand. */
+const CLAIM_FORCE_RELEASED_TEXT = "claim cleared by the GM";
+
+/**
  * Pluralise a counted noun. Same idiom as `formatDiceRollLogText`'s
  * `${hits} hit${hits !== 1 ? "s" : ""}` - a batch of one is a real and common
  * case at the table (one straggler left to roll) and "1 participants" reads as
@@ -208,6 +315,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly declaredActionSelections = new Map<IParticipant, DeclaredActionSelection>();
   private actModalRef: NgbModalRef | null = null;
   actModalParticipant: IParticipant | null = null;
+  /**
+   * Which row member the currently-open Act modal is declaring for (brief
+   * "NPC Group Initiative" Decision 23), or `null` for an ordinary
+   * participant's own Act. `actModalParticipant` stays the row itself in
+   * both cases - the row is what holds the shared Score and Action Phase the
+   * modal gates on (Decision 24) - this only says which NPC the declared
+   * action gets attributed and logged to, and which NPC's `hasActed` marker
+   * is set on submit.
+   */
+  actModalRowMember: GruntMember | null = null;
   readonly declaredActions = DECLARED_ACTIONS;
 
   get physicalActionCategories() {
@@ -521,6 +638,80 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   shareJoinCode = "";
   shareError = "";
   shareInfo = "";
+  /**
+   * True between a transport drop and a successful re-authentication. Drives
+   * the banner that stops the GM running three more passes while every
+   * broadcast is being discarded (spec AC 10).
+   */
+  shareConnectionLost = false;
+  /**
+   * What a restore could not bring back, shown to the GM at restore time.
+   * Health/damage/OOC participants are outside this change's scope (spec Open
+   * Decision 4 chose option (b)), so the loss must at least be stated out loud.
+   */
+  restoreWarning = "";
+  /**
+   * Every room code this tab's *live* combat state belongs to, kept across a
+   * Close (which clears `shareRoomCode`) so a rejoin can tell "this is my own
+   * encounter coming back" from "I am joining a room cold".
+   *
+   * This is the distinguishing signal for push-vs-pull on the explicit Join
+   * button (spec Open Decision 6). It is in-memory only: a page reload or a new
+   * tab starts blank, which is exactly the fresh-tab case that must still pull.
+   *
+   * **A set, not a single code** (round-3 fix 6). Create Player Session used to
+   * *reassign* it to the new room, while its own confirmation dialog told the GM
+   * "rejoining with code {old} brings it back". After a mis-tap that promise was
+   * false: the old code was no longer this tab's live encounter, so rejoining it
+   * took the destructive pull path and discarded the very encounter the dialog
+   * had just said was safe. One `CombatManager` can legitimately be the live
+   * source of truth for several codes at once - creating or joining another room
+   * does not stop it being the truth for the one it just left - so membership is
+   * additive.
+   *
+   * Entries leave on exactly two events: the room is destroyed (End Room /
+   * an external end), or this tab's encounter is *replaced* by a pull, at which
+   * point every earlier association is genuinely stale.
+   */
+  private liveEncounterRooms = new Set<string>();
+
+  /**
+   * Per-room snapshot of participant IDs, taken whenever a room is added to
+   * `liveEncounterRooms` (round-4 fix D6).
+   *
+   * `liveEncounterRooms` membership is additive and never expires on its own
+   * (round-3 fix 6, by design - see the doc comment above), which is provably
+   * wrong once this tab has gone on to become the live source of truth for a
+   * *different* encounter under a different room code: the two share nothing,
+   * but a blind push would still silently overwrite the old room's real saved
+   * state with the new, unrelated one. `liveEncounterDivergedFrom()` compares
+   * the current on-screen participants against what was fingerprinted "as
+   * when the room was joined/created" (not continuously updated while play
+   * continues there - see that method's doc comment for why) to tell the two
+   * cases apart.
+   */
+  private liveEncounterFingerprints = new Map<string, Set<string>>();
+
+  /**
+   * Single-code view of `liveEncounterRooms`: the most recent one, or "".
+   * Assigning replaces the whole set (used by teardown paths and tests).
+   */
+  private get liveEncounterRoomCode(): string {
+    let last = "";
+    for (const room of this.liveEncounterRooms) {
+      last = room;
+    }
+    return last;
+  }
+
+  private set liveEncounterRoomCode(room: string) {
+    this.liveEncounterRooms.clear();
+    this.liveEncounterFingerprints.clear();
+    if (room) {
+      this.markRoomLive(room);
+    }
+  }
+
   private isClosingSession = false;
   initiativePrepActive = false;
   sharedLogEntries: SharedLogEntry[] = [];
@@ -537,6 +728,27 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   expandedAstralPanels = new Set<IParticipant>();
   /** Which linked NPC rows have their member list open (brief p. 379). */
   expandedRowPanels = new Set<IParticipant>();
+  /**
+   * The Damage Value the GM is about to apply to each NPC in a row.
+   *
+   * Needed because p. 379 settles a downed grunt's alive-or-dead from the DV of
+   * the **final attack** compared against Body — so the tracker has to be told
+   * the attack's real DV, not just "one more box". Purely transient view state
+   * (the same class of thing as `expandedRowPanels`), so it is not routed
+   * through `Undoable.Set`: it holds nothing that survives applying the damage,
+   * and the damage application itself is fully undoable.
+   */
+  private readonly rowMemberDamageValues = new Map<GruntMember, number>();
+  /**
+   * The Damage Value queued against a standalone / detached grunt's next hit
+   * (brief "NPC Group Initiative" Decision 20, `RULINGS.md` 2026-08-13). Same
+   * purpose and shape as `rowMemberDamageValues`, keyed by the participant
+   * itself since a standalone grunt has no `GruntMember` to key off. The
+   * Condition Monitor widget's box-clicking can only ever record as many
+   * boxes as are left on the track, which makes a killing blow bigger than
+   * the remaining boxes unrecordable for p. 379's alive-or-dead comparison.
+   */
+  private readonly gruntDamageValues = new Map<IParticipant, number>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
   private readonly participantOwners = new Map<IParticipant, string>();
@@ -576,6 +788,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     super();
     this.addParticipant();
     this.changeDetector = ref;
+    // A linked NPC row can be found spent by the engine itself
+    // (`advanceToNextActors()`'s pre-step), not just by a GM tap. Registering
+    // here means the log line happens once, in exactly the same way, whichever
+    // path noticed it.
+    this.combatManager.onSpentNpcRowsFlagged = rows => this.onSpentNpcRowsFlagged(rows);
   }
 
   /**
@@ -687,10 +904,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       window.clearTimeout(this.damageLogFlushTimeout);
       this.damageLogFlushTimeout = null;
     }
+    this.clearMergeMessageDismiss();
     this.clearSharedLogDecodeAnimations();
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
     this.osThresholdSub?.unsubscribe();
+    // The CombatManager is a singleton and outlives this component; leaving a
+    // callback into a destroyed component registered would log spent rows
+    // into a tracker that is no longer on screen.
+    if (this.combatManager.onSpentNpcRowsFlagged) {
+      this.combatManager.onSpentNpcRowsFlagged = null;
+    }
   }
 
   ngAfterViewChecked() {
@@ -720,41 +944,194 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   async btnCreateShareSession_Click() {
     this.shareError = "";
     this.shareInfo = "";
-    // A fresh session starts a fresh record, which throws away any hidden
-    // entries retained from a session that closed under the GM. Those are the
-    // only copy in existence (the server never had them), and this button is
-    // the reflex action after a disconnect - so the loss is confirmed out loud
-    // rather than happening as a silent side effect (brief p. 330).
-    if (this.hasRetainedHiddenLogEntries()) {
-      const count = this.retainedHiddenLogEntryCount;
-      const confirmed = await this.confirmationDialog.confirm(
-        `${count} hidden GM log ${count === 1 ? "entry is" : "entries are"} still held locally from the closed `
-        + `session. The server never received ${count === 1 ? "it" : "them"}, so starting a new session discards `
-        + `${count === 1 ? "it" : "them"} permanently. Rejoin the old room code instead to keep `
-        + `${count === 1 ? "it" : "them"}.`,
-        "Discard retained hidden entries?",
-        "Discard and Create",
-        "Cancel"
-      );
-      if (!confirmed) {
-        this.shareInfo = "Kept the retained hidden entries; no new session created.";
-        return;
-      }
+    const previousRoom = this.shareRoomCode;
+    if (!await this.confirmCreateShareSession(previousRoom)) {
+      return;
     }
     try {
       this.sessionSync.connect();
       const { room } = await this.sessionSync.createSession();
       this.shareRoomCode = room;
       this.shareJoinCode = room;
+      // From here on this tab is the live source of truth for that code, so a
+      // later Close + Join of the same code pushes rather than pulls.
+      //
+      // `markRoomLive`, not `liveEncounterRoomCode =` (round-3 fix 6): the
+      // encounter on screen is unchanged by creating a room, so it is still
+      // the live truth for `previousRoom` too. That is what makes the
+      // dialog's "rejoining with code {previous} brings it back" actually
+      // true - a rejoin of the old code pushes this encounter back rather
+      // than pulling the old room's lossy snapshot over the top of it. Both
+      // codes are fingerprinted against the same (unchanged) participants
+      // right now (round-4 fix D6).
+      this.markRoomLive(room);
+      this.shareConnectionLost = false;
+      this.restoreWarning = "";
       this.sharedLogEntries = this.reseedLogOrder([]);
       this.clearSharedLogDecodeAnimations();
       this.attachShareListeners();
       this.syncSharedState();
+      // The old code is the GM's only handle on the room they just walked out
+      // of, and this button has just overwritten the join box with the new one.
+      this.shareInfo = previousRoom && previousRoom !== room
+        ? `Created room ${room}. Left room ${previousRoom} - it is kept, and rejoining with code `
+          + `${previousRoom} brings it back.`
+        : `Created room ${room}.`;
     } catch (err) {
       this.shareError = err instanceof Error ? err.message : "Unable to create share session.";
     }
   }
 
+  /**
+   * The two things "Create Player Session" destroys or abandons, confirmed
+   * before either happens (review defects D3 / spec AC 9, AC 15).
+   *
+   * 1. **Hidden GM log entries.** A fresh session reseeds `sharedLogEntries` to
+   *    `[]`, and the server never had the hidden ones - this tab is the only
+   *    copy. The old gate asked `hasRetainedHiddenLogEntries()`, which is
+   *    `shareRoomCode ? [] : getHiddenLogEntries()`, so it answered *false*
+   *    exactly when a session was live: the dangerous case never prompted. Ask
+   *    about whatever hidden entries exist, live room or not - the same way
+   *    End Room (AC 17) counts them.
+   * 2. **The room this tab is already running.** Creating a new session detaches
+   *    this GM socket from the old room server-side, so players still sitting in
+   *    it are left with no GM. That is the same abandoned-room consequence AC 15
+   *    made Join confirm; this button is the second path to it.
+   *
+   * Returns true when the create may go ahead.
+   */
+  private async confirmCreateShareSession(previousRoom: string): Promise<boolean> {
+    const hiddenCount = this.getHiddenLogEntries().length;
+    if (hiddenCount === 0 && !previousRoom) {
+      return true;
+    }
+    const parts: string[] = [];
+    if (previousRoom) {
+      parts.push(`This tab is running room ${previousRoom}. Creating a new session leaves that room: `
+        + `anyone still in ${previousRoom} sees no GM connected. The room itself is kept and rejoining `
+        + `with code ${previousRoom} brings it back.`);
+    }
+    if (hiddenCount > 0) {
+      parts.push(`${hiddenCount} hidden GM log ${hiddenCount === 1 ? "entry is" : "entries are"} held only in `
+        + `this tab. The server never received ${hiddenCount === 1 ? "it" : "them"}, so starting a new session `
+        + `discards ${hiddenCount === 1 ? "it" : "them"} permanently. Rejoin `
+        + `${previousRoom ? `room ${previousRoom}` : "the old room code"} instead to keep `
+        + `${hiddenCount === 1 ? "it" : "them"}. This cannot be undone.`);
+    }
+    const confirmed = await this.confirmationDialog.confirm(
+      parts.join(" "),
+      previousRoom ? `Leave room ${previousRoom} and create a new one?` : "Discard retained hidden entries?",
+      hiddenCount > 0 ? "Discard and Create" : "Leave and Create",
+      "Cancel"
+    );
+    if (confirmed) {
+      return true;
+    }
+    if (hiddenCount > 0 && !previousRoom) {
+      this.shareInfo = "Kept the retained hidden entries; no new session created.";
+    } else if (hiddenCount > 0) {
+      this.shareInfo = `Kept room ${previousRoom} and its hidden entries; no new session created.`;
+    } else {
+      this.shareInfo = `Kept room ${previousRoom}; no new session created.`;
+    }
+    return false;
+  }
+
+  /**
+   * Does this tab still hold the live encounter for `room`?
+   *
+   * True for any code this tab has been the live GM of whose encounter is still
+   * the one on screen - a GM who tapped Close Room (or Create Player Session, or
+   * was closed out from another tab) and is now rejoining that code. A fresh
+   * tab, a reloaded tab, or a tab joining a room it has never run all answer
+   * false and must pull.
+   */
+  private holdsLiveEncounterFor(room: string): boolean {
+    return !!room
+      && this.liveEncounterRooms.has(room)
+      && this.combatManager.participants.items.length > 0;
+  }
+
+  /** IDs of every participant currently on screen (see `getParticipantId`). */
+  private currentParticipantIdSet(): Set<string> {
+    return new Set(this.combatManager.participants.items.map(p => this.getParticipantId(p)));
+  }
+
+  /**
+   * Record `room` as a code whose live encounter this tab holds - additive
+   * with any other room it already holds one for (round-3 fix 6) - and
+   * fingerprint what that means right now for `liveEncounterDivergedFrom()`
+   * (round-4 fix D6).
+   */
+  private markRoomLive(room: string): void {
+    this.liveEncounterRooms.add(room);
+    this.liveEncounterFingerprints.set(room, this.currentParticipantIdSet());
+  }
+
+  /**
+   * Has this tab's on-screen encounter drifted far enough from `room`'s
+   * fingerprint that a blind push (`holdsLiveEncounterFor()` says yes) would
+   * actually be a silent, undetected overwrite of that room's real saved
+   * state (round-4 fix D6)?
+   *
+   * Sequence this exists to catch: GM runs room A, taps Create Player Session
+   * (now live in both A and B, round-3 fix 6), builds a *completely
+   * different* encounter in B over the following hour, then rejoins A by
+   * typing its code. `liveEncounterRooms` still has A in it - membership never
+   * expires on its own - so without this check the join would silently push
+   * the B-derived encounter over A's real saved state while claiming "nothing
+   * was replaced".
+   *
+   * A room with no recorded fingerprint is treated as **not** diverged: that
+   * only happens defensively (every `markRoomLive` call sets one), and
+   * refusing to push on missing evidence would regress the ordinary
+   * mis-tap-and-immediately-recover case (round-3 fix 6) that gave no reason
+   * to doubt the association in the first place. Otherwise "diverged" means
+   * **zero** participant IDs survive in common with what was fingerprinted
+   * "as when the room was joined/created" (spec wording, not a continuously
+   * rolling window - see `liveEncounterFingerprints`): ordinary play, adding
+   * or removing individual participants from the *same* fight, always leaves
+   * at least one survivor. Only a wholesale cast swap zeroes it out, and that
+   * is deliberately the only thing this catches - the threshold is a judgment
+   * call, documented here per the review defect.
+   */
+  private liveEncounterDivergedFrom(room: string): boolean {
+    const fingerprint = this.liveEncounterFingerprints.get(room);
+    if (!fingerprint || fingerprint.size === 0) {
+      return false;
+    }
+    for (const p of this.combatManager.participants.items) {
+      if (fingerprint.has(this.getParticipantId(p))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Join by room code. **Push when this tab still holds the encounter; pull
+   * only when it does not** (spec Open Decision 6 - the single most damaging
+   * thing to get backwards here).
+   *
+   * `restoreFromSharedState()` unconditionally clears both participant lists and
+   * all eight side-maps, rebuilds from the lossy server snapshot (no damage, no
+   * health, no OOC participants, no `NpcRowParticipant`/`ICParticipant`, no
+   * action history) and wipes undo history. Close Room's own on-screen advice is
+   * "rejoin with code X to pick it back up", so a mis-tapped Close followed by
+   * that advice would otherwise irreversibly downgrade a live encounter. That is
+   * the same hazard `handleSessionReconnected()` already solves for a transport
+   * drop, reached through a different trigger, so it gets the same answer: this
+   * call is an authentication, not a restore, and the tab re-broadcasts what it
+   * already has.
+   *
+   * The log is merged either way - `mergeHiddenLogEntries` is additive (server
+   * history plus GM-local hidden entries), so it destroys nothing.
+   *
+   * When the tab does *not* hold the live encounter but does hold participants -
+   * a different room's encounter, or one built up before any session existed -
+   * the pull is destructive and is confirmed first (spec AC 15). A genuinely
+   * empty tab has nothing at risk and is never prompted.
+   */
   async btnJoinShareSession_Click() {
     this.shareError = "";
     this.shareInfo = "";
@@ -763,19 +1140,207 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.shareError = "Enter a room code to join.";
       return;
     }
+    const pushLocalState = this.holdsLiveEncounterFor(room);
+    if (!pushLocalState && !await this.confirmDestructiveJoin(room)) {
+      return;
+    }
     try {
       this.sessionSync.connect();
       const { state, log } = await this.sessionSync.joinAsGm(room);
       this.shareRoomCode = room;
+      this.shareConnectionLost = false;
+      this.restoreWarning = "";
       this.sharedLogEntries = this.mergeHiddenLogEntries(log || []);
       this.clearSharedLogDecodeAnimations();
       this.pendingLogScroll = true;
       this.attachShareListeners();
-      this.restoreFromSharedState(state);
-      this.shareInfo = `Joined session ${room}.`;
+      if (pushLocalState) {
+        if (this.liveEncounterDivergedFrom(room)) {
+          // Round-4 fix D6: see `liveEncounterDivergedFrom()`. Nothing this
+          // tab still recognises survives from what was fingerprinted when it
+          // last became this room's live truth, so the stale association is
+          // dropped and the GM is stopped and told, rather than the push
+          // proceeding unprompted and silently overwriting the room's real
+          // saved state.
+          this.liveEncounterRooms.delete(room);
+          this.liveEncounterFingerprints.delete(room);
+          this.shareInfo = `Room ${room}'s saved encounter no longer matches what this tab is showing - `
+            + "this tab looks like it has become a different encounter since. Nothing was sent to the "
+            + `room and nothing here was changed. Rejoin ${room} again to pull its saved encounter `
+            + "instead, or use \"End Room\" if you meant to replace it.";
+        } else {
+          // Still the live encounter for every code it was already live for,
+          // plus this one (round-3 fix 6).
+          this.markRoomLive(room);
+          this.syncSharedState();
+          this.shareInfo = `Rejoined session ${room} with this tab's live encounter - `
+            + "nothing was replaced, and players are back in sync.";
+        }
+      } else if (this.snapshotHasEncounter(state)) {
+        const ooc = this.snapshotOocCount(state);
+        const replaced = !!state && Array.isArray(state.participants) && state.participants.length > 0;
+        this.restoreFromSharedState(state);
+        // A pull *replaces* this tab's encounter, so every earlier association
+        // is now stale and the set is reset to this room alone, fingerprinted
+        // against what was just restored (round-4 fix D6) - not against what
+        // this tab had before the pull, which is exactly what was just
+        // discarded. An OOC-only snapshot replaces nothing, so those
+        // associations survive.
+        if (replaced) {
+          this.liveEncounterRoomCode = room;
+        } else {
+          this.markRoomLive(room);
+        }
+        if (!replaced) {
+          // Everyone in the saved encounter is out of action, so there was
+          // nothing on the wire to rebuild - and nothing was replaced here
+          // either. Critically, this branch does **not** push: pushing would
+          // overwrite a real saved fight with this tab's encounter, which is the
+          // silent-overwrite this fix exists to stop (round-3 fix 5).
+          this.shareInfo = `Joined session ${room}. Its saved encounter is ${ooc} `
+            + `participant${ooc === 1 ? "" : "s"} out of action, which are not broadcast and cannot be `
+            + "restored - nothing here was replaced, and nothing was sent to the room.";
+        } else {
+          this.shareInfo = `Joined session ${room}.`;
+        }
+      } else {
+        // `restoreFromSharedState()` no-ops on an empty snapshot, so nothing was
+        // discarded however the confirmation read (review defect D4). Say so,
+        // and push what this tab has: the join already made this tab the live
+        // encounter for that code, and without a push the room would keep
+        // showing players its empty snapshot until the GM's next click.
+        this.markRoomLive(room);
+        this.syncSharedState();
+        this.shareInfo = `Joined session ${room} - it had no saved encounter, so this tab's `
+          + "encounter was kept and sent to the room instead.";
+      }
     } catch (err) {
       this.shareError = err instanceof Error ? err.message : "Unable to join share session.";
     }
+  }
+
+  /**
+   * Ask before a Join replaces what is on this screen (spec AC 15).
+   *
+   * A pull runs `restoreFromSharedState()`, which clears both participant lists
+   * and all eight side-maps, rebuilds from the lossy server snapshot and calls
+   * `UndoHandler.Initialize()` - so damage, condition monitors, out-of-action
+   * participants, committed interrupt actions and the whole undo history go,
+   * irreversibly, on one tap of a button sitting next to a text box. Naming the
+   * count is the difference between "are you sure" and an informed answer.
+   *
+   * Returns true when the join may proceed. An empty tab is never prompted:
+   * there is nothing to lose, and a prompt on every fresh join would train the
+   * GM to dismiss it.
+   */
+  private async confirmDestructiveJoin(room: string): Promise<boolean> {
+    // Round-4 fix D5: a literal `.length === 0` check could only ever fire in
+    // a test whose fixture had been emptied after the constructor ran - the
+    // constructor's own `addParticipant()` (see below) means a real app
+    // instance never has zero participants, so a genuinely fresh tab always
+    // showed this "will be discarded" warning for one blank row nobody
+    // touched. `isUnusedPlaceholder` treats that row the same as empty.
+    const atRisk = this.combatManager.participants.items.filter(p => !this.isUnusedPlaceholder(p));
+    const count = atRisk.length;
+    if (count === 0) {
+      return true;
+    }
+    // Whether the pull actually replaces anything depends on the target room's
+    // snapshot, which this tab cannot see until after `joinAsGm` - and joining
+    // first to find out would abandon the current room server-side before the
+    // GM had agreed to anything. So the dialog is honest about the condition
+    // instead of promising a discard that `restoreFromSharedState`'s
+    // empty-snapshot no-op may never perform (review defect D4).
+    const confirmed = await this.confirmationDialog.confirm(
+      `Joining room ${room} replaces this tab's encounter with that room's last saved broadcast. `
+      + `If that room has a saved encounter, ${count} participant${count === 1 ? "" : "s"} on screen `
+      + `${count === 1 ? "is" : "are"} discarded, along with damage and condition monitors, anyone `
+      + "out of action, committed interrupt actions and the undo history. This cannot be undone. "
+      + `If room ${room} turns out to have no saved encounter, nothing is replaced and this tab keeps `
+      + "what it has.",
+      `Replace this encounter with room ${room}?`,
+      "Discard and Join",
+      "Cancel"
+    );
+    if (!confirmed) {
+      this.shareInfo = `Kept this tab's encounter; did not join ${room}.`;
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Is `p` the untouched blank row `addParticipant()` seeds in the
+   * constructor on every tab load, still exactly as created (round-4 fix D5)?
+   *
+   * `combatManager.participants` is therefore never literally empty in a real
+   * app instance, so `confirmDestructiveJoin()`'s risk check has to treat this
+   * one row the same as "nothing on screen", or every fresh tab shows the
+   * scary "this will destroy your work" dialog for a row nobody has touched.
+   *
+   * A field-by-field check rather than a tracked "still pristine" flag on
+   * purpose: a flag would have to be cleared by every one of the many
+   * participant-mutation paths in this file, which is exactly the kind of
+   * manual, uncompiler-checked bookkeeping ARCHITECTURE §8 already flags for
+   * the eight side-maps - a mutation path that forgot to clear it would
+   * silently defeat the warning this check exists to give. Reading the
+   * participant's actual state cannot drift out of sync with an edit nobody
+   * remembered to flag.
+   */
+  private isUnusedPlaceholder(p: IParticipant): boolean {
+    // `Object.getPrototypeOf`, not `p.constructor` directly: TypeScript
+    // narrows a `.constructor` comparison against a class reference, and
+    // since `IParticipant` has no nominal relationship to `Participant` the
+    // narrowed type in the rest of this function collapses to `never` -
+    // `getPrototypeOf` reads the same fact without tripping that narrowing.
+    if (Object.getPrototypeOf(p) !== Participant.prototype) {
+      // A promoted/demoted or otherwise subclassed participant (Matrix,
+      // Astral, NPC row, grunt) was a deliberate GM action, never the
+      // constructor's own placeholder.
+      return false;
+    }
+    if (this.participantOwners.get(p) || this.participantClaimable.get(p)) {
+      return false; // claimed or made claimable - a deliberate GM decision
+    }
+    return p.name === ""
+      && p.physicalDamage === 0
+      && p.stunDamage === 0
+      && p.dices === 1
+      && p.diceIni === 0
+      && !p.ooc
+      && !p.edge
+      && !p.hasPainEditor
+      && p.actionHistory.length === 0;
+  }
+
+  /**
+   * Does this room hold real content that a Join must not silently overwrite?
+   *
+   * Deliberately **not** the same question as "will `restoreFromSharedState()`
+   * rebuild anything" (review defect D4 read them as one; round-3 fix 5 splits
+   * them). A room whose every participant is out of action broadcasts
+   * `participants: []`, because `getSharedParticipants()` filters OOC out - so a
+   * real, saved, fully-incapacitated encounter looked content-free, and the
+   * Join's empty-snapshot branch pushed this tab's encounter straight over it.
+   * `oocParticipantCount` is on the wire precisely so that room still counts as
+   * occupied here.
+   *
+   * This is the persistence/overwrite guard only. The combat log and the rest of
+   * the UI still exclude OOC participants from "active participants" on purpose,
+   * and none of that changes.
+   */
+  private snapshotHasEncounter(state: SharedCombatState | null): boolean {
+    if (!state) {
+      return false;
+    }
+    const listed = Array.isArray(state.participants) ? state.participants.length : 0;
+    return listed > 0 || this.snapshotOocCount(state) > 0;
+  }
+
+  /** Participants held by a room but withheld from its broadcast as OOC. */
+  private snapshotOocCount(state: SharedCombatState | null): number {
+    const raw = Number(state?.oocParticipantCount ?? 0);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
   }
 
   get shareUrl(): string {
@@ -787,10 +1352,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       mode: "player",
       room: this.shareRoomCode
     });
-    const skin = window.localStorage.getItem("battle-tracker-skin");
-    if (skin === "alternate" || skin === "vintage" || skin === "cyberdeck") {
-      params.set("skin", skin);
-    }
+    // No `skin` param: cyberdeck is the app's only theme now, so there is
+    // nothing to propagate to the player's URL.
     return `${base}?${params.toString()}`;
   }
 
@@ -818,6 +1381,15 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
+  /**
+   * Close = *leave the room*, not destroy it.
+   *
+   * Durable rooms make the room rejoinable by code afterwards (spec Open
+   * Decision 3), so this path no longer discards the GM-local hidden log
+   * entries: they are the only copy in existence and a rejoin merges them back
+   * in. Discarding them moved to the destructive `btnEndShareSession_Click`
+   * (spec AC 9).
+   */
   async btnCloseShareSession_Click() {
     this.shareError = "";
     this.shareInfo = "";
@@ -833,28 +1405,127 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.isClosingSession = true;
     try {
       await this.sessionSync.closeSession(room);
-      this.shareInfo = `Closed session ${room}.`;
+      this.shareInfo = `Closed session ${room}. The room is kept - rejoin with code ${room} to pick it back up.`;
     } catch (err) {
       this.shareError = err instanceof Error ? err.message : "Unable to close share session.";
     } finally {
-      this.sessionSync.disconnect();
-      this.shareRoomCode = "";
-      this.shareJoinCode = "";
-      // Deliberate close: the GM ended this session's record on purpose, so
-      // the GM-local hidden entries go with it. (An *unexpected* close keeps
-      // them - see the onSessionClosed handler.)
-      this.sharedLogEntries = this.reseedLogOrder([]);
-      this.clearSharedLogDecodeAnimations();
-      this.initiativePrepActive = false;
-      // Second choke point alongside End Combat: a GM who closes the session
-      // has finished with this table's scene even if they never pressed End
-      // Combat, and a name left armed here would carry into the next session.
-      // Deliberate closes only - an *unexpected* close (handleSessionClosedExternally)
-      // is a dropped connection mid-fight, where the NPC is still standing and
-      // the GM is still rolling for it.
-      this.clearGmRollAttribution();
-      this.isClosingSession = false;
+      this.resetShareStateAfterLeaving(room, false);
     }
+  }
+
+  /**
+   * End = *destroy the room*. Deletes the persisted record on the server, so
+   * the code stops resolving (spec AC 8). This is the action that throws the
+   * GM-local hidden entries away, behind a confirmation (spec AC 9).
+   */
+  async btnEndShareSession_Click() {
+    this.shareError = "";
+    this.shareInfo = "";
+    if (!this.shareRoomCode) {
+      return;
+    }
+    const room = this.shareRoomCode;
+    const hiddenCount = this.getHiddenLogEntries().length;
+    const hiddenWarning = hiddenCount > 0
+      ? ` ${hiddenCount} hidden GM log ${hiddenCount === 1 ? "entry" : "entries"} held only in this tab will be discarded with it.`
+      : "";
+    const confirmed = await this.confirmationDialog.confirm(
+      `Permanently delete room ${room} and its saved encounter from the server? `
+      + `Nobody will be able to rejoin this code.${hiddenWarning}`,
+      "Delete this room?",
+      "Delete Room",
+      "Cancel"
+    );
+    if (!confirmed) {
+      this.shareInfo = `Kept room ${room}.`;
+      return;
+    }
+    if (this.damageLogFlushTimeout !== null) {
+      window.clearTimeout(this.damageLogFlushTimeout);
+      this.damageLogFlushTimeout = null;
+      this.flushDamageLog();
+    }
+    this.isClosingSession = true;
+    try {
+      await this.sessionSync.endSession(room);
+    } catch (err) {
+      // The room was NOT deleted, so nothing here may behave as if it was
+      // (spec AC 17). `resetShareStateAfterLeaving(room, true)` discards the
+      // GM-local hidden log entries - the only copy in existence, since the
+      // server never received them - and clears `liveEncounterRoomCode`, which
+      // is what makes a later rejoin push rather than pull. Doing that on a
+      // timeout or a rejected emit would destroy data over a network blip. Every
+      // other action in this file already leaves state alone on failure; this
+      // one now does too: the GM stays in the room and can retry.
+      //
+      // ...unless the failure *is* the room already being gone (review defect
+      // D5). A successful end whose ack was lost leaves the GM holding a room
+      // code that no longer resolves: End Room, Close Room and rejoin all then
+      // answer "Room not found" while the UI still shows the room as live, with
+      // no way out. The GM's intent - destroy this room - was already achieved,
+      // so treat it as the terminal state it is and tear down locally.
+      const message = err instanceof Error ? err.message : "Unable to end share session.";
+      if (this.isRoomAlreadyGone(message)) {
+        this.shareInfo = `Room ${room} was already deleted on the server (the earlier attempt got through). `
+          + "Cleared it here too.";
+        this.resetShareStateAfterLeaving(room, true);
+        return;
+      }
+      this.shareError = message;
+      this.isClosingSession = false;
+      return;
+    }
+    this.shareInfo = `Deleted room ${room}.`;
+    this.resetShareStateAfterLeaving(room, true);
+  }
+
+  /**
+   * Does this failure reason mean the room no longer exists server-side?
+   *
+   * Matches the two things `roomNotFoundReason()` in `server.js` can answer:
+   * the plain "Room not found", and the legacy removed-room message. A timeout
+   * ("No response from server for ...") deliberately does not match - that is
+   * genuinely unknown, and AC 17 requires unknown to mean "keep everything".
+   */
+  private isRoomAlreadyGone(reason: string): boolean {
+    const text = (reason || "").toLowerCase();
+    return text.includes("room not found") || text.includes("no longer available");
+  }
+
+  /**
+   * Shared teardown for the two lifecycle actions. `discardHiddenEntries` is
+   * the only difference: only the destructive action throws away log entries
+   * the server never received.
+   */
+  private resetShareStateAfterLeaving(room: string, discardHiddenEntries: boolean) {
+    this.sessionSync.disconnect();
+    this.shareRoomCode = "";
+    this.shareJoinCode = discardHiddenEntries ? "" : room;
+    // A close keeps the association: the room is still there and this tab still
+    // holds its encounter, so rejoining the code pushes that encounter back
+    // (`btnJoinShareSession_Click`). An end destroys the room, so there is
+    // nothing left to push to.
+    if (discardHiddenEntries) {
+      // Only *this* room's association goes: any other code this tab is still
+      // the live encounter for (a room it created and walked away from, round-3
+      // fix 6) is untouched by ending this one.
+      this.liveEncounterRooms.delete(room);
+      this.liveEncounterFingerprints.delete(room);
+    }
+    this.shareConnectionLost = false;
+    this.sharedLogEntries = this.reseedLogOrder(
+      discardHiddenEntries ? [] : this.getHiddenLogEntries()
+    );
+    this.clearSharedLogDecodeAnimations();
+    this.initiativePrepActive = false;
+    // Second choke point alongside End Combat: a GM who leaves the session
+    // has finished with this table's scene even if they never pressed End
+    // Combat, and a name left armed here would carry into the next session.
+    // Deliberate leaves only - an *unexpected* close (handleSessionClosedExternally)
+    // is a dropped connection mid-fight, where the NPC is still standing and
+    // the GM is still rolling for it.
+    this.clearGmRollAttribution();
+    this.isClosingSession = false;
   }
 
   private attachShareListeners() {
@@ -868,22 +1539,123 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         LogHandler.log(this.currentBTTime, `${entry.actor} ${entry.text}`);
       }
     });
-    this.sessionSync.onSessionClosed(() => this.handleSessionClosedExternally());
+    this.sessionSync.onSessionClosed((payload) => this.handleSessionClosedExternally(payload));
+    // A rejected broadcast used to vanish silently, which is exactly how the
+    // GM ended up running combat against frozen player screens (spec AC 10).
+    this.sessionSync.onError((payload) => this.handleSessionError(payload));
+    this.sessionSync.onDisconnect(() => {
+      if (!this.shareRoomCode || this.isClosingSession) {
+        return;
+      }
+      this.shareConnectionLost = true;
+      this.shareError = "Connection to the session server lost - players are not receiving updates. Reconnecting...";
+      this.refreshShareBanner();
+    });
+    this.sessionSync.onReconnect(() => void this.handleSessionReconnected());
   }
 
   /**
-   * The session went away without the GM asking for it (server restart,
-   * dropped connection). Reset the share state but keep the GM-local hidden
+   * A guarded emit was refused by the server. The common cause is a reconnected
+   * socket that has not re-authenticated yet (`role-required: gm`), which the
+   * reconnect handler repairs; anything else is shown as-is so it cannot be
+   * silently swallowed (spec AC 10).
+   */
+  private handleSessionError(payload: { event: string; reason: string }) {
+    if (!payload) {
+      return;
+    }
+    const isAuth = typeof payload.reason === "string" && payload.reason.startsWith("role-required");
+    this.shareError = isAuth
+      ? `Session server refused ${payload.event} (${payload.reason}) - players are not receiving updates. Re-authenticating...`
+      : `Session server refused ${payload.event}: ${payload.reason}`;
+    if (isAuth) {
+      this.shareConnectionLost = true;
+      void this.handleSessionReconnected();
+    }
+    this.refreshShareBanner();
+  }
+
+  /**
+   * Transport came back after a drop - typically a `pm2 restart`.
+   *
+   * **PUSH, NEVER PULL.** This is the single most damaging thing to get
+   * backwards in this feature (spec Open Decision 6). The GM's local
+   * `CombatManager` is the source of truth (ARCHITECTURE §7) and still holds
+   * perfect state across the outage: subclasses, health, damage, OOC
+   * participants, action history. The server's snapshot is a lossy projection
+   * of it. So this handler re-authenticates and then re-broadcasts *local*
+   * state - it must never call `restoreFromSharedState()`, which would
+   * downgrade a live encounter to the lossy copy. Pull is correct only when
+   * the tab has no state: a fresh page load or the explicit Join button.
+   */
+  private async handleSessionReconnected() {
+    if (!this.shareRoomCode || this.isClosingSession) {
+      return;
+    }
+    const room = this.shareRoomCode;
+    try {
+      // The returned state/log are deliberately ignored: this call is an
+      // authentication, not a restore.
+      await this.sessionSync.joinAsGm(room);
+      this.shareConnectionLost = false;
+      this.shareError = "";
+      this.shareInfo = `Reconnected to session ${room}; players are back in sync.`;
+      this.syncSharedState();
+    } catch (err) {
+      this.shareConnectionLost = true;
+      this.shareError = err instanceof Error
+        ? `Could not rejoin session ${room}: ${err.message}`
+        : `Could not rejoin session ${room}.`;
+    }
+    this.refreshShareBanner();
+  }
+
+  /**
+   * Session listeners fire outside Angular's change detection (socket
+   * callbacks), so the banner they set would otherwise not repaint until the
+   * GM's next click - which is the wrong moment to learn players are frozen.
+   */
+  private refreshShareBanner() {
+    try {
+      this.changeDetector.detectChanges();
+    } catch {
+      // View already destroyed, or a detection pass is in flight; the banner
+      // will paint on the next cycle either way.
+    }
+  }
+
+  /**
+   * The session went away without the GM asking for it (a deliberate close from
+   * another tab). Reset the share state but keep the GM-local hidden
    * entries: the server never received them, so this list is the only copy and
    * a rejoin merges them back in (brief p. 330).
+   *
+   * Note this is *not* the server-restart path, despite what this comment used
+   * to claim: a restarting server never emits `session:closed`. Restarts are
+   * handled by `handleSessionReconnected`.
+   *
+   * `persisted` distinguishes a close (room kept, code still valid) from an end
+   * (room destroyed). Only an end clears the join box - after a close the code
+   * is the one thing needed to pick the encounter back up, so wiping it costs
+   * the GM the room.
    */
-  private handleSessionClosedExternally() {
+  private handleSessionClosedExternally(payload?: { room: string; persisted?: boolean }) {
     if (this.isClosingSession) {
       return;
     }
-    this.shareInfo = "Session was closed.";
+    // Older servers omit the flag; assume the room survives rather than throwing
+    // away a code that may still be valid.
+    const persisted = payload?.persisted !== false;
+    const room = payload?.room || this.shareRoomCode;
+    this.shareInfo = persisted
+      ? `Session was closed. Room ${room} is kept - rejoin with that code to pick it back up.`
+      : "Session was ended and the room was deleted.";
     this.shareRoomCode = "";
-    this.shareJoinCode = "";
+    this.shareJoinCode = persisted ? room : "";
+    if (!persisted) {
+      this.liveEncounterRooms.delete(room);
+      this.liveEncounterFingerprints.delete(room);
+    }
     this.sharedLogEntries = this.reseedLogOrder(this.getHiddenLogEntries());
     this.clearSharedLogDecodeAnimations();
     this.initiativePrepActive = false;
@@ -901,6 +1673,75 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.participantOwners.delete(p);
     }
     this.syncSharedState();
+  }
+
+  /** Does this participant currently have a player owner? */
+  isParticipantClaimed(p: IParticipant): boolean {
+    return !!this.participantOwners.get(p);
+  }
+
+  /**
+   * What the GM's "Claimed" chip says on hover. The owner is an opaque `pl-…`
+   * token, never a human name (ARCHITECTURE §7), so it is shown only as a hint
+   * that a claim exists and can be cleared.
+   */
+  getClaimOwnerHint(p: IParticipant): string {
+    const owner = this.participantOwners.get(p);
+    if (!owner) {
+      return "";
+    }
+    return `Claimed by player token ${owner}. Tap to clear the claim so a player can take it (or re-take it after a reconnect).`;
+  }
+
+  /**
+   * Clear a claim by hand.
+   *
+   * The other half of the stale-owner fix. A claim can outlive the client that
+   * made it: the server strips `ownerName` on a player disconnect and emits
+   * `release_claims`, but if the GM's socket was down at that moment the GM tab
+   * never sees it, and the GM's reconnect push writes the stale owner straight
+   * back. Nobody then holds the claim and the player cannot re-take it - so the
+   * GM needs a visible way to see and clear one.
+   *
+   * Undoable: the ownership side-map is dropped through `forgetMapEntry`
+   * (`UndoHandler.DoAction`) inside its own chapter, so a mis-tap is one Ctrl+Z.
+   */
+  btnReleaseClaim_Click(p: IParticipant) {
+    if (!this.isParticipantClaimed(p)) {
+      return;
+    }
+    UndoHandler.StartActions();
+    this.forgetMapEntry(this.participantOwners, p);
+    this.appendPlayerCommandLog(p, CLAIM_FORCE_RELEASED_TEXT, RELEASED_CLAIM_FALLBACK_ACTOR);
+    this.sort();
+  }
+
+  /**
+   * Tell the requesting player why their `claim_character` was refused, and put
+   * the same fact in front of the GM.
+   *
+   * The command is broadcast like every other one (the server has no per-socket
+   * channel); the player view shows it only to the token in `payload.requester`.
+   * The GM's copy is a GM-only log entry: it is troubleshooting information
+   * about one player's client, not table-facing narration.
+   */
+  private denyClaim(
+    requester: string,
+    participantId: string,
+    characterName: string,
+    reason: string
+  ): void {
+    const name = characterName || "That character";
+    this.sessionSync.sendCommand({
+      type: "claim_denied",
+      player: "GM",
+      payload: { requester, participantId, characterName, reason }
+    });
+    this.appendGmOnlyLog(
+      name,
+      `claim refused for a player (${reason})`
+    );
+    this.refreshShareBanner();
   }
 
   private handleSessionCommand(command: SessionCommand) {
@@ -1077,13 +1918,28 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       }
       const target = this.combatManager.participants.items.find(p => this.getParticipantId(p) === participantId);
       if (!target) {
+        this.denyClaim(playerName, participantId, "", CLAIM_DENIED_REASON.missing);
         return;
       }
       if (this.participantClaimable.get(target) !== true) {
+        this.denyClaim(playerName, participantId, target.name, CLAIM_DENIED_REASON.notClaimable);
         return;
       }
       const existingOwner = this.participantOwners.get(target);
+      if (existingOwner === playerName) {
+        // Already theirs (a duplicate tap, or a resend after a reconnect).
+        // Nothing to change and nothing to complain about.
+        return;
+      }
       if (existingOwner) {
+        // The stale-owner case the durable-rooms review found: a player's
+        // browser reloads during a restart, the old process strips `ownerName`
+        // and emits `release_claims`, the GM's socket is down and never gets it,
+        // and the GM's reconnect PUSH (Open Decision 6 - correct, unchanged)
+        // writes the stale owner back. The re-claim then hits this branch. It
+        // used to return silently, leaving the player locked out of their own
+        // character with nothing on either screen.
+        this.denyClaim(playerName, participantId, target.name, CLAIM_DENIED_REASON.owned);
         return;
       }
       this.participantOwners.set(target, playerName);
@@ -1256,7 +2112,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       started: this.combatManager.started,
       passEnded: this.combatManager.passEnded,
       currentInitiative: this.combatManager.currentInitiative,
-      participants: this.getSharedParticipants()
+      participants: this.getSharedParticipants(),
+      // Not a participant list, a *count* - see `SharedCombatState`. It exists
+      // so a room whose whole encounter is out of action still reads as
+      // "has content" to the join guard instead of looking like an empty room
+      // that is safe to overwrite (round-3 fix 5). Nothing renders it.
+      oocParticipantCount: this.combatManager.participants.items.filter(p => p.ooc).length
     };
     this.sessionSync.broadcastState(sharedState);
   }
@@ -1276,7 +2137,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           ownerName: this.participantOwners.get(p),
           canAct: p.status === StatusEnum.Active || p.status === StatusEnum.Delaying,
           canDelay: p.status === StatusEnum.Active,
-          canInterrupt: p.getCurrentInitiative() >= 1,
+          // A member of a linked NPC row can never take an Interrupt Action
+          // (brief "NPC Group Initiative" criterion 17 / Decision 3, a
+          // deliberate departure from p. 167) - so the row itself never offers
+          // one, however high its shared Score.
+          canInterrupt: !isNpcRow(p) && p.getCurrentInitiative() >= 1,
           initiativeDice: p.dices,
           pendingRoll: p.diceIni <= 0,
           // Carried so a rejoining GM can reconstruct "already rolled" state
@@ -1305,6 +2170,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         if (this.isAstral(p)) {
           base.isAstral = true;
           base.isAstralProjecting = p.astralProjecting;
+        }
+
+        // Presentation only (addendum Decision 12): a standalone grunt is badged
+        // on the player view the way a group row is, so players can tell a lone
+        // grunt from a PC or an ordinary NPC at a glance. Nothing downstream
+        // reads it as rules state.
+        if (hasGruntConditionMonitor(p)) {
+          base.isDetachedGrunt = true;
+        }
+
+        // A linked row carries state no other participant type has: its NPCs
+        // (each with its own Condition Monitor, criteria 3-4/7, p. 379) and the
+        // shared wound accumulator (criterion 5 / Decision 1). All of it is on
+        // the wire so a rejoining GM rebuilds the row as a row - see
+        // buildRestoredParticipant.
+        if (isNpcRow(p)) {
+          const snapshot = p.toRowSnapshot();
+          base.isNpcRow = true;
+          base.rowWoundModifier = snapshot.rowWoundModifier;
+          base.rowEverPopulated = snapshot.everPopulated;
+          base.rowMembers = snapshot.members.map(m => ({
+            name: m.name,
+            body: m.body,
+            willpower: m.willpower,
+            damage: m.damage,
+            lastDamageType: m.lastDamageType,
+            lastDamageValue: m.lastDamageValue
+          }));
         }
 
         return base;
@@ -1863,10 +2756,88 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return 0;
   }
 
+  /**
+   * Rebuild one broadcast participant as the *right class*.
+   *
+   * `SharedParticipantState` already carries `isMatrix` / `isAstral` and the
+   * deck and astral fields; the restore path used to throw them away and build
+   * a plain `Participant` for everyone, so a rejoining GM silently got a decker
+   * back as an ordinary combatant. Persistence makes rejoining the normal
+   * resume path, so the spec fixes the reconstruction here (Open Decision 4,
+   * option (b)). No wire-format change: every field read below is already on
+   * the wire today.
+   */
+  private buildRestoredParticipant(shared: SharedParticipantState): Participant {
+    // Rows first: a row is never a decker or a magician (an NPC changing
+    // Initiative type has to be detached off the row first, criterion 13), and
+    // a row rebuilt as a plain Participant loses its members, its shared wound
+    // accumulator and its refusal of Interrupt Actions (criterion 17 /
+    // Decision 3) - the refusal being the one that silently changes what the
+    // GM and the players are offered on the next broadcast.
+    if (shared.isNpcRow === true) {
+      const row = new NpcRowParticipant();
+      row.restoreRowSnapshot({
+        members: (shared.rowMembers ?? []).map(m => ({
+          name: String(m.name ?? ""),
+          body: Math.max(0, Number(m.body ?? 0)),
+          willpower: Math.max(0, Number(m.willpower ?? 0)),
+          damage: Math.max(0, Number(m.damage ?? 0)),
+          lastDamageType: m.lastDamageType === "physical" || m.lastDamageType === "stun"
+            ? m.lastDamageType
+            : null,
+          lastDamageValue: Math.max(0, Number(m.lastDamageValue ?? 0))
+        })),
+        rowWoundModifier: Math.max(0, Number(shared.rowWoundModifier ?? 0)),
+        everPopulated: shared.rowEverPopulated === true
+      });
+      return row;
+    }
+    if (shared.isMatrix === true) {
+      const mp = new MatrixParticipant();
+      mp.dataProcessing = Math.max(0, Number(shared.dataProcessing || 0));
+      mp.attack = Math.max(0, Number(shared.attack || 0));
+      mp.sleaze = Math.max(0, Number(shared.sleaze || 0));
+      mp.firewall = Math.max(0, Number(shared.firewall || 0));
+      mp.deviceRating = Math.max(0, Number(shared.deviceRating || 0));
+      mp.overwatch = Math.max(0, Number(shared.overwatch || 0));
+      mp.jackedIn = shared.jackedIn === true;
+      mp.vrMode = this.restoredVrMode(shared.vrMode);
+      // `isVRCatatonic` is exactly `blocksPhysicalActions` on the wire
+      // (getSharedParticipants). It gates the action planner only - a jacked-in
+      // decker stays fully scheduled in initiative (ARCHITECTURE §6).
+      mp.blocksPhysicalActions = shared.isVRCatatonic === true;
+      return mp;
+    }
+    if (shared.isAstral === true) {
+      const ap = new AstralParticipant();
+      ap.astralProjecting = shared.isAstralProjecting === true;
+      ap.blocksPhysicalActions = shared.isAstralProjecting === true;
+      return ap;
+    }
+    return new Participant();
+  }
+
+  /** Map the broadcast VR-mode string back onto the enum. */
+  private restoredVrMode(mode: string | undefined): VRMode {
+    switch (mode) {
+      case VRMode.HotSim: return VRMode.HotSim;
+      case VRMode.ColdSim: return VRMode.ColdSim;
+      case VRMode.AR: return VRMode.AR;
+      default: return VRMode.None;
+    }
+  }
+
   private restoreFromSharedState(state: SharedCombatState | null) {
     if (!state || !state.participants || state.participants.length === 0) {
       return;
     }
+
+    // Bound this rebuild's own undo chapter. A write made outside an explicit
+    // StartActions() auto-opens a chapter that then absorbs everything after it
+    // (ARCHITECTURE §4), so without this the GM's first post-restore Ctrl+Z
+    // would walk into the middle of the restore. The chapter is then discarded
+    // entirely below - see the Initialize() call at the end.
+    UndoHandler.StartActions();
 
     this.declaredActionSelections.clear();
     this.participantIds.clear();
@@ -1893,7 +2864,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
     const ordered = [ ...state.participants ].sort((a, b) => a.order - b.order);
     for (const shared of ordered) {
-      const participant = new Participant();
+      const participant = this.buildRestoredParticipant(shared);
       participant.name = shared.name;
       // Reconstructing existing state, not a change event: no roll is owed
       // (the Score is restored verbatim below). The 5D6 cap still applies.
@@ -1909,9 +2880,20 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       );
       const safeReaction = Math.max(0, Number(shared.reaction || 0));
       const safeIntuition = Math.max(0, Number(shared.intuition || 0));
-      participant.baseIni = safeReaction + safeIntuition > 0
-        ? safeReaction + safeIntuition
-        : (shared.pendingRoll ? 6 : Math.max(0, Number(shared.initiativeScore || 0)));
+      // A jacked-in decker's Initiative Attribute is Data Processing +
+      // Intuition, not Reaction + Intuition (MatrixParticipant.applyJackInMode);
+      // both inputs are already on the wire. The running Score is restored
+      // verbatim below regardless - this only keeps future recomputes honest.
+      const jackedInMatrixAttribute = shared.isMatrix === true
+        && shared.jackedIn === true
+        && Number(shared.dataProcessing || 0) > 0
+        ? Math.max(0, Number(shared.dataProcessing)) + safeIntuition
+        : 0;
+      participant.baseIni = jackedInMatrixAttribute > 0
+        ? jackedInMatrixAttribute
+        : (safeReaction + safeIntuition > 0
+          ? safeReaction + safeIntuition
+          : (shared.pendingRoll ? 6 : Math.max(0, Number(shared.initiativeScore || 0))));
       const sharedSortOrder = Math.max(0, Number(shared.order || 1) - 1);
       if (shared.ownerName) {
         this.participantOwners.set(participant, shared.ownerName);
@@ -1946,6 +2928,41 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
 
     this.combatManager.participants.sortBySortOrder();
+    this.restoreWarning = this.buildRestoreWarning();
+
+    // Discard the whole undo history, including this rebuild's own chapter.
+    // There is no history from before the restore to walk back into, and the
+    // restore itself must not be undoable - "undo" would leave the tab holding
+    // whatever happened to be in memory before the join (spec scenario S3).
+    // `recording` is left false, so the GM's next edit opens a fresh chapter.
+    UndoHandler.Initialize();
+  }
+
+  /**
+   * What a restore could not bring back, in the GM's words.
+   *
+   * Participant subclasses *are* restored now (spec Open Decision 4, option
+   * (b)). Health, damage and out-of-combat participants are not: none of them
+   * are on the wire at all (`SharedParticipantState` has no damage fields, and
+   * `getSharedParticipants` filters OOC participants out entirely), and
+   * widening the player-visible payload is explicitly a separate change - it is
+   * logged in `docs/FEATURE-BACKLOG.md`. Undo history never leaves the browser
+   * (ARCHITECTURE §7), so a resumed room starts with none.
+   *
+   * The one exception is a linked NPC row: its members' Condition Monitors *are*
+   * on the wire and are restored (they are row state, not the participant-level
+   * damage fields), so the warning says so rather than telling the GM to re-key
+   * damage they already have back.
+   */
+  private buildRestoreWarning(): string {
+    return "Restored from the room's last broadcast. Not included: damage and "
+      + "condition monitors (linked NPC rows excepted - their NPCs come back "
+      + "with theirs), any participant who was out of action, committed "
+      + "interrupt actions, and undo history - re-enter those by hand.";
+  }
+
+  dismissRestoreWarning() {
+    this.restoreWarning = "";
   }
 
   /// Style Handler
@@ -1972,6 +2989,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.addParticipant()
   }
 
+  /**
+   * "Add Grunt" (brief addendum Decision 9). Same one-tap shape as
+   * `btnAddParticipant_Click`; the grunt lands unrolled and takes its own
+   * Initiative Test from the roll button next to it.
+   */
+  btnAddGrunt_Click() {
+    LogHandler.log(this.currentBTTime, "AddGrunt_Click");
+    this.addGrunt();
+  }
+
   btnEdge_Click(sender: IParticipant) {
     UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, sender.name + " Edge_Click");
@@ -1984,7 +3011,41 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   btnAct_Click(sender: IParticipant, actModalContent: TemplateRef<unknown>) {
+    this.actModalRowMember = null;
     this.openActModal(sender, actModalContent);
+  }
+
+  /**
+   * A row member's own Act control (brief "NPC Group Initiative" Decision
+   * 23). Opens the same Act modal an ordinary participant gets, scoped to
+   * this one NPC (`actModalRowMember`) - the declared action is logged
+   * attributed to the NPC, not the row, and only this member is marked
+   * "acted" on submit (`performRowMemberAct`).
+   *
+   * Gated the same way the template disables the button (Decision 24): the
+   * row has to be the current actor and still have a live Action Phase.
+   * Checked again here in case the handler is ever reached some other way -
+   * the template's `[disabled]` is the primary gate.
+   */
+  btnRowMemberAct_Click(row: NpcRowParticipant, member: GruntMember, actModalContent: TemplateRef<unknown>): void {
+    if (!this.canRowMemberAct(row)) {
+      return;
+    }
+    this.actModalRowMember = member;
+    this.openActModal(row, actModalContent);
+  }
+
+  /**
+   * Is a row's per-member Act button live right now (brief Decision 24)?
+   * Two gates, both on the row (the member has no Score or turn state of its
+   * own - the row does):
+   *  - the row has to be the participant currently up (`currentActors`), not
+   *    merely "somewhere in the order";
+   *  - the row still needs a live Action Phase (`hasLiveActionPhase`,
+   *    Decision 16) - a shared Score of 0 or below has none.
+   */
+  canRowMemberAct(row: NpcRowParticipant): boolean {
+    return this.combatManager.currentActors.contains(row) && this.hasLiveActionPhase(row);
   }
 
   btnDeclaredAct_Click(sender: IParticipant, declaredAction: DeclaredActionItem) {
@@ -2002,6 +3063,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.actModalRef.result.finally(() => {
       this.actModalRef = null;
       this.actModalParticipant = null;
+      this.actModalRowMember = null;
     });
   }
 
@@ -2027,8 +3089,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     const actor = this.actModalParticipant;
+    const rowMember = this.actModalRowMember;
     const illegalActions = this.actModalIllegalOsActions;
-    this.performAct(actor, this.buildDeclaredActionLog(actor));
+    // Decision 23: a row member's declared action marks and logs that NPC,
+    // not the whole row - `performAct` would finish the row's Action Phase on
+    // the first member to act, which is wrong for a group of more than one.
+    if (rowMember && isNpcRow(actor)) {
+      this.performRowMemberAct(actor, rowMember, this.buildDeclaredActionLog(actor));
+    } else {
+      this.performAct(actor, this.buildDeclaredActionLog(actor));
+    }
     if (illegalActions.length > 0) {
       const names = illegalActions.map(a => a.name).join(", ");
       this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
@@ -2083,9 +3153,37 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return selection.complex === action.name;
   }
 
+  /**
+   * Does this participant still have a live Action Phase?
+   *
+   * An Initiative Score of 0 or below has none, so no Simple and no Complex
+   * action can be declared from it; one Free Action per pass and ordinary
+   * defence are both still available (brief "NPC Group Initiative" Decision 16,
+   * `RULINGS.md` 2026-08-07, p. 159-160). General mechanics: this applies to
+   * PCs, ordinary NPCs, standalone grunts and rows identically.
+   *
+   * Interrupt Actions are a separate gate and already correct - they are
+   * refused by cost in `Participant.canUseAction()` (p. 167) and are not
+   * declared through this modal at all.
+   *
+   * Outside a started combat there is no running Score to gate on (the Score
+   * reads as the bare Initiative attribute), and no Act button either, so the
+   * gate is not applied there.
+   */
+  /** Template copy of `NO_ACTION_PHASE_MESSAGE` (Decision 16). */
+  readonly noActionPhaseMessage = NO_ACTION_PHASE_MESSAGE;
+
+  hasLiveActionPhase(sender: IParticipant): boolean {
+    return !this.combatManager.started
+      || sender.getCurrentInitiative() > MIN_ACTION_PHASE_INITIATIVE_SCORE;
+  }
+
   canUseDeclaredAction(sender: IParticipant, action: DeclaredActionItem): boolean {
     const isCyberdeckAct = CYBERDECK_REQUIRED_ACTIONS.has(action.name);
     const isPhysicalAct = !ALL_MATRIX_ACTION_NAMES.has(action.name);
+    if (action.economy !== "free" && !this.hasLiveActionPhase(sender)) {
+      return false;
+    }
     if (isCyberdeckAct && (!this.isMatrix(sender) || !this.asMatrix(sender).jackedIn)) {
       return false;
     }
@@ -2099,11 +3197,30 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   isDeclaredActionSelectionValid(sender: IParticipant): boolean {
+    if (!this.hasLiveActionPhase(sender) && this.hasActionPhaseSelection(sender)) {
+      return false;
+    }
     return DeclaredActionEngine.getValidationResult(this.getDeclaredActionSelection(sender)).valid;
   }
 
   getDeclaredActionValidationMessage(sender: IParticipant): string {
+    if (!this.hasLiveActionPhase(sender) && this.hasActionPhaseSelection(sender)) {
+      return NO_ACTION_PHASE_MESSAGE;
+    }
     return DeclaredActionEngine.getValidationResult(this.getDeclaredActionSelection(sender)).message;
+  }
+
+  /**
+   * Does the current selection contain anything that needs an Action Phase?
+   *
+   * Checked separately from `canUseDeclaredAction` so a selection made while
+   * the participant still had a Score above 0 cannot be *submitted* after the
+   * Score has dropped to 0 or below (Decision 16). A Free-Action-only selection
+   * is still legal down there (p. 160) and stays submittable.
+   */
+  private hasActionPhaseSelection(sender: IParticipant): boolean {
+    const selection = this.getDeclaredActionSelection(sender);
+    return selection.simple.length > 0 || selection.complex !== null;
   }
 
   getSelectionStateClass(sender: IParticipant): "valid" | "invalid" {
@@ -2139,6 +3256,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     if (isPhysicalAct && this.isAstral(sender) && (sender as AstralParticipant).blocksPhysicalActions) {
       return "Cannot take physical actions while astrally projecting.";
+    }
+    if (action.economy !== "free" && !this.hasLiveActionPhase(sender)) {
+      return NO_ACTION_PHASE_MESSAGE;
     }
     if (this.isDeclaredActionSelected(sender, action)) {
       const selection = this.getDeclaredActionSelection(sender);
@@ -2230,6 +3350,35 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.sort();
   }
 
+  /**
+   * The row-member counterpart of `performAct` (brief "NPC Group Initiative"
+   * Decision 23): declares and logs **one NPC's** action, not the row's.
+   *
+   * Attribution follows the same convention every other row log line uses
+   * (`logRowEvent`): the actor is the row (`rowLogActor`), the NPC's name is
+   * named in the text - "Gangers" is who the log speaks for, "Ganger 1" is
+   * who did the thing. This is a fictional event the table witnesses (unlike
+   * the wound-modifier bookkeeping lines), so it goes to both the GM and the
+   * shared log, same as an ordinary participant's declared action.
+   *
+   * Only marks *this* member as having acted (`hasActed`, Decision 18) and
+   * only finishes the row's Action Phase - `CombatManager.act(row)`, exactly
+   * the call an ordinary participant's `performAct` makes - once every member
+   * still standing has gone. A group does not take one action; its members
+   * each take their own, and the initiative only moves on once they all have.
+   */
+  private performRowMemberAct(row: NpcRowParticipant, member: GruntMember, declaredAction: string | null = null): void {
+    UndoHandler.StartActions();
+    const actor = this.rowLogActor(row);
+    const text = declaredAction ? `${member.name}: ${declaredAction}` : `${member.name}: Act`;
+    this.logRowEvent(actor, text);
+    member.hasActed = true;
+    if (row.activeMembers.every(m => m.hasActed)) {
+      this.combatManager.act(row);
+    }
+    this.sort();
+  }
+
   btnDelay_Click(sender: IParticipant) {
     UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, sender.name + " Delay_Click");
@@ -2282,27 +3431,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     LogHandler.log(this.currentBTTime, sender.name + " Delete_Confirm");
     UndoHandler.StartActions();
-    this.declaredActionSelections.delete(sender);
-    const participantId = this.participantIds.get(sender);
-    if (participantId) {
-      this.lastKnownDamage.delete(participantId);
+    // Same undoable side-map cleanup the automatic row removal uses. Raw
+    // `.delete()` calls here made a manual delete only half-undoable: the
+    // participant came back from the undo stack with a brand-new id, a
+    // defaulted Reaction/Intuition and a fresh coin-toss tie-breaker, and was
+    // re-announced to players as somebody new (ARCHITECTURE.md §7/§8).
+    this.forgetParticipant(sender);
+    // A row's per-member side map is keyed by `GruntMember`, not by the row, so
+    // `forgetParticipant` cannot reach it: deleting a row left one entry per
+    // dead member behind forever. This is now the *only* path that removes a
+    // row (Decision 14 stopped the automatic one), so it is the only place that
+    // can drop those entries.
+    if (isNpcRow(sender)) {
+      for (const member of sender.members) {
+        this.forgetMapEntry(this.rowMemberDamageValues, member);
+      }
     }
-    this.participantIds.delete(sender);
-    this.participantOwners.delete(sender);
-    this.participantClaimable.delete(sender);
-    this.participantEdgeRatings.delete(sender);
-    this.participantReactions.delete(sender);
-    this.participantIntuitions.delete(sender);
-    this.participantTieBreakers.delete(sender);
     this.combatManager.removeParticipant(sender);
     // The combatant the GM was rolling for is gone: the sticky attribution
     // outlives it otherwise, and the next roll (their own Perception check,
     // say) goes out under a name no longer in the fight. Cleared only when it
     // is *this* name - deleting an unrelated combatant leaves it armed.
     this.clearGmRollAttributionIfNamed(sender.name || "");
-    if (this.selectedActor === sender) {
-      this.selectedActor = null;
-    }
+    // Deselecting the deleted participant is `forgetParticipant`'s job now, and
+    // it does it undoably - a bare assignment here would survive the undo and
+    // leave the restored participant unselected.
     this.syncSharedState();
   }
 
@@ -2551,14 +3704,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return !UndoHandler.hasFuture();
   }
 
+  /**
+   * Undo/redo change player-visible state, so they must re-broadcast like every
+   * other mutation path - otherwise the GM tab and the players silently
+   * disagree. The case that made this a live defect: the GM releases a claim
+   * (broadcast), then undoes it (local only). Players still saw the character as
+   * free, a second player could claim it, and the original owner's re-claim was
+   * refused for a character their own screen said was unowned.
+   *
+   * `syncSharedState()` rather than `sort()`: `sort()` runs
+   * `enforceSingleCurrentActor()`, which writes participant `status` through the
+   * undo system. Any such write auto-opens a chapter (ARCHITECTURE §4) and
+   * `StartActions()` clears `futureHistory` - so sorting straight after an undo
+   * would destroy the redo stack it just created. `syncSharedState()` only reads
+   * and broadcasts.
+   */
   btnUndo_Click() {
     LogHandler.log(this.currentBTTime, "Undo_Click");
     UndoHandler.Undo();
+    this.syncSharedState();
   }
 
   btnRedo_Click() {
     LogHandler.log(this.currentBTTime, "Redo_Click");
     UndoHandler.Redo();
+    this.syncSharedState();
   }
 
   inpName_KeyDown(e: KeyboardEvent) {
@@ -2824,11 +3994,315 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.syncSharedState();
   }
 
+  /**
+   * Create a **standalone grunt**: one grunt-shaped NPC in its own slot in the
+   * initiative order, not inside a row (brief addendum Decision 9).
+   *
+   * Deliberately the same shape as `addParticipant` above - it is added to the
+   * encounter the same way, gets the same side-map seeding, and has **not**
+   * rolled, so it takes its own Initiative Test from the ordinary roll button
+   * (or Initiative Prep) like any other new participant, with no special-cased
+   * score. The only differences are the class (`DetachedGruntParticipant`, so it
+   * gets the single combined Condition Monitor of p. 379) and the Body /
+   * Willpower defaults, which match `addNpcToRow`'s.
+   *
+   * Its Edge rating is seeded to 0 for the same reason a row's is: a grunt has
+   * no Edge attribute (p. 380), so ERIC falls through to Reaction, then
+   * Intuition, then the coin toss (Decision 5, p. 159).
+   */
+  addGrunt(
+    name?: string,
+    body = DEFAULT_GRUNT_ATTRIBUTE,
+    willpower = DEFAULT_GRUNT_ATTRIBUTE,
+    selectNewGrunt = true
+  ): DetachedGruntParticipant {
+    UndoHandler.StartActions();
+    const grunt = createStandaloneGrunt(name ?? this.nextStandaloneGruntName(), body, willpower);
+    this.combatManager.addParticipant(grunt);
+    this.participantClaimable.set(grunt, false);
+    this.participantEdgeRatings.set(grunt, NPC_ROW_EDGE_RATING);
+    this.participantReactions.set(grunt, 3);
+    this.participantIntuitions.set(grunt, 3);
+    grunt.baseIni = this.getParticipantBaseInitiative(grunt);
+    this.participantTieBreakers.set(grunt, Math.random());
+    const id = this.getParticipantId(grunt);
+    this.lastKnownDamage.set(id, {
+      physical: Math.max(0, Number(grunt.physicalDamage || 0)),
+      stun: Math.max(0, Number(grunt.stunDamage || 0))
+    });
+    // Deliberately box-count-free. The old wording published this NPC's exact
+    // Condition Monitor size to every player in the room the moment it was
+    // added - GM bookkeeping, and a straight answer to "how many hits until it
+    // drops" that nobody at the table had earned. The GM reads the box count off
+    // the Condition Monitor panel, where it always was.
+    this.logRowEvent(grunt.name || STANDALONE_GRUNT_NAME_PREFIX,
+      "added as a standalone grunt (single Condition Monitor) - "
+      + "still to roll their own Initiative Test");
+    if (selectNewGrunt) {
+      this.selectActor(grunt);
+    }
+    this.syncSharedState();
+    this.sort();
+    return grunt;
+  }
+
+  /**
+   * Default name for the next standalone grunt: `"Grunt <n>"`, one past the
+   * highest number already in the encounter. Same reasoning as
+   * `nextRowMemberName`: the combat log names the grunt whose wound or death it
+   * records (p. 379), and two combatants answering to one name make those lines
+   * unreadable.
+   */
+  private nextStandaloneGruntName(): string {
+    const pattern = new RegExp(`^${STANDALONE_GRUNT_NAME_PREFIX} (\\d+)$`);
+    let highest = 0;
+    for (const p of this.combatManager.participants.items) {
+      const match = pattern.exec(p.name || "");
+      if (match) {
+        highest = Math.max(highest, Number(match[1]));
+      }
+    }
+    return `${STANDALONE_GRUNT_NAME_PREFIX} ${highest + 1}`;
+  }
+
+  /**
+   * Default name for the next row, merged or created with the Grunt Group
+   * button: `"Grunt Group"` for the first one in the encounter, then
+   * `"Grunt Group 2"`, `"Grunt Group 3"`, ...
+   *
+   * Same reasoning as `nextStandaloneGruntName`, applied one level up: the
+   * row-level log lines this feature writes (the group-wide wound line of
+   * scenario S3, a member removed, the row going spent per Decision 14) are
+   * attributed to the row *by name*, so two merges in one session under one
+   * name make the whole row-level half of the log unreadable.
+   *
+   * The first row is left unnumbered on purpose - most sessions have exactly one
+   * grunt group, and "Grunt Group 1" would be a number the GM has to read past
+   * for nothing. Numbering starts where ambiguity does.
+   */
+  private nextMergedGruntRowName(): string {
+    let highest = 0;
+    for (const p of this.combatManager.participants.items) {
+      const match = DEFAULT_ROW_NAME_PATTERN.exec(p.name || "");
+      if (match) {
+        // A bare "Grunt Group" is group 1, so the next one is 2.
+        highest = Math.max(highest, match[1] ? Number(match[1]) : 1);
+      }
+    }
+    return highest === 0 ? MERGED_GRUNT_ROW_NAME : `${MERGED_GRUNT_ROW_NAME} ${highest + 1}`;
+  }
+
+  /** Is this row still on a name this app generated (brief Decision 19)? */
+  private isDefaultRowName(name: string): boolean {
+    return !name || DEFAULT_ROW_NAME_PATTERN.test(name);
+  }
+
+  // ── Merging standalone grunts into a row (addendum Decision 10) ──────────
+
+  /**
+   * Which standalone grunts the GM has ticked for a merge.
+   *
+   * Transient view state, like `expandedRowPanels`: it holds nothing that
+   * survives the merge, and the merge itself is fully undoable. Kept as a `Set`
+   * of participants so a mis-tap is one tap to correct and nothing is committed
+   * until the Merge button is pressed.
+   */
+  readonly gruntsSelectedForMerge = new Set<IParticipant>();
+
+  /**
+   * Result of the last merge attempt, in the GM's words - shown next to the
+   * button. Decision 10 requires a refusal to say *why*, because the GM's
+   * alternative (re-group between Combat Turns) is a different action rather
+   * than a retry.
+   */
+  mergeMessage = "";
+
+  /** Pending auto-dismiss for `mergeMessage`, or `null` when nothing is shown. */
+  private mergeMessageDismissTimeout: number | null = null;
+
+  /**
+   * Show a merge result, and start it counting down.
+   *
+   * The message is transient feedback on a tap that has already happened, not
+   * state: it is rendered outside the selection-count guard, so without this it
+   * would sit under an empty selection for the rest of the session and read as
+   * if it were describing whatever the GM is doing now. Every write goes through
+   * here so there is exactly one place that can leave a stale one on screen.
+   *
+   * Not undoable and deliberately so - it is a toast, not tracker state; undoing
+   * the merge itself puts the grunts back regardless.
+   */
+  private setMergeMessage(text: string): void {
+    this.clearMergeMessageDismiss();
+    this.mergeMessage = text;
+    if (!text) {
+      return;
+    }
+    this.mergeMessageDismissTimeout = window.setTimeout(() => {
+      this.mergeMessageDismissTimeout = null;
+      this.mergeMessage = "";
+    }, MERGE_MESSAGE_DISMISS_MS);
+  }
+
+  private clearMergeMessageDismiss(): void {
+    if (this.mergeMessageDismissTimeout !== null) {
+      window.clearTimeout(this.mergeMessageDismissTimeout);
+      this.mergeMessageDismissTimeout = null;
+    }
+  }
+
+  /** Is this participant one the GM could merge into a group at all? */
+  isMergeableGruntCandidate(p: IParticipant): boolean {
+    return hasGruntConditionMonitor(p);
+  }
+
+  isSelectedForMerge(p: IParticipant): boolean {
+    return this.gruntsSelectedForMerge.has(p);
+  }
+
+  toggleMergeSelection(p: IParticipant): void {
+    if (this.gruntsSelectedForMerge.has(p)) {
+      this.gruntsSelectedForMerge.delete(p);
+    } else {
+      this.gruntsSelectedForMerge.add(p);
+    }
+    this.setMergeMessage("");
+  }
+
+  /** Untick everything. A mis-tap costs one tap to correct, not an undo. */
+  clearMergeSelection(): void {
+    this.gruntsSelectedForMerge.clear();
+    this.setMergeMessage("");
+  }
+
+  /** The ticked grunts, in initiative-list order, still in the encounter. */
+  private getGruntsSelectedForMerge(): DetachedGruntParticipant[] {
+    return this.combatManager.participants.items
+      .filter(p => this.gruntsSelectedForMerge.has(p) && hasGruntConditionMonitor(p))
+      .map(p => p as DetachedGruntParticipant);
+  }
+
+  getMergeSelectionCount(): number {
+    return this.getGruntsSelectedForMerge().length;
+  }
+
+  /** Enabled only once the GM has ticked enough grunts to form a group. */
+  canMergeSelectedGrunts(): boolean {
+    return this.getMergeSelectionCount() >= MIN_MERGEABLE_GRUNTS;
+  }
+
+  /**
+   * Fold the ticked standalone grunts into one new linked NPC row
+   * (Decision 10).
+   *
+   * Refused - with a message, never silently - if any of them has already
+   * rolled Initiative for the current Combat Turn: a group acts on **one**
+   * shared Initiative Test (p. 379), and there is no defined answer to whose
+   * already-rolled score the new group would take. Nothing is changed on a
+   * refusal, so the GM can untick the offender and merge the rest.
+   *
+   * On success each grunt becomes a member of the row carrying its Condition
+   * Monitor damage across exactly (Decision 11), the grunts leave the order, and
+   * the row goes in unrolled so the GM makes its single group Initiative Test.
+   * The row's shared wound accumulator starts at 0 - no retroactive penalty for
+   * damage the founding members already had (Decision 11, matching Decision 7).
+   */
+  mergeSelectedGrunts(): GruntMergeResult {
+    const selected = this.getGruntsSelectedForMerge();
+    const result = mergeGruntsIntoRow(selected, this.nextMergedGruntRowName());
+    this.setMergeMessage(result.reason);
+    if (!result.ok || !result.row) {
+      // Refusals are logged as well as shown: the GM's next move (re-group
+      // between Combat Turns) happens minutes later, and the reason has to
+      // still be readable then.
+      //
+      // GM-only. A refusal names an NPC and says why it could not be grouped -
+      // pure GM bookkeeping about NPCs the players may not even have met, and
+      // "Ganger A already rolled Initiative" is table information nobody
+      // in-fiction has. `StartActions` is here only so the log write opens its
+      // own undo chapter instead of appending to whatever chapter happened to be
+      // left open; nothing else on this path mutates tracker state.
+      UndoHandler.StartActions();
+      this.logGmOnlyRowEvent(MERGED_GRUNT_ROW_NAME, `merge refused - ${result.reason}`);
+      return result;
+    }
+    UndoHandler.StartActions();
+    const row = result.row;
+    const first = selected[0];
+    // The row is a brand-new participant, not a joiner: if it is created after
+    // combat has begun it takes the ordinary late-entry penalty of -10 per
+    // elapsed pass (criterion 15, p. 160). Decision 7's exemption covers an NPC
+    // joining an *existing* row, which this is not.
+    this.combatManager.addParticipant(row);
+    this.participantClaimable.set(row, false);
+    this.participantEdgeRatings.set(row, NPC_ROW_EDGE_RATING);
+    this.participantReactions.set(row, this.getParticipantReactionValue(first));
+    this.participantIntuitions.set(row, this.getParticipantIntuitionValue(first));
+    this.participantTieBreakers.set(row, Math.random());
+    this.getParticipantId(row);
+    this.expandedRowPanels.add(row);
+    for (const grunt of selected) {
+      this.forgetParticipant(grunt);
+      this.combatManager.removeParticipant(grunt);
+      // Undoable, like every other side-map drop here: undoing the merge has to
+      // give the GM back the same ticked selection, not an empty one.
+      this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
+    }
+    this.logRowEvent(row.name,
+      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")} - `
+      + "one shared Initiative Score from here on. Their Condition Monitor damage carried over; "
+      + "no wound penalty is applied to the group for damage taken before the merge (house rule).");
+    this.selectActor(row);
+    this.syncSharedState();
+    this.sort();
+    return result;
+  }
+
   // ── Linked NPC rows (grunt groups) ──────────────────────────────────────
   //
   // All of the rules live in `src/Grunts/`; everything here is plumbing: side
   // maps, undo batching, logging and panel state. See
   // briefs/npc-group-initiative.md.
+
+  /**
+   * Write a row event to both logs: the GM's own local log and, if a session is
+   * running, the shared one. Same shape as `appendParticipantRollLog` - a
+   * `appendSharedLog` call on its own is a no-op with no session open, and
+   * these lines (especially the house-rule wound line, scenario S3) have to be
+   * readable back by the GM whether or not players were connected.
+   */
+  private logRowEvent(actor: string, text: string, playerText: string = text): void {
+    LogHandler.log(this.currentBTTime, `${actor} ${text}`);
+    this.appendSharedLog(actor, playerText);
+  }
+
+  /**
+   * The name a row's log lines are attributed to.
+   *
+   * One helper rather than `row.name || "NPC Row"` repeated at nine call sites:
+   * the literal fallback was the doubled-text bug of brief Decision 19 (a row
+   * left on its default name produced `"NPC Row: NPC Row 1 is out of action"`,
+   * the same words twice in one line). New rows now get a distinct default name
+   * (`nextMergedGruntRowName`) and members of a still-default row are named from
+   * `STANDALONE_GRUNT_NAME_PREFIX` rather than from the row, so neither half of
+   * the line repeats the other.
+   */
+  private rowLogActor(row: NpcRowParticipant): string {
+    return row.name || MERGED_GRUNT_ROW_NAME;
+  }
+
+  /**
+   * The same, for a row event the players have no business seeing - GM
+   * bookkeeping about NPCs rather than something that happened in the fiction.
+   *
+   * `appendGmOnlyLog` writes the GM's own local line itself, tagged
+   * "(hidden from players)", so this must not write one as well or the GM gets
+   * the event twice with only one copy telling the truth about visibility. Same
+   * contract as `appendParticipantRollLog`.
+   */
+  private logGmOnlyRowEvent(actor: string, text: string): void {
+    this.appendGmOnlyLog(actor, text);
+  }
 
   /** Template guard: is this participant a linked NPC row? */
   isNpcRow(p: IParticipant): p is NpcRowParticipant {
@@ -2838,6 +4312,134 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   /** Template cast, mirroring `asMatrix` / `asAstral`. */
   asNpcRow(p: IParticipant): NpcRowParticipant {
     return p as NpcRowParticipant;
+  }
+
+  /**
+   * Template guard: does this participant carry the grunt Condition Monitor
+   * shape - **one** combined Physical + Stun track, no overflow (p. 379, and
+   * p. 381 for lieutenants: "They possess a single Condition Monitor, like
+   * other grunts")? True for a `DetachedGruntParticipant`; false for a row,
+   * which has no Condition Monitor of its own at all.
+   */
+  hasGruntConditionMonitor(p: IParticipant): p is DetachedGruntParticipant {
+    return hasGruntConditionMonitor(p);
+  }
+
+  /** Template cast — only call inside a `hasGruntConditionMonitor(p)` guard. */
+  asGrunt(p: IParticipant): DetachedGruntParticipant {
+    return p as DetachedGruntParticipant;
+  }
+
+  /**
+   * Write a combined-track edit from the Condition Monitor widget back onto a
+   * detached grunt.
+   *
+   * The widget is a single bar over one pool, but the participant keeps two
+   * writable damage fields (Physical and Stun) so the GM can still record which
+   * kind of damage was taken. Boxes clicked on the combined bar are written to
+   * the Physical field on top of whatever Stun is already recorded, which is
+   * what keeps `combinedDamage` equal to the number of boxes the GM just
+   * filled; Stun stays wherever it was. Falls back to zero rather than negative
+   * if the GM drags the bar below the recorded Stun.
+   */
+  onGruntCombinedDamageChanged(p: DetachedGruntParticipant, combined: number): void {
+    const target = Math.max(0, Math.floor(Number(combined || 0)));
+    p.physicalDamage = Math.max(0, target - p.stunDamage);
+    this.onParticipantDamageChanged();
+  }
+
+  /**
+   * Record a standalone grunt's Body, and resize its Condition Monitor to match.
+   *
+   * Body does two things on a grunt (p. 379): it is the number the final
+   * attack's DV is compared against to settle alive-or-dead, **and** it is one
+   * of the two inputs to the box count, `8 + ceil(max(Body, Willpower) / 2)`.
+   * This used to record only the first, leaving a Body-9 grunt on the 10 boxes
+   * it was created with instead of 13 for its whole life - a straight criterion-7
+   * violation, and the reason a merge could change the size of a Condition
+   * Monitor: `GruntMember` recomputes the formula from the attributes, and the
+   * attributes and the box count had been allowed to drift apart.
+   *
+   * The resize itself lives on the participant (`setGruntAttributes`), so the
+   * same rule applies however Body is written - GM field, detach, or merge.
+   */
+  onGruntBodyChanged(p: DetachedGruntParticipant, value: number): void {
+    UndoHandler.StartActions();
+    p.gruntBody = Math.max(0, Number(value || 0));
+    this.syncSharedState();
+  }
+
+  /**
+   * The other Condition Monitor input (p. 379). Editable for the same reason
+   * Body is: "Add Grunt" seeds both at `DEFAULT_GRUNT_ATTRIBUTE`, and a grunt
+   * whose Willpower is the higher of the two has no other way to get the box
+   * count the formula gives it.
+   */
+  onGruntWillpowerChanged(p: DetachedGruntParticipant, value: number): void {
+    UndoHandler.StartActions();
+    p.gruntWillpower = Math.max(0, Number(value || 0));
+    this.syncSharedState();
+  }
+
+  // ── Standalone / detached grunt DV controls (brief Decision 20) ─────────
+  //
+  // The Condition Monitor widget's box-clicking can only ever record as many
+  // boxes as are left on the track, so the largest recordable hit is exactly
+  // the boxes remaining - too small for p. 379's "DV of the final attack vs.
+  // Body" comparison whenever a killing blow outsizes the track. These mirror
+  // the row panel's per-member DV controls (`getRowMemberDamageValue` and
+  // friends), keyed by participant instead of by `GruntMember`.
+
+  /** The Damage Value the next P/S tap will apply, defaulting to a single box. */
+  getGruntDamageValue(p: IParticipant): number {
+    return this.gruntDamageValues.get(p) ?? DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
+  }
+
+  /** Clamped the same way `setRowMemberDamageValue` is - at least one box. */
+  setGruntDamageValue(p: IParticipant, value: number): void {
+    const parsed = Math.floor(Number(value));
+    const safe = Number.isFinite(parsed)
+      ? Math.max(DEFAULT_ROW_MEMBER_DAMAGE_VALUE, Math.min(MAX_ROW_MEMBER_DAMAGE_VALUE, parsed))
+      : DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
+    this.gruntDamageValues.set(p, safe);
+  }
+
+  hitGruntPhysical(p: DetachedGruntParticipant, boxes = this.getGruntDamageValue(p)) {
+    return this.applyGruntDamage(p, boxes, "physical");
+  }
+
+  hitGruntStun(p: DetachedGruntParticipant, boxes = this.getGruntDamageValue(p)) {
+    return this.applyGruntDamage(p, boxes, "stun");
+  }
+
+  /**
+   * Apply a Damage Value to a standalone / detached grunt's combined track
+   * (brief Decision 20, `RULINGS.md` 2026-08-13 "A killing blow's Damage
+   * Value can exceed the boxes left on the track"). The rules-level clamping
+   * and final-attack recording live on `DetachedGruntParticipant.applyDamage`;
+   * this is plumbing only.
+   *
+   * Routed through the same `onParticipantDamageChanged()` hook the box-
+   * clicking widget already uses, so the hit is logged the ordinary
+   * participant way (`flushDamageLog`) rather than a second bespoke log path -
+   * that generic path already drops the Condition Monitor maximum
+   * (`RULINGS.md` 2026-08-13 "Condition Monitor maximums never appear in any
+   * log"), so nothing further is needed here to satisfy Decision 25 for this
+   * control.
+   */
+  applyGruntDamage(p: DetachedGruntParticipant, boxes: number, type: GruntDamageType) {
+    UndoHandler.StartActions();
+    const result = p.applyDamage(boxes, type);
+    this.onParticipantDamageChanged();
+    return result;
+  }
+
+  /** Heal one box / take back a mis-keyed hit (the row panel's "-1" button). */
+  healGrunt(p: DetachedGruntParticipant, boxes: number) {
+    UndoHandler.StartActions();
+    const healed = p.healDamage(boxes);
+    this.onParticipantDamageChanged();
+    return healed;
   }
 
   isRowPanelExpanded(p: IParticipant): boolean {
@@ -2865,7 +4467,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   addNpcRow(selectNewRow = true): NpcRowParticipant {
     UndoHandler.StartActions();
     const row = new NpcRowParticipant();
-    row.name = "NPC Row";
+    // Numbered and distinct rather than the old literal `"NPC Row"`: that
+    // string was reused as the log-actor fallback *and* as the prefix of every
+    // member's default name, so an unrenamed row logged "NPC Row: NPC Row 1 ..."
+    // (brief Decision 19). Shares the merged-row namer so a button-made row and
+    // a merged one cannot collide either.
+    row.name = this.nextMergedGruntRowName();
     this.combatManager.addParticipant(row);
     this.participantClaimable.set(row, false);
     this.participantEdgeRatings.set(row, NPC_ROW_EDGE_RATING);
@@ -2884,6 +4491,46 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
+   * Default name for the next NPC added to a row: `"<row name> <n>"`.
+   *
+   * `n` is one past the **highest number already used** in the row, not
+   * `members.length + 1`: with a count, deleting a middle NPC and adding
+   * another produced a second NPC with the same name (delete "G 2" of G 1-3,
+   * add -> "G 3" again). Two identically-named grunts is not a cosmetic problem
+   * at the table - the combat log names the NPC whose wound moved the row's
+   * shared score (Decision 1) and the alive/dead verdict is recorded per NPC
+   * (p. 379), and neither line can be read back if two NPCs answer to it.
+   * Custom names the GM typed are skipped by the pattern, so a final
+   * collision check keeps the name unique against those too.
+   *
+   * A row still on its **default** name is the one case where the row's name is
+   * a bad prefix: `"Grunt Group 1"` inside `"Grunt Group"`'s log lines repeats
+   * the row's own name back at the reader, which is the doubled text brief
+   * Decision 19 removes. Those members fall back to
+   * `DEFAULT_ROW_MEMBER_NAME_PREFIX` instead. The moment the GM names the row,
+   * its NPCs go back to being named after it.
+   */
+  private nextRowMemberName(row: NpcRowParticipant): string {
+    const prefix = this.isDefaultRowName(row.name)
+      ? DEFAULT_ROW_MEMBER_NAME_PREFIX
+      : (row.name || DEFAULT_ROW_MEMBER_NAME_PREFIX);
+    const pattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} (\\d+)$`);
+    let highest = 0;
+    for (const member of row.members) {
+      const match = pattern.exec(member.name);
+      if (match) {
+        highest = Math.max(highest, Number(match[1]));
+      }
+    }
+    const taken = new Set(row.members.map(m => m.name));
+    let next = Math.max(highest, row.members.length) + 1;
+    while (taken.has(`${prefix} ${next}`)) {
+      next++;
+    }
+    return `${prefix} ${next}`;
+  }
+
+  /**
    * Add an NPC to a row. Mid-combat this is the reinforcement case: the new
    * NPC inherits the row's current shared Initiative Score directly, with no
    * Initiative Test of its own and no -10-per-elapsed-pass late-entry penalty
@@ -2891,10 +4538,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   addNpcToRow(row: NpcRowParticipant, name?: string, body = 3, willpower = 3): GruntMember {
     UndoHandler.StartActions();
-    const member = new GruntMember(name ?? `${row.name || "NPC"} ${row.members.length + 1}`, body, willpower);
+    const member = new GruntMember(name ?? this.nextRowMemberName(row), body, willpower);
     row.addMember(member);
-    this.appendSharedLog(row.name || "NPC Row",
-      `${member.name} joins the row on shared initiative score ${row.getCurrentInitiative()}`);
+    // Joining is Score-neutral even for an NPC who arrives already hurt: the
+    // shared Score moves on wound *events* inside the row (Decision 1), and
+    // Decision 7 says a joiner simply takes the row's current Score. Said out
+    // loud in the log for a wounded joiner, because that is exactly the case a
+    // GM would otherwise expect to see the row slow down.
+    const carriedWounds = member.wm > 0
+      ? ` (arrives wounded: -${member.wm} on their own tests only, row's shared score unchanged)`
+      : "";
+    this.logRowEvent(this.rowLogActor(row),
+      `${member.name} joins the row on shared initiative score ${row.getCurrentInitiative()}${carriedWounds}`);
     this.syncSharedState();
     this.sort();
     return member;
@@ -2909,6 +4564,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * rule, so it gets its own log line naming the NPC whose wound caused it -
    * otherwise a GM watching the whole row slow down at once has no way to tell
    * the house rule from a bug (scenario S3).
+   *
+   * **Log privacy (brief Decision 17).** The GM's copy of a damage line carries
+   * the running damage total; the players' copy does not. The Condition
+   * Monitor's *maximum* is dropped from both copies (brief Decision 25,
+   * `RULINGS.md` 2026-08-13 "Condition Monitor maximums never appear in any
+   * log") - "how many more hits until it drops" is a straight answer that
+   * nobody at the table has earned, the same reasoning that already keeps a
+   * new grunt's box count out of the shared log. The wound-modifier house-rule
+   * line goes further and is GM-only outright: it is a statement about the
+   * tracker's own bookkeeping, not an event anyone in the fiction witnesses.
    */
   applyRowMemberDamage(
     row: NpcRowParticipant,
@@ -2917,54 +4582,249 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     type: GruntDamageType
   ) {
     UndoHandler.StartActions();
+    const actor = this.rowLogActor(row);
     const result = row.applyDamageToMember(member, boxes, type);
     if (result.applied > 0) {
-      this.appendSharedLog(row.name || "NPC Row",
-        `${member.name} took ${result.applied} ${type === "stun" ? "Stun" : "Physical"} `
-        + `(${member.damage}/${member.conditionMonitorBoxes})`);
+      const damageType = type === "stun" ? "Stun" : "Physical";
+      // The running damage total may stay in the GM's own copy; the
+      // Condition Monitor's maximum may not (brief Decision 25, `RULINGS.md`
+      // 2026-08-13 "Condition Monitor maximums never appear in any log") - it
+      // answers "how many more hits until it drops", which the maximum alone
+      // gave away regardless of the current total.
+      this.logRowEvent(actor,
+        `${member.name} took ${result.applied} ${damageType} `
+        + `(${member.damage})`,
+        `${member.name} took ${result.applied} ${damageType}`);
+    } else if (member.outOfAction) {
+      // A tap on a grunt whose track is already full applies nothing (p. 379:
+      // grunts take no overflow) and must not rewrite the final-attack record.
+      // Say so: a silent no-op looks like a broken button to a GM recording a
+      // coup de grace, and "nothing happened" is itself the ruling.
+      this.logRowEvent(actor,
+        `${member.name} - no effect, already out of action `
+        + `(${member.damage}, ${member.finalState})`,
+        `${member.name} - no effect, already out of action`);
     }
     if (result.scoreDelta !== 0) {
-      this.appendSharedLog(row.name || "NPC Row", formatGroupWoundLogText(
-        row.name, member.name,
-        result.woundModifierAfter - result.woundModifierBefore,
+      this.logGmOnlyRowEvent(actor, formatGroupWoundLogText(
+        actor, member.name,
+        result.rowWoundModifierDelta,
         result.scoreAfter
       ));
     }
     if (result.wentOutOfAction) {
-      this.appendSharedLog(row.name || "NPC Row",
-        `${member.name} is out of action (${member.finalState})`);
+      this.logRowEvent(actor,
+        `${member.name} is out of action (${member.finalState})`,
+        `${member.name} is out of action`);
     }
-    // Decision 8: the row leaves the order the moment its last member drops.
-    for (const spent of this.combatManager.removeSpentNpcRows()) {
-      this.appendSharedLog(spent.name || "NPC Row", "every member is out of action - row removed from initiative");
-      this.forgetParticipant(spent);
-    }
+    // Decision 14: the row is flagged, not removed, once its last member drops.
+    this.flagSpentNpcRows();
     this.syncSharedState();
     this.sort();
     return result;
   }
 
   /**
-   * Template shorthands for the two damage buttons. Both types go on the same
-   * combined track (p. 379); the type is still recorded because it decides
-   * alive-or-dead once the NPC drops (p. 379).
+   * Pull any row that can no longer act off the current-actor slot, and flag
+   * (only) the ones taken out **by damage** (Decision 14, narrowed by
+   * Decision 21). Called from every GM path that can empty or finish off a
+   * row - damage, heal, detach and the per-member trash icon - so the flag
+   * (and the "this row can no longer act" consequence) lands on the same tap
+   * that caused it.
+   *
+   * A damage-wiped row is **not** removed: it keeps its slot, styled like any
+   * other out-of-action participant, and the GM's existing per-row trash icon
+   * (`btnDelete_Click`) is the cleanup path. A row emptied by hand is left as
+   * a plain, unflagged empty row instead (brief Decision 21, `RULINGS.md`
+   * 2026-08-13). Either way `CombatManager.flagSpentNpcRows()` advances the
+   * order if the row that can no longer act was the one currently acting, so
+   * emptying the acting row does not stall the tracker.
+   *
+   * The logging lives in `onSpentNpcRowsFlagged` below, which the engine calls
+   * for *every* damage-wipe flagging - including the one it performs itself as
+   * the pre-step of `goToNextActors()`. Doing it here instead would mean a row
+   * that went spent on the next "Act" tap did so with no log line.
    */
-  hitRowMemberPhysical(row: NpcRowParticipant, member: GruntMember, boxes = 1) {
+  private flagSpentNpcRows(): void {
+    this.combatManager.flagSpentNpcRows();
+  }
+
+  /**
+   * The GM-side half of a row being wiped out **by damage**: say so in the
+   * log. Registered on the CombatManager in the constructor, so it runs
+   * exactly once per collapse, from whichever path caused it. Never called for
+   * a row emptied by hand (Decision 21) - `CombatManager.flagSpentNpcRows()`
+   * only reports rows where `isWipedOut` is true.
+   *
+   * GM-only (brief Decision 17). "Every member of that group is down, and the
+   * row is still sitting in my initiative list waiting to be deleted" is
+   * bookkeeping about the tracker, not something the players witness - the
+   * individual NPCs going down are logged separately and those lines *are*
+   * shared.
+   *
+   * No side-map cleanup here any more: the row is still in the encounter, so
+   * its ids, tie-break inputs and its NPCs' queued Damage Values all have to
+   * stay. `btnDelete_Click` does that cleanup when the GM actually removes it.
+   */
+  private onSpentNpcRowsFlagged(rows: NpcRowParticipant[]): void {
+    for (const spent of rows) {
+      this.logGmOnlyRowEvent(this.rowLogActor(spent),
+        "every member is out of action - flagged out of action; the row keeps its place "
+        + "in the initiative order until you delete it");
+    }
+    this.syncSharedState();
+  }
+
+  // ── Per-NPC "has acted this pass" (brief Decisions 18 & 23) ──────────────
+  //
+  // The row is one participant, so the engine's own Waiting/Active/Finished
+  // lifecycle can only say whether *the row* has gone. Which of six gangers has
+  // already fired is per-NPC bookkeeping that the GM previously had to hold in
+  // their head. This is the row-member equivalent of an ordinary participant's
+  // Act button.
+  //
+  // Since Decision 23 the primary path to `hasActed = true` is
+  // `btnRowMemberAct_Click` -> the Act modal -> `performRowMemberAct`, which
+  // opens the same declare-action flow an ordinary participant gets and logs
+  // the result, exactly like `performAct`. `toggleRowMemberActed` below stays
+  // as the one-tap correction for a mis-tap: once a member is marked
+  // "Acted", tapping the pill again calls this to flip it straight back off,
+  // with no modal and no second log line - the declared action already
+  // logged is left alone, only the bookkeeping marker is corrected.
+
+  isRowMemberActed(member: GruntMember): boolean {
+    return member.hasActed;
+  }
+
+  /**
+   * Un-mark (or, if ever called directly, mark) one NPC of a row as having
+   * gone this pass, without opening the Act modal and without writing a log
+   * line.
+   *
+   * Kept as a toggle, and kept undoable and unlogged for the same reason it
+   * always was: a mis-tap at the table has to cost one tap to correct, not an
+   * Undo, and a row of six must not write six bookkeeping lines a pass into a
+   * log whose job is to record what happened in the fiction. Since Decision
+   * 23 the template only reaches this method for the *un-mark* direction -
+   * the mark-as-acted direction now goes through `btnRowMemberAct_Click` so
+   * it is a real, logged action declaration - but the method itself is left
+   * bidirectional so a caller (or a future control) can still flip either way
+   * in one tap. Cleared automatically at each pass boundary
+   * (`CombatManager.nextIniPass`) and Combat Turn boundary
+   * (`NpcRowParticipant.softReset`) either way.
+   */
+  toggleRowMemberActed(member: GruntMember): void {
+    UndoHandler.StartActions();
+    member.hasActed = !member.hasActed;
+    this.syncSharedState();
+  }
+
+  /**
+   * "3/4 acted" for the row panel header - one glance tells the GM whether the
+   * row still owes actions this pass. Counts only members that can still act:
+   * a downed NPC is skipped when the row comes up (criterion 6, p. 379) and
+   * would otherwise make the row look permanently unfinished.
+   */
+  getRowActedSummary(row: NpcRowParticipant): string {
+    const active = row.activeMembers;
+    return `${active.filter(m => m.hasActed).length}/${active.length} acted`;
+  }
+
+  /**
+   * The Damage Value queued against one NPC in a row, defaulting to a single
+   * box so the panel still works as a one-tap "+1" for chip damage.
+   */
+  getRowMemberDamageValue(member: GruntMember): number {
+    return this.rowMemberDamageValues.get(member) ?? DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
+  }
+
+  /**
+   * Set the DV the next hit on this NPC will apply. Clamped to at least one box
+   * (a DV of 0 is not an attack) and to no more than a full Condition Monitor's
+   * worth plus the row's own headroom - the excess is discarded anyway, since
+   * grunts take no overflow damage (p. 379).
+   */
+  setRowMemberDamageValue(member: GruntMember, value: number): void {
+    const parsed = Math.floor(Number(value));
+    const safe = Number.isFinite(parsed)
+      ? Math.max(DEFAULT_ROW_MEMBER_DAMAGE_VALUE, Math.min(MAX_ROW_MEMBER_DAMAGE_VALUE, parsed))
+      : DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
+    this.rowMemberDamageValues.set(member, safe);
+  }
+
+  /**
+   * Template shorthands for the two damage buttons. Both types go on the same
+   * combined track (p. 379); the type *and the DV* are still recorded because
+   * together they decide alive-or-dead once the NPC drops (p. 379: Stun, or
+   * Physical with DV less than Body, means alive; Physical with DV greater than
+   * Body means dead). That is why these default to the GM-entered DV rather
+   * than a fixed single box - with a fixed 1-box tap the recorded final DV
+   * would always be 1 and a grunt killed by a 9P burst would report "alive".
+   */
+  hitRowMemberPhysical(row: NpcRowParticipant, member: GruntMember, boxes = this.getRowMemberDamageValue(member)) {
     return this.applyRowMemberDamage(row, member, boxes, "physical");
   }
 
-  hitRowMemberStun(row: NpcRowParticipant, member: GruntMember, boxes = 1) {
+  hitRowMemberStun(row: NpcRowParticipant, member: GruntMember, boxes = this.getRowMemberDamageValue(member)) {
     return this.applyRowMemberDamage(row, member, boxes, "stun");
   }
 
-  /** Undo a mis-keyed hit / heal an NPC, re-syncing the row's shared score. */
+  /**
+   * Undo a mis-keyed hit / heal an NPC, re-syncing the row's shared score.
+   *
+   * The house rule runs in both directions (Decision 1), so a heal that takes
+   * the NPC back below a Wound Modifier threshold gives the *whole row* its
+   * shared penalty back — and gets the same log line the wound got, for the
+   * same reason: a GM watching every member of the row speed up at once needs
+   * to see that it was the house rule and which NPC caused it.
+   *
+   * **Healing a downed NPC brings it back up** (brief Decision 13,
+   * `RULINGS.md` 2026-08-07, reversing the 2026-08-02 refusal): out-of-action
+   * is derived live from the box count, so taking boxes off puts the NPC back
+   * on its feet, restores it to `activeMembers`, and un-flags the row if it was
+   * the last one standing. This is now the correction path for a mis-keyed
+   * killing blow, in place of global Undo.
+   *
+   * Log privacy as in `applyRowMemberDamage`: the GM sees the running damage
+   * total, players see only that healing happened (Decision 17). The Condition
+   * Monitor's maximum is dropped from the GM's copy too (Decision 25,
+   * `RULINGS.md` 2026-08-13).
+   */
   healRowMember(row: NpcRowParticipant, member: GruntMember, boxes: number) {
     UndoHandler.StartActions();
+    const actor = this.rowLogActor(row);
+    // Read before the call so the "back on its feet" line can be written from
+    // the transition rather than inferred from the post-heal state alone.
+    const wasOutOfAction = member.outOfAction;
     const result = row.healMember(member, boxes);
     if (result.healed > 0) {
-      this.appendSharedLog(row.name || "NPC Row",
-        `${member.name} healed ${result.healed} (${member.damage}/${member.conditionMonitorBoxes})`);
+      this.logRowEvent(actor,
+        `${member.name} healed ${result.healed} (${member.damage})`,
+        `${member.name} healed ${result.healed}`);
     }
+    if (wasOutOfAction && !member.outOfAction) {
+      // The reversal that Decision 13 exists for. Said out loud in both logs:
+      // the NPC is back in the row's rotation from this moment on, which is
+      // exactly the kind of change a GM must not have to infer.
+      this.logRowEvent(actor, `${member.name} is back in action - Condition Monitor no longer full`);
+    }
+    if (result.scoreDelta !== 0) {
+      // The ROW's applied delta, not the member's raw recovery: the row's
+      // shared accumulator is floored at 0, so an NPC who arrived wounded can
+      // recover four steps while the row gives back only the one it was
+      // actually carrying. Logging the member's number there would claim a
+      // shared-score movement that never happened.
+      //
+      // GM-only for the same reason the damage path's copy is (Decision 17).
+      this.logGmOnlyRowEvent(actor, formatGroupWoundLogText(
+        actor, member.name,
+        result.rowWoundModifierDelta,
+        result.scoreAfter
+      ));
+    }
+    // A heal can *un*-spend a row (Decision 13 + Decision 14), so the spent flag
+    // has to be re-evaluated here too, not only on the damage path.
+    this.flagSpentNpcRows();
     this.syncSharedState();
     this.sort();
     return result;
@@ -2981,11 +4841,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * so the GM rolls its own Initiative Test, and `addParticipant` applies the
    * ordinary late-entry penalty for elapsed passes (p. 160). Decision 7's "no
    * penalty" covers joining a row, not leaving one.
+   *
+   * **The default factory must stay a `DetachedGruntParticipant`.** This is the
+   * only production caller of `detachMember`, and the template calls it with
+   * two arguments, so this default *is* what every Detach tap constructs.
+   * Defaulting it to a bare `Participant` (as it briefly did) silently gave
+   * every detached grunt the PC shape of two independent Condition Monitors —
+   * roughly double the boxes it had a moment earlier — contradicting p. 379 and
+   * p. 381 ("They possess a single Condition Monitor, like other grunts") and
+   * bypassing the class written to satisfy them. `NpcRowParticipant.detachMember`
+   * has the same default, but a parameter default in the caller shadows it.
    */
   detachRowMember(
     row: NpcRowParticipant,
     member: GruntMember,
-    factory: () => Participant = () => new Participant()
+    factory: () => Participant = () => new DetachedGruntParticipant()
   ): Participant | null {
     UndoHandler.StartActions();
     const detached = row.detachMember(member, factory);
@@ -3003,20 +4873,72 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       physical: Math.max(0, Number(detached.physicalDamage || 0)),
       stun: Math.max(0, Number(detached.stunDamage || 0))
     });
-    this.appendSharedLog(row.name || "NPC Row",
+    this.logRowEvent(this.rowLogActor(row),
       `${member.name} detached from the row onto their own initiative`);
-    for (const spent of this.combatManager.removeSpentNpcRows()) {
-      this.forgetParticipant(spent);
-    }
+    // Detaching the last NPC empties the row, but that is tidying up, not a
+    // wipe-out: the row is left as a plain empty row, not flagged/ooc/styled
+    // red (brief Decision 21, `RULINGS.md` 2026-08-13, narrowing Decision 14
+    // to the damage case). `flagSpentNpcRows()` still has to run so the row
+    // gives up the current-actor slot if it was the one acting.
+    this.flagSpentNpcRows();
     this.syncSharedState();
     this.sort();
     return detached;
   }
 
-  /** Remove an NPC from a row outright (GM correction, no standalone entry). */
-  removeRowMember(row: NpcRowParticipant, member: GruntMember) {
+  /**
+   * Remove an NPC from a row outright (GM correction, no standalone entry).
+   *
+   * **Always prompts first** (brief Decision 21, `RULINGS.md` 2026-08-13
+   * "Emptying a row by hand is not the same as wiping it out") - Xavier's own
+   * wording: "this is for all participant rows, it should prompt and offer to
+   * delete." Same `confirmationDialog.simpleConfirm` pattern `btnDelete_Click`
+   * uses. When the NPC being removed is the row's **last**, the same prompt
+   * also offers to delete the now-empty row: a single "Yes" does both, in one
+   * undo chapter, rather than leaving a corpse-free empty row behind for a
+   * second tap the GM has to remember to make. Declining leaves everything
+   * untouched.
+   *
+   * Deleting the row this way runs the exact same undoable side-map cleanup
+   * `btnDelete_Click` does (`forgetParticipant`), including
+   * `forgetMapEntry(this.rowMemberDamageValues, member)` for the member's own
+   * queued Damage Value - otherwise undo would restore the row with a fresh,
+   * defaulted set of GM-local bookkeeping (ARCHITECTURE.md §7/§8).
+   *
+   * Never raises `spentFlagged` or `ooc` (Decision 21): a row emptied this way
+   * is not "wiped out", so `flagSpentNpcRows()` - which still has to run so a
+   * mid-turn removal gives up the current-actor slot - reads it through
+   * `NpcRowParticipant.isWipedOut`, not the broader `isSpent`, and leaves it
+   * unflagged. Only called when the row survives the tap (i.e. not the last
+   * member), since a deleted row has nothing left to flag.
+   */
+  async removeRowMember(row: NpcRowParticipant, member: GruntMember): Promise<void> {
+    LogHandler.log(this.currentBTTime, (member.name || "NPC") + " RemoveRowMember_Click");
+    const isLastMember = row.members.length === 1 && row.members[0] === member;
+    const confirmationText = isLastMember
+      ? `Are you sure you want to remove ${member.name || "this NPC"}? `
+        + "It is the last NPC in the row - the now-empty row will be deleted too."
+      : `Are you sure you want to remove ${member.name || "this NPC"} from the row?`;
+    const confirmed = await this.confirmationDialog.simpleConfirm(confirmationText);
+    if (!confirmed) {
+      LogHandler.log(this.currentBTTime, (member.name || "NPC") + " RemoveRowMember_Cancel");
+      return;
+    }
+    LogHandler.log(this.currentBTTime, (member.name || "NPC") + " RemoveRowMember_Confirm");
     UndoHandler.StartActions();
     row.removeMember(member);
+    this.forgetMapEntry(this.rowMemberDamageValues, member);
+    this.logRowEvent(this.rowLogActor(row), `${member.name} removed from the row`);
+    if (isLastMember) {
+      // The row is now a plain empty row (Decision 21) - the prompt already
+      // offered to delete it, so finish the job in the same undo chapter
+      // rather than leaving the GM a second tap to remember.
+      this.forgetParticipant(row);
+      this.combatManager.removeParticipant(row);
+      this.clearGmRollAttributionIfNamed(row.name || "");
+    } else {
+      this.flagSpentNpcRows();
+    }
     this.syncSharedState();
     this.sort();
   }
@@ -3028,24 +4950,63 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * `btnDelete_Click` has to do this too.
    */
   private forgetParticipant(p: IParticipant) {
-    this.declaredActionSelections.delete(p);
     const id = this.participantIds.get(p);
     if (id) {
-      this.lastKnownDamage.delete(id);
+      this.forgetMapEntry(this.lastKnownDamage, id);
     }
-    this.participantIds.delete(p);
-    this.participantOwners.delete(p);
-    this.participantClaimable.delete(p);
-    this.participantEdgeRatings.delete(p);
-    this.participantReactions.delete(p);
-    this.participantIntuitions.delete(p);
-    this.participantTieBreakers.delete(p);
-    this.expandedRowPanels.delete(p);
-    this.expandedDeckPanels.delete(p);
-    this.expandedAstralPanels.delete(p);
+    this.forgetMapEntry(this.declaredActionSelections, p);
+    this.forgetMapEntry(this.participantIds, p);
+    this.forgetMapEntry(this.participantOwners, p);
+    this.forgetMapEntry(this.participantClaimable, p);
+    this.forgetMapEntry(this.participantEdgeRatings, p);
+    this.forgetMapEntry(this.participantReactions, p);
+    this.forgetMapEntry(this.participantIntuitions, p);
+    this.forgetMapEntry(this.participantTieBreakers, p);
+    this.forgetSetEntry(this.expandedRowPanels, p);
+    this.forgetSetEntry(this.expandedDeckPanels, p);
+    this.forgetSetEntry(this.expandedAstralPanels, p);
     if (this.selectedActor === p) {
-      this.selectedActor = null;
+      const previous = this.selectedActor;
+      UndoHandler.DoAction(
+        () => { this.selectedActor = null; },
+        () => { this.selectedActor = previous; }
+      );
     }
+  }
+
+  /**
+   * Delete one side-map entry **undoably**.
+   *
+   * The side maps are keyed by object identity and hold state the domain model
+   * does not (`participantIds`, the ERIC tie-break inputs, ownership, panel
+   * state — ARCHITECTURE.md §7/§8). Dropping them outside an undo closure makes
+   * the removal only half-undoable: the participant comes back from the undo
+   * stack, but with a brand-new id, a defaulted Reaction/Intuition, a fresh
+   * random coin-toss tie-breaker, and it broadcasts to players as if it were
+   * somebody new. Routed through `UndoHandler.DoAction` (the non-property
+   * mutation primitive, §4) so they land in the same chapter as the list
+   * removal that triggered them.
+   */
+  private forgetMapEntry<K, V>(map: Map<K, V>, key: K): void {
+    if (!map.has(key)) {
+      return;
+    }
+    const value = map.get(key) as V;
+    UndoHandler.DoAction(
+      () => { map.delete(key); },
+      () => { map.set(key, value); }
+    );
+  }
+
+  /** `forgetMapEntry` for the panel-expansion `Set`s. */
+  private forgetSetEntry<T>(set: Set<T>, key: T): void {
+    if (!set.has(key)) {
+      return;
+    }
+    UndoHandler.DoAction(
+      () => { set.delete(key); },
+      () => { set.add(key); }
+    );
   }
 
   isDeckPanelExpanded(p: IParticipant): boolean {

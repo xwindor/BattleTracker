@@ -1,3 +1,8 @@
+/* DUPLICATED, deliberately (same reasoning as Open Decision 4): this chip
+   idiom also exists in matrix/matrix-participant-badge/
+   matrix-participant-badge.component.css. Emulated view encapsulation means
+   neither component can see the other's copy, so the two are kept
+   byte-identical by hand rather than hoisted to styles.scss. */
 .astral-badge {
   display: inline-flex;
   align-items: center;

@@ -49,6 +49,10 @@ obj/Debug/
 .vscode/settings.json
 src/assets/version.txt
 
+# Durable room storage (one JSON file per room, written by server.js).
+# Must never be committed and must survive a `git pull` deploy.
+/data/
+
 .claude/worktrees/
 .claude/settings.local.json
 rules/

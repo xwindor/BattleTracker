@@ -119,14 +119,14 @@ export function formatLogEntryReference(actor: string, text: string): string {
 
 /**
  * Initiative Test line: Initiative attribute + the Initiative Dice actually
- * rolled = Initiative Score (brief p. 160). The dice subtotal is shown next to
- * the faces so the arithmetic is checkable at a glance. `total` is printed
- * verbatim, including negative Scores, which are never clamped to 0
- * (ARCHITECTURE.md §1; brief p. 160).
+ * rolled = Initiative Score (brief p. 160). The faces are shown in brackets;
+ * their count already signifies how many Initiative Dice were rolled, so no
+ * separate subtotal is printed. `total` is printed verbatim, including
+ * negative Scores, which are never clamped to 0 (ARCHITECTURE.md §1; brief
+ * p. 160).
  */
 export function formatInitiativeRollLogText(baseLabel: string, values: readonly number[], total: number): string {
-  const subtotal = values.reduce((s, v) => s + v, 0);
-  return `initiative roll: ${baseLabel} + [${values.join(", ")}] (${subtotal}) = ${total}`;
+  return `initiative roll: ${baseLabel} + [${values.join(", ")}] = ${total}`;
 }
 
 /** Initiative Test entered by hand rather than rolled in the app. */
@@ -146,6 +146,41 @@ export function formatInitiativeDeltaLogText(values: readonly number[], delta: n
   return values.length > 0
     ? `initiative delta: ${dice} = ${sign}${magnitude} → score: ${total}`
     : `initiative delta: ${dice} → score: ${total}`;
+}
+
+/**
+ * Linked NPC row: a member's wound moved the row's **shared** Initiative Score
+ * (brief "NPC Group Initiative" acceptance criterion 5 / Decision 1, house rule
+ * against p. 379 / p. 170; `RULINGS.md` 2026-08-01).
+ *
+ * Scenario S3 requires the log to make it visible both that the group-wide
+ * wound-debuff house rule fired and *which* NPC's wound triggered it, because
+ * the visible effect (every member of the row slowing down at once) is not
+ * what the printed rules would produce and a GM reading back the log would
+ * otherwise have no way to tell it from a bug.
+ *
+ * `woundModifierDelta` is **signed**, as the house rule runs in both
+ * directions: a positive delta is a wound (the row's Wound Modifier grew, its
+ * shared Score drops) and a negative delta is that penalty coming back off
+ * because the NPC was healed or the hit was corrected. A one-way "-N" rendering
+ * cannot express the second case, and the GM has to be able to see why a row's
+ * shared Score went *up* just as much as why it went down.
+ */
+export function formatGroupWoundLogText(
+  rowName: string,
+  memberName: string,
+  woundModifierDelta: number,
+  scoreAfter: number
+): string {
+  const row = (rowName || "").trim() || "NPC row";
+  const member = (memberName || "").trim() || "a member";
+  const magnitude = Math.abs(woundModifierDelta);
+  const healing = woundModifierDelta < 0;
+  const cause = healing
+    ? `${member}'s recovery (+${magnitude})`
+    : `${member}'s wound (-${magnitude})`;
+  return `group wound (house rule): ${cause} applies to `
+    + `all of ${row} → shared initiative score: ${scoreAfter}`;
 }
 
 /**
@@ -196,7 +231,7 @@ export function formatLogText(text: string): string {
 
 function formatLogTextCore(text: string): string {
   let formatted = escapeHtml(text);
-  const rollPattern = /(initiative roll:\s*)(-?\d+)/i;
+  const rollPattern = /(initiative roll:.*=\s*)(-?\d+)\s*$/i;
   if (rollPattern.test(formatted)) {
     return formatted.replace(rollPattern, `$1<span class="log-keyword-roll">$2</span>`);
   }

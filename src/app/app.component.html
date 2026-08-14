@@ -1,23 +1,16 @@
 <div class="content">
-  <nav class="navbar navbar-dark bg-dark py-0 mb-3 navbar-expand-lg" [hidden]="mode === 'player'">
-    <div class="container-fluid">
+  <!-- No `navbar-expand-lg`: it pins the bar to one non-wrapping line, and with
+       no `navbar-toggler` to go with it the brand and the version text were
+       crushed together on a small screen. Letting the bar wrap costs nothing on
+       desktop (it only wraps when it has to) and fixes the small end. -->
+  <nav class="navbar navbar-dark bg-dark py-0 mb-3" [hidden]="mode === 'player'">
+    <div class="container-fluid gap-2">
       <a class="navbar-brand" rel="home" href="#" title="BattleTracker">
-        <img style="height: 50px; object-fit: contain;" src="assets/logo.svg" alt="BattleTracker Logo">
+        <img class="navbar-logo" src="assets/logo.svg" alt="BattleTracker Logo">
       </a>
       <a id="navbar-title" class="navbar-brand" href="#">BattleTracker</a>
       <ul class="navbar-nav me-auto mb-2 mb-lg-0"></ul>
-      <div class="d-flex">
-        <div class="btn-group btn-group-sm me-3" role="group" aria-label="Skin selection">
-          @for (option of skinOptions; track option.id) {
-          <button type="button"
-            class="btn"
-            [class.btn-light]="skin === option.id"
-            [class.btn-outline-light]="skin !== option.id"
-            (click)="setSkin(option.id)">
-            {{ option.label }}
-          </button>
-          }
-        </div>
+      <div class="d-flex align-items-center flex-wrap gap-2">
         <span class="navbar-text">Version: {{ versionService.version }}</span>
         <!--<li *ngIf="!auth.authenticated()">
     <a href="#" (click)="auth.login()"><i class="fa fa-sign-in-alt fa-lg fa-inverse"></i> Login</a>

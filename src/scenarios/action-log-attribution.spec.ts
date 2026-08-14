@@ -643,9 +643,11 @@ describe('Action Log attribution, wording and coverage', () => {
       expect(sent.length).toBe(0);
     });
 
-    // S3: undo restores the state but emits no log line - `btnUndo_Click`
-    // calls `UndoHandler.Undo()` and nothing else. Existing behaviour, stated
-    // here so a future change to it is a deliberate one.
+    // S3: undo restores the state but emits no log line. `btnUndo_Click` now
+    // also re-broadcasts the resulting state (a claim release undone locally but
+    // not on the wire left the GM and the players disagreeing - see
+    // `src/scenarios/persistent-rooms.spec.ts`), but a broadcast is not a log
+    // entry: no line is written. Stated here so a future change is deliberate.
     it('S3 - undoing a mis-clicked Leave Combat emits no log line', () => {
       const p = addCombatant('Ganger Alpha');
       sent.length = 0;

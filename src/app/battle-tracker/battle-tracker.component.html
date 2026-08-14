@@ -1,14 +1,31 @@
 <div class="container-fluid">
   <div class="row mb-2">
-    <div class="col-9">
-      <div class="input-group input-group-sm">
+    <div class="col-12">
+      <div class="input-group">
         <button type="button" class="btn btn-outline-primary" (click)="btnCreateShareSession_Click()">Create Player Session</button>
         <input type="text" class="form-control" placeholder="Join room code" [(ngModel)]="shareJoinCode">
         <button type="button" class="btn btn-outline-secondary" (click)="btnJoinShareSession_Click()">Join Session</button>
         @if (shareRoomCode) {
-        <button type="button" class="btn btn-outline-danger" (click)="btnCloseShareSession_Click()">Close Room</button>
+        <button type="button" class="btn btn-outline-secondary" data-testid="close-room-btn"
+          title="Leave this room. It stays saved and you can rejoin the same code later."
+          (click)="btnCloseShareSession_Click()">Close Room</button>
+        <button type="button" class="btn btn-outline-danger" data-testid="end-room-btn"
+          title="Permanently delete this room and its saved encounter."
+          (click)="btnEndShareSession_Click()">End Room</button>
         }
       </div>
+      @if (shareConnectionLost) {
+      <div class="small text-warning mt-1" data-testid="share-connection-lost">
+        Session server unreachable - players are NOT receiving updates.
+      </div>
+      }
+      @if (restoreWarning) {
+      <div class="small text-warning mt-1" data-testid="restore-warning">
+        {{ restoreWarning }}
+        <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline"
+          (click)="dismissRestoreWarning()">Dismiss</button>
+      </div>
+      }
       @if (shareRoomCode) {
       <div class="small text-success mt-1">
         Room {{ shareRoomCode }}
@@ -28,10 +45,10 @@
     </div>
   </div>
   <div class="row">
-    <div class="col-9">
+    <div class="col-12">
       <div class="row">
-        <div class="col-6" style="padding-left: 0">
-          <div class="left btn-group" role="group">
+        <div class="col-6 gm-toolbar-col">
+          <div class="btn-group" role="group">
             @if(!combatManager.started)
             {
             <button type="button" class="btn btn-primary" (click)="btnStartRound_Click()">
@@ -70,7 +87,7 @@
             Pending rolls: {{ getPendingOutstandingRollCount() }}
             (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
           </div>
-          <div class="btn-group btn-group-sm" role="group">
+          <div class="btn-group" role="group">
             <button type="button" class="btn btn-outline-primary" (click)="btnRequestPlayerRolls_Click()"
               [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">
               Request Player Rolls
@@ -95,63 +112,128 @@
   </div>
   <br>
   <div class="row">
-    <div class="col-9">
+    <!-- Open Decision 2: the 9/12 main column applies only while the details
+         panel is actually open. With nothing selected it used to waste 25% of
+         a wide desktop permanently. -->
+    <div class="col-12" [class.col-lg-9]="selectedActor !== null && selectedActor !== undefined">
       @for (msg of icAlertMessages; track $index) {
       <div class="ic-alert-strip" role="alert">
         <span class="ic-alert-text"><strong>&#9888; IC Alert</strong> — {{ msg }}</span>
         <button type="button" class="ic-alert-dismiss" (click)="dismissIcAlert($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
-      <div class="row bg-dark text-light">
-        <div class="col-4 col-xl-2">
+      <!-- Header cells must line up with the participant-row cells beneath them
+           at every width (AC 10). Both use the SAME breakpoint family as the
+           player view (lg) — the GM view used to use xl, so between 992 and
+           1200px the row split into two 12-column lines while the header
+           described only the first, and the trailing cell — which had no
+           col-* class in force below xl — drew an empty full-width strip under
+           the labels. Below md the row cells stack full width, so the header
+           describes nothing and is hidden rather than drawn as three orphaned
+           labels. -->
+      <div class="row bg-dark text-light d-none d-md-flex">
+        <div class="col-md-4 col-lg-2">
           <span class="h5">
             <b>Name</b>
           </span>
         </div>
-        <div class="col-2 col-xl-1 text-center">
+        <div class="col-md-2 col-lg-1 text-center">
           <span class="h5">
             <b>Ini</b>
           </span>
         </div>
-        <div class="col-6 col-xl-3 text-center">
+        <div class="col-md-6 col-lg-3 text-center">
           <span class="h5">
-            <b>Stats / Dice Roll</b>
+            <b>Stats / Dice Pool</b>
           </span>
         </div>
-        <div class="col-xl-6"></div>
+        <!-- The rolled Initiative total has its own column: it used to be the
+             10th child of the Stats input-group, where it was the first thing
+             to be squeezed off and was routinely clipped. Only labelled at lg —
+             below that the column sits on the row's second 12-column line,
+             which this header does not describe. -->
+        <div class="d-none d-lg-block col-lg-2 text-center">
+          <span class="h5">
+            <b>Rolled Initiative</b>
+          </span>
+        </div>
+        <div class="d-none d-lg-block col-lg-4"></div>
       </div>
 
       <div cdkDropList (cdkDropListDropped)="drop($event)">
         @for(p of combatManager.participants.items; track $index; let i = $index; let last = $last) {
         <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
           (click)="selectActor(p)" [class]="getParticipantStyles(p)" cdkDrag>
-          <div class="col-4 col-xl-2 d-flex align-items-center">
+          <div class="col-12 col-md-4 col-lg-2 d-flex align-items-center gap-1">
+            <!-- Merge tick (addendum Decision 10): only a standalone grunt can
+                 be folded into a group, so only a grunt gets the box. -->
+            @if (isMergeableGruntCandidate(p)) {
+            <input type="checkbox" class="form-check-input mt-0 merge-select-box"
+              data-testid="merge-select-box"
+              [checked]="isSelectedForMerge(p)"
+              (click)="$event.stopPropagation()"
+              (change)="toggleMergeSelection(p)"
+              title="Select for merging into a Grunt Group (only before this grunt has rolled Initiative this Combat Turn)">
+            }
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
+            <!-- Identification badges (addendum Decision 12): presentation only.
+                 A group row and a lone grunt both read differently from a PC or
+                 an ordinary NPC and have to be tellable apart at a glance. -->
+            @if (isNpcRow(p)) {
+            <span class="participant-badge participant-badge-group" data-testid="badge-npc-row"
+              title="Grunt Group: several NPCs on one shared Initiative Score, acting back-to-back in this slot (p. 379)">GROUP</span>
+            }
+            @else if (hasGruntConditionMonitor(p)) {
+            <span class="participant-badge participant-badge-grunt" data-testid="badge-grunt"
+              title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (p. 379)">GRUNT</span>
+            }
           </div>
-          <div class="col-2 col-xl text-center d-flex align-items-center justify-content-center">
+          <div class="col-12 col-md-2 col-lg-1 text-center d-flex align-items-center justify-content-center">
             <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
           </div>
-          <div class="col-6 col-xl-3 text-center gm-stats-col d-flex align-items-center">
-            <div class="input-group input-group-sm gm-stats-roll-group">
-              <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
-              <input class="form-control text-center gm-stat-input" type="number"
-                [ngModel]="getParticipantEdgeRatingValue(p)"
-                (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
-              <input class="form-control text-center gm-stat-input" type="number"
-                [ngModel]="getParticipantReactionValue(p)"
-                (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
-              <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
-              <input class="form-control text-center gm-stat-input" type="number"
-                [ngModel]="getParticipantIntuitionValue(p)"
-                (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
-              <span class="input-group-text gm-stat-chip gm-chip-initdice" title="Initiative Dice">D</span>
-              <input class="form-control text-center gm-dice-count-input" type="number"
-                [ngModel]="p.dices"
-                (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
-                [min]="1"
-                title="Initiative Dice">
+          <div class="col-12 col-md-6 col-lg-3 text-center gm-stats-col d-flex align-items-center">
+            <div class="input-group gm-stats-roll-group">
+              <!-- Each chip+input is an atomic, unbreakable pair (Xavier: "D
+                   should stick with its right most box if it gets shrunken
+                   horizontally"). The group below may wrap between pairs,
+                   never inside one - see `.gm-stat-pair` in
+                   battle-tracker.component.css. -->
+              <div class="gm-stat-pair">
+                <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="getParticipantEdgeRatingValue(p)"
+                  (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
+              </div>
+              <div class="gm-stat-pair">
+                <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="getParticipantReactionValue(p)"
+                  (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
+              </div>
+              <div class="gm-stat-pair">
+                <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
+                <input class="form-control text-center gm-stat-input" type="number"
+                  [ngModel]="getParticipantIntuitionValue(p)"
+                  (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
+              </div>
+              <div class="gm-stat-pair">
+                <span class="input-group-text gm-stat-chip gm-chip-initdice" title="Initiative Dice">D</span>
+                <input class="form-control text-center gm-dice-count-input" type="number"
+                  [ngModel]="p.dices"
+                  (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
+                  [min]="1"
+                  title="Initiative Dice">
+              </div>
+            </div>
+          </div>
+          <!-- Rolled Initiative: its own column (header "Rolled Initiative"
+               above). The input and the roll-die button are one input-group so
+               they stay adjacent and the same height; they used to be the last
+               two children of the Stats group, where the input was the first
+               thing squeezed and was clipped at any laptop width. -->
+          <div class="col-12 col-md-3 col-lg-2 text-center gm-rolled-ini-col d-flex align-items-center">
+            <div class="input-group gm-rolled-ini-group">
               <!-- One-way binding + explicit handler (same shape as the dice-count
                    box above): the typed value must be clamped *before* it reaches
                    the Score-moving `diceIni` setter, otherwise an out-of-range
@@ -170,7 +252,15 @@
               </div>
             </div>
           </div>
-          <div class="col-7 col-xl-3 btn-group" role="group">
+          <!-- Was a Bootstrap `.btn-group`: a connected, single-line button
+               bar. Up to four buttons appear here depending on combat state
+               (Seize Initiative / Act / Delay / Interrupts) and a `.btn-group`
+               does not wrap - confirmed to overflow this column and paint
+               over the trailing Deck/Awakened/Private column at every width
+               from 1024 to 1920px whenever more than two buttons were
+               present. `.gm-action-buttons` (below) wraps instead. `role`
+               kept for the same grouping semantics. -->
+          <div class="col-12 col-md-5 col-lg-2 gm-action-buttons" role="group">
             @if (!p.edge
             && (!combatManager.started || (combatManager.passEnded && p.getCurrentInitiative() > 10)))
             {
@@ -178,12 +268,22 @@
               Seize Initiative
             </button>
             }
-            @if(combatManager.started && (p.status === 1 || p.status === 2))
+            <!-- A grunt row has no whole-row Act button (brief "NPC Group
+                 Initiative" Decision 22): a group does not take one action -
+                 its members each take their own, from the per-member Act
+                 control in the row panel below (Decision 23). Ordinary
+                 participants keep this button unchanged. -->
+            @if(combatManager.started && (p.status === 1 || p.status === 2) && !isNpcRow(p))
             {
             <button type="button" class="btn btn-primary" (click)="btnAct_Click(p, actModalContent)">
               Act
             </button>
             }
+            <!-- Delay is kept for a row, unlike Act (Decision 22): delaying
+                 moves the row's single shared slot in the order later, which
+                 is coherent for the group as a whole - it does not need to
+                 pick which member's action that is, the way an "Act" tap
+                 would. -->
             @if (combatManager.started && p.status === 1)
             {
             <button type="button" class="btn btn-warning" (click)="btnDelay_Click(p)">
@@ -196,7 +296,13 @@
                  Affordability is gated per action by canUseAction() below,
                  which refuses any interrupt costing more Score than is left
                  (brief F9, p. 167). -->
-            @if (combatManager.started) {
+            <!-- Members of a linked NPC row cannot take Interrupt Actions at all
+                 (brief "NPC Group Initiative" criterion 17 / Decision 3, a
+                 deliberate departure from p. 167): there is no coherent way for
+                 one member to pay a cost out of a score the whole row shares.
+                 The dropdown is simply hidden - no explanatory label, which was
+                 overflowing into the next column. -->
+            @if (combatManager.started && !isNpcRow(p)) {
             <div class="btn-group p-0" #interruptDropdown ngbDropdown autoClose="outside">
               <button ngbDropdownToggle id="interruptDropdownButton" type="button" class="btn btn-secondary"
                 dropdownToggle>
@@ -217,7 +323,7 @@
                           {{ getActionLabel(action) }} ({{ action.iniMod }})
                         </label>
                       </div>
-                      <button type="button" class="btn btn-outline-secondary btn-sm interrupt-twirl"
+                      <button type="button" class="btn btn-outline-secondary interrupt-twirl"
                         (click)="toggleActionDetails($event, action)" [attr.aria-expanded]="isActionDetailsOpen(action)"
                         [attr.title]="isActionDetailsOpen(action) ? 'Hide details' : 'Show details'">
                         <i class="fa fa-circle-info" aria-hidden="true"></i>
@@ -232,7 +338,7 @@
                         [attr.title]="getActionTooltip(action)">
                         {{ getActionLabel(action) }} ({{ action.iniMod }})
                       </button>
-                      <button type="button" class="btn btn-outline-secondary btn-sm interrupt-twirl"
+                      <button type="button" class="btn btn-outline-secondary interrupt-twirl"
                         (click)="toggleActionDetails($event, action)" [attr.aria-expanded]="isActionDetailsOpen(action)"
                         [attr.title]="isActionDetailsOpen(action) ? 'Hide details' : 'Show details'">
                         <i class="fa fa-circle-info" aria-hidden="true"></i>
@@ -251,51 +357,96 @@
             </div>
             }
           </div>
-          <div class="col-5 col-xl-3 text-right">
-            <div class="d-flex flex-column gap-1 align-items-end">
-              <div class="d-flex gap-1">
-                <button type="button" class="btn"
-                  [class.btn-secondary]="isDeckPanelExpanded(p)"
-                  [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
-                  (click)="toggleDeckPanel(p)"
-                  title="Cyberdeck configuration">
-                  Deck
-                </button>
-                <button type="button" class="btn"
-                  [class.btn-warning]="isAstralPanelExpanded(p)"
-                  [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
-                  [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
-                  (click)="toggleAstralPanel(p)"
-                  title="Awakened — astral projection">
-                  Awakened
-                </button>
-                <button type="button"
-                  class="btn"
-                  [class.btn-outline-info]="!isParticipantClaimable(p)"
-                  [class.btn-info]="isParticipantClaimable(p)"
-                  [attr.title]="isParticipantClaimable(p) ? 'Character can be claimed by players' : 'Character cannot be claimed by players'"
-                  (click)="btnToggleClaimable_Click(p)">
-                  {{ isParticipantClaimable(p) ? "Claimable" : "Private" }}
-                </button>
-              </div>
-              <div class="d-flex gap-1">
-                <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
-                  <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
-                </button>
-                @if(p.ooc){
-                <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
-                  <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
-                </button>
-                }
-                @else {
-                <button type="button" class="btn btn-warning" (click)="btnLeaveCombat_Click(p)">
-                  <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
-                </button>
-                }
-                <button type="button" class="btn btn-danger" (click)="btnDelete_Click(p)">
-                  <i class="fa fa-trash fa-lg"></i>
-                </button>
-              </div>
+          <!-- `text-right` was a Bootstrap 4 class; this app is on Bootstrap 5
+               (`text-end`), so it was a dead no-op - the actual right-alignment
+               comes from `justify-content: flex-end` on `.gm-trailing-actions`
+               below. Dropped rather than fixed to `text-end`, since there is no
+               text content directly in this column to align. -->
+          <div class="col-12 col-md-4 col-lg-2">
+            <!-- Deck(or Group)/Awakened/Claimable/Claimed/Duplicate/Enter-or-
+                 Leave/Delete: ONE wrapping flex row, not two hard-stacked rows
+                 (text buttons above, icon buttons below). The two-row split was
+                 presentational only and forced a participant row to be at least
+                 2-3 button-lines tall even when a later button (e.g. an icon
+                 button) had room to sit at the end of an earlier line. Xavier:
+                 "i dont like how tall each initiative participant is... because
+                 of the deck, awakened, private, copy, leave, and delete buttons
+                 all stacked ontop of eachother." `.gm-trailing-actions`
+                 (battle-tracker.component.css) right-aligns via
+                 `justify-content: flex-end` and, like `.gm-action-buttons`
+                 beside it, is capped to the column's own width so a line that
+                 doesn't fit wraps instead of overflowing LEFTWARD over the
+                 Actions column (confirmed at every width from 1024 to 1920px
+                 in the prior pass that introduced this column). -->
+            <div class="gm-trailing-actions">
+              @if (isNpcRow(p)) {
+              <button type="button" class="btn"
+                [class.btn-info]="isRowPanelExpanded(p)"
+                [class.btn-outline-info]="!isRowPanelExpanded(p)"
+                (click)="toggleRowPanel(p)"
+                title="The NPCs in this row and their Condition Monitors">
+                Group ({{ asNpcRow(p).activeMembers.length }}/{{ asNpcRow(p).members.length }})
+              </button>
+              }
+              @else {
+              <button type="button" class="btn"
+                [class.btn-secondary]="isDeckPanelExpanded(p)"
+                [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
+                (click)="toggleDeckPanel(p)"
+                title="Cyberdeck configuration">
+                Deck
+              </button>
+              }
+              <!-- A row is a group, not a character: it cannot project or jack
+                   in. An NPC in the row that changes Initiative type must be
+                   detached onto its own row first (criterion 13, pp. 159-160)
+                   - the Detach control in the Group panel below. -->
+              @if (!isNpcRow(p)) {
+              <button type="button" class="btn"
+                [class.btn-warning]="isAstralPanelExpanded(p)"
+                [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
+                [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
+                (click)="toggleAstralPanel(p)"
+                title="Awakened — astral projection">
+                Awakened
+              </button>
+              }
+              <button type="button"
+                class="btn"
+                [class.btn-outline-info]="!isParticipantClaimable(p)"
+                [class.btn-info]="isParticipantClaimable(p)"
+                [attr.title]="isParticipantClaimable(p) ? 'Character can be claimed by players' : 'Character cannot be claimed by players'"
+                (click)="btnToggleClaimable_Click(p)">
+                {{ isParticipantClaimable(p) ? "Claimable" : "Private" }}
+              </button>
+              <!-- A claim can outlive the client that made it (a player who
+                   reloaded during a server restart comes back with a new
+                   token). Without this the character is stuck: nobody holds
+                   the claim and no player can re-take it. One tap, undoable. -->
+              @if (isParticipantClaimed(p)) {
+              <button type="button" class="btn btn-outline-warning"
+                data-testid="release-claim-btn"
+                [attr.title]="getClaimOwnerHint(p)"
+                (click)="btnReleaseClaim_Click(p)">
+                Claimed <i class="fas fa-unlock"></i>
+              </button>
+              }
+              <button type="button" class="btn btn-primary" (click)="btnDuplicate_Click(p)">
+                <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
+              </button>
+              @if(p.ooc){
+              <button type="button" class="btn btn-success" (click)="btnEnterCombat_Click(p)">
+                <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
+              </button>
+              }
+              @else {
+              <button type="button" class="btn btn-warning" (click)="btnLeaveCombat_Click(p)">
+                <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
+              </button>
+              }
+              <button type="button" class="btn btn-danger" (click)="btnDelete_Click(p)">
+                <i class="fa fa-trash fa-lg"></i>
+              </button>
             </div>
           </div>
           @if (p.actionHistory.length > 0) {
@@ -314,7 +465,127 @@
           </div>
           }
         </div>
-        @if (isDeckPanelExpanded(p)) {
+        <!-- Linked NPC row panel: the group's NPCs, each with its own Condition
+             Monitor (brief criteria 3-4, 7, p. 379). There is deliberately no
+             group-wide Condition Monitor and no shared damage anywhere here
+             (criterion 18). -->
+        @if (isNpcRow(p) && isRowPanelExpanded(p)) {
+        <div class="row npc-row-panel py-2 px-3 mb-1" attr.id="npcRow{{i}}">
+          <div class="col">
+            <!-- The old "One Initiative Test for the whole row (p. 379); shared
+                 score N" line lived here and was removed (brief Decision 19):
+                 the shared score is already in the row's own header one line
+                 up, and the row badge already says it is a group. -->
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <!-- Which NPCs still owe an action this pass (Decision 18), at a
+                   glance, without expanding anything further. -->
+              <span class="small text-muted npc-row-acted-summary"
+                title="How many of the NPCs still standing in this row have already gone this Initiative Pass">
+                {{ getRowActedSummary(asNpcRow(p)) }}
+              </span>
+              <button type="button" class="btn btn-sm btn-outline-primary ms-auto npc-row-add-member"
+                (click)="addNpcToRow(asNpcRow(p))"
+                title="Add an NPC to this row — it inherits the row's current shared Initiative Score">
+                Add NPC
+              </button>
+            </div>
+            @if (asNpcRow(p).members.length === 0) {
+            <div class="small text-muted">No NPCs in this row yet.</div>
+            }
+            @for (m of asNpcRow(p).members; track $index; let mi = $index) {
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-1 npc-row-member"
+              attr.id="npcRow{{i}}member{{mi}}" [class.npc-row-member-down]="m.outOfAction"
+              [class.npc-row-member-acted]="isRowMemberActed(m)">
+              <!-- Per-NPC Act control (brief Decisions 18 & 23). The row is
+                   one participant, so the engine's Waiting/Active/Finished
+                   state cannot say which member has gone; this is the
+                   row-member equivalent of an ordinary participant's Act
+                   button. Not yet acted: opens the same Act modal an
+                   ordinary participant gets, scoped to this NPC - the
+                   declared action is logged attributed to it and it is
+                   marked acted on submit. Already acted: one tap un-marks it
+                   (Decision 18's mis-tap correction), no modal, no second log
+                   line. Disabled while not acted unless the row is actually
+                   up (Decision 24: the row must be the current actor and
+                   still have a live Action Phase); the "un-mark" direction is
+                   never gated, so a mis-tap can always be corrected. Hidden
+                   for a downed NPC, which is skipped when the row comes up
+                   anyway (p. 379). -->
+              @if (!m.outOfAction) {
+              <button type="button" class="btn btn-sm npc-row-acted"
+                [class.btn-primary]="isRowMemberActed(m)"
+                [class.btn-outline-primary]="!isRowMemberActed(m)"
+                [disabled]="!isRowMemberActed(m) && !canRowMemberAct(asNpcRow(p))"
+                (click)="isRowMemberActed(m)
+                  ? toggleRowMemberActed(m)
+                  : btnRowMemberAct_Click(asNpcRow(p), m, actModalContent)"
+                [attr.title]="isRowMemberActed(m)
+                  ? 'Has acted this pass — click to mark as still to go'
+                  : (canRowMemberAct(asNpcRow(p))
+                    ? 'Declare an action for this NPC'
+                    : 'Not this row current turn, or no live Action Phase at Score 0 or below')">
+                {{ isRowMemberActed(m) ? "Acted" : "Act" }}
+              </button>
+              }
+              <input class="form-control form-control-sm npc-row-member-name"
+                [ngModel]="m.name" (ngModelChange)="m.name = $event; onParticipantUpdated()"
+                placeholder="NPC name">
+              <div class="input-group input-group-sm gm-inline-input-group">
+                <span class="input-group-text gm-stat-chip" title="Body">B</span>
+                <input class="form-control text-center gm-stat-input" type="number" [min]="0"
+                  [ngModel]="m.body" (ngModelChange)="m.body = $event; onParticipantUpdated()">
+                <span class="input-group-text gm-stat-chip" title="Willpower">W</span>
+                <input class="form-control text-center gm-stat-input" type="number" [min]="0"
+                  [ngModel]="m.willpower" (ngModelChange)="m.willpower = $event; onParticipantUpdated()">
+              </div>
+              <!-- One combined Physical+Stun track, 8 + ceil(max(B,W)/2) boxes,
+                   no overflow (criterion 7, p. 379). -->
+              <span class="npc-row-cm" title="Condition Monitor: 8 + ceil(max(Body, Willpower) / 2), Physical and Stun on one track">
+                CM {{ m.damage }}/{{ m.conditionMonitorBoxes }}
+              </span>
+              <span class="npc-row-wm" title="This NPC's own wound modifier (p. 169)">WM -{{ m.wm }}</span>
+              <!-- Damage Value, not just "one more box": p. 379 decides a
+                   downed grunt's alive-or-dead from the DV of the final attack
+                   against his Body, so the DV of the hit has to be enterable.
+                   Left at 1 the two buttons behave exactly like the old +1
+                   taps. -->
+              <div class="input-group input-group-sm npc-row-damage gm-inline-input-group">
+                <span class="input-group-text gm-stat-chip"
+                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379).">DV</span>
+                <input class="form-control text-center gm-stat-input npc-row-dv" type="number" [min]="1"
+                  [ngModel]="getRowMemberDamageValue(m)"
+                  (ngModelChange)="setRowMemberDamageValue(m, $event)">
+                <button type="button" class="btn btn-sm btn-outline-danger npc-row-hit-physical"
+                  (click)="hitRowMemberPhysical(asNpcRow(p), m)"
+                  title="Apply that DV as Physical damage">P</button>
+                <button type="button" class="btn btn-sm btn-outline-warning npc-row-hit-stun"
+                  (click)="hitRowMemberStun(asNpcRow(p), m)"
+                  title="Apply that DV as Stun damage">S</button>
+                <button type="button" class="btn btn-sm btn-outline-success npc-row-heal"
+                  (click)="healRowMember(asNpcRow(p), m, 1)"
+                  title="Heal one box / take back a mis-keyed hit. Healing a downed NPC below a full Condition Monitor puts it back in the fight (p. 379).">-1</button>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary npc-row-detach"
+                (click)="detachRowMember(asNpcRow(p), m)"
+                title="Detach onto its own initiative row — required for Interrupt Actions, astral projection or a Matrix mode change">
+                Detach
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger npc-row-remove"
+                (click)="removeRowMember(asNpcRow(p), m)" title="Remove from the row">
+                <i class="fa fa-trash"></i>
+              </button>
+              @if (m.outOfAction) {
+              <span class="npc-row-down-badge"
+                title="Condition Monitor full — out of action for the rest of the fight (p. 379). Alive/dead is decided by the final attack (p. 379).">
+                out of action — {{ m.finalState }}
+              </span>
+              }
+            </div>
+            }
+          </div>
+        </div>
+        }
+        @if (!isNpcRow(p) && isDeckPanelExpanded(p)) {
         <div class="row deck-panel py-2 px-3 mb-1">
           @if (!isMatrix(p)) {
           <!-- Phase 0: No deck -->
@@ -329,7 +600,7 @@
           <div class="col">
             <!-- Deck stats + Remove Deck — always visible when deck is active -->
             <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-              <div class="input-group input-group-sm" style="width: auto">
+              <div class="input-group input-group-sm gm-inline-input-group">
                 <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
                 <input class="form-control text-center gm-stat-input" type="number"
                   [ngModel]="asMatrix(p).dataProcessing"
@@ -452,11 +723,48 @@
         }
       </div>
       <div>
-        <div colspan="8">
+        <!-- mt-3: these sat flush against the last initiative row, reading as
+             part of the track rather than as the controls that add to it. -->
+        <div class="mt-3">
           <button type="submit" class="btn btn-primary" (click)="btnAddParticipant_Click()" title="Add Participant">
             <i class="fa fa-plus fa-lg"></i>
           </button>
+          <!-- One Initiative Test, one slot in the order, several NPCs acting
+               back-to-back (brief "NPC Group Initiative" criteria 1-2,
+               p. 379). -->
+          <button type="button" class="btn btn-outline-primary ms-1" (click)="addNpcRow()"
+            title="Add a linked NPC row (grunt group): one shared Initiative Score, one slot in the order">
+            <i class="fa fa-users"></i> Grunt Group
+          </button>
+          <!-- One grunt-shaped NPC in its own initiative slot, rolling its own
+               Initiative Test (brief addendum Decision 9). Same single combined
+               Physical+Stun Condition Monitor as a detached grunt (p. 379). -->
+          <button type="button" class="btn btn-outline-primary ms-1" data-testid="add-grunt-btn"
+            (click)="btnAddGrunt_Click()"
+            title="Add a single grunt on its own Initiative Score: one combined Condition Monitor, no overflow (p. 379)">
+            <i class="fa fa-user-ninja"></i> Add Grunt
+          </button>
         </div>
+        <!-- Merge two or more standalone grunts into one linked row
+             (Decision 10). Only offered while it is legal - i.e. while none of
+             the ticked grunts has rolled Initiative for this Combat Turn; the
+             refusal itself is still reported out loud rather than hidden. -->
+        @if (getMergeSelectionCount() > 0) {
+        <div class="mt-2 merge-grunts-bar" data-testid="merge-grunts-bar">
+          <button type="button" class="btn btn-outline-info" data-testid="merge-grunts-btn"
+            [disabled]="!canMergeSelectedGrunts()"
+            (click)="mergeSelectedGrunts()"
+            title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn.">
+            <i class="fa fa-object-group"></i>
+            Merge {{ getMergeSelectionCount() }} into a Grunt Group
+          </button>
+          <button type="button" class="btn btn-link" data-testid="merge-grunts-clear"
+            (click)="clearMergeSelection()">Clear selection</button>
+        </div>
+        }
+        @if (mergeMessage) {
+        <div class="small mt-1 merge-grunts-message" data-testid="merge-grunts-message">{{ mergeMessage }}</div>
+        }
       </div>
       <div>
         @if (combatManager.started)
@@ -598,19 +906,92 @@
 
     @if (selectedActor !== null && selectedActor !== undefined)
     {
-    <div class="col-3 detailsBar">
+    <div class="col-12 col-lg-3 detailsBar">
       <div class="card">
         <div class="card-header">
           <h3>{{ selectedActor.name || "Selected Actor" }}</h3>
         </div>
         <div class="card-body">
           <nav ngbNav #nav="ngbNav" class="nav-tabs">
+            <!-- A linked NPC row has no Condition Monitor of its own: the row
+                 is a shared Initiative Score, the Condition Monitors belong to
+                 its NPCs one each (criteria 3-4 / 18, p. 379) and are edited in
+                 the row's own member panel. Rendering the PC two-track display
+                 here showed a phantom 10/10 + 10/10 that, when tapped, benched
+                 the entire row. -->
+            @if (!isNpcRow(selectedActor)) {
             <ng-container ngbNavItem>
               <button ngbNavLink>Condition Monitor</button>
               <ng-template ngbNavContent>
                 <h4>Condition Monitor</h4>
+                @if (hasGruntConditionMonitor(selectedActor)) {
+                <!-- A detached grunt is still a grunt: ONE combined Physical +
+                     Stun track of 8 + ceil(max(Body, Willpower)/2) boxes, no
+                     overflow (p. 379; p. 381 "They possess a single Condition
+                     Monitor, like other grunts"). Two independent bars would
+                     show it as roughly twice as healthy as it is. -->
                 <div class="row">
-                  <div class="col-xl-6 cm">
+                  <div class="col-12 cm">
+                    <app-condition-monitor class="grunt-cm"
+                      [health]="asGrunt(selectedActor).physicalHealth"
+                      [overflow]="asGrunt(selectedActor).overflowHealth"
+                      [painTolerance]="asGrunt(selectedActor).painTolerance"
+                      [hasPainEditor]="asGrunt(selectedActor).hasPainEditor"
+                      [damage]="asGrunt(selectedActor).combinedDamage"
+                      (damageChange)="onGruntCombinedDamageChanged(asGrunt(selectedActor), $event)">
+                    </app-condition-monitor>
+                    <!-- Damage Value, not just "one more box" (brief Decision
+                         20, `RULINGS.md` 2026-08-13): the box-clicking widget
+                         above can only ever record as many boxes as are left
+                         on the track, so a killing blow bigger than the
+                         remaining boxes could never be recorded for p. 379's
+                         "DV of the final attack vs. Body" comparison. Same
+                         controls as the row panel's per-member DV
+                         (`npc-row-damage`). -->
+                    <div class="input-group input-group-sm mt-2 grunt-damage gm-inline-input-group">
+                      <span class="input-group-text gm-stat-chip"
+                        title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379).">DV</span>
+                      <input class="form-control text-center gm-stat-input grunt-dv" type="number" [min]="1"
+                        [ngModel]="getGruntDamageValue(selectedActor)"
+                        (ngModelChange)="setGruntDamageValue(selectedActor, $event)">
+                      <button type="button" class="btn btn-sm btn-outline-danger grunt-hit-physical"
+                        (click)="hitGruntPhysical(asGrunt(selectedActor))"
+                        title="Apply that DV as Physical damage">P</button>
+                      <button type="button" class="btn btn-sm btn-outline-warning grunt-hit-stun"
+                        (click)="hitGruntStun(asGrunt(selectedActor))"
+                        title="Apply that DV as Stun damage">S</button>
+                      <button type="button" class="btn btn-sm btn-outline-success grunt-heal"
+                        (click)="healGrunt(asGrunt(selectedActor), 1)"
+                        title="Heal one box / take back a mis-keyed hit. Healing a downed grunt below a full Condition Monitor puts it back in the fight (p. 379).">-1</button>
+                    </div>
+                    <!-- Body and Willpower are kept per grunt because they are
+                         the two inputs to the track above,
+                         8 + ceil(max(Body, Willpower)/2) (p. 379) — editing
+                         either resizes it immediately — and because p. 379
+                         settles a downed grunt's alive-or-dead from the final
+                         attack's DV against his Body. A grunt created with
+                         "Add Grunt" has no other place to record them (a row
+                         member has the row panel). -->
+                    <div class="input-group input-group-sm mt-2 grunt-body-group gm-inline-input-group">
+                      <span class="input-group-text gm-stat-chip"
+                        title="Body — sizes the Condition Monitor with Willpower, and the final attack's DV is compared against it to settle alive or dead (p. 379)">B</span>
+                      <input type="number" class="form-control text-center gm-stat-input grunt-body-input"
+                        [min]="0" [ngModel]="asGrunt(selectedActor).gruntBody"
+                        (ngModelChange)="onGruntBodyChanged(asGrunt(selectedActor), $event)">
+                      <span class="input-group-text gm-stat-chip"
+                        title="Willpower — the other input to 8 + ceil(max(Body, Willpower)/2) (p. 379)">W</span>
+                      <input type="number" class="form-control text-center gm-stat-input grunt-willpower-input"
+                        [min]="0" [ngModel]="asGrunt(selectedActor).gruntWillpower"
+                        (ngModelChange)="onGruntWillpowerChanged(asGrunt(selectedActor), $event)">
+                      <span class="input-group-text small">
+                        {{ asGrunt(selectedActor).finalState }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                } @else {
+                <div class="row">
+                  <div class="col-12 cm">
                     <h4>Physical</h4>
                     <app-condition-monitor [health]="selectedActor.physicalHealth"
                       [overflow]="selectedActor.overflowHealth" [painTolerance]="selectedActor.painTolerance"
@@ -618,7 +999,7 @@
                       (damageChange)="onParticipantDamageChanged()">
                     </app-condition-monitor>
                   </div>
-                  <div class="col-xl-6 cm">
+                  <div class="col-12 cm">
                     <h4>Stun</h4>
                     <app-condition-monitor [health]="selectedActor.stunHealth"
                       [painTolerance]="selectedActor.painTolerance" [hasPainEditor]="selectedActor.hasPainEditor"
@@ -626,8 +1007,10 @@
                     </app-condition-monitor>
                   </div>
                 </div>
+                }
               </ng-template>
             </ng-container>
+            }
             <ng-container ngbNavItem>
               <button ngbNavLink>Stats</button>
               <ng-template ngbNavContent>
@@ -708,7 +1091,12 @@
 <ng-template #actModalContent>
   <div class="modal-header">
     <h5 class="modal-title">
-      Declare Actions @if (actModalParticipant) { - {{ actModalParticipant.name || "Participant" }} }
+      <!-- Decision 23: the modal is scoped to the row's shared Score, but the
+           header names the actual NPC the declaration is for, when there is
+           one. -->
+      Declare Actions
+      @if (actModalRowMember) { - {{ actModalRowMember.name || "NPC" }} }
+      @else if (actModalParticipant) { - {{ actModalParticipant.name || "Participant" }} }
     </h5>
     <button type="button" class="btn-close" aria-label="Close" (click)="closeActModal()"></button>
   </div>
@@ -719,15 +1107,28 @@
         <span class="economy-label">Free</span>
         <span class="economy-value">{{ getFreeUsageText(actModalParticipant) }}</span>
       </div>
-      <div class="economy-chip" [class.economy-blocked]="getComplexUsageText(actModalParticipant) === '1/1'">
+      <!-- Simple and Complex are also shut outright at Initiative Score 0 or
+           below: no live Action Phase down there (brief "NPC Group Initiative"
+           Decision 16, p. 159-160). The Free chip above stays open - one Free
+           Action per pass survives, and defending is not gated at all. -->
+      <div class="economy-chip"
+        [class.economy-blocked]="getComplexUsageText(actModalParticipant) === '1/1'
+          || !hasLiveActionPhase(actModalParticipant)">
         <span class="economy-label">Simple</span>
         <span class="economy-value">{{ getSimpleUsageText(actModalParticipant) }}</span>
       </div>
-      <div class="economy-chip" [class.economy-blocked]="getSimpleUsageText(actModalParticipant) !== '0/2'">
+      <div class="economy-chip"
+        [class.economy-blocked]="getSimpleUsageText(actModalParticipant) !== '0/2'
+          || !hasLiveActionPhase(actModalParticipant)">
         <span class="economy-label">Complex</span>
         <span class="economy-value">{{ getComplexUsageText(actModalParticipant) }}</span>
       </div>
     </div>
+    @if (!hasLiveActionPhase(actModalParticipant)) {
+    <div class="action-validation action-validation-error" data-testid="no-action-phase-notice">
+      {{ noActionPhaseMessage }}
+    </div>
+    }
     <div class="action-validation" [class.action-validation-error]="!isDeclaredActionSelectionValid(actModalParticipant)"
       [class.action-validation-ok]="isDeclaredActionSelectionValid(actModalParticipant)">
       {{ getDeclaredActionValidationMessage(actModalParticipant) }}

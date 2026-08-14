@@ -10,34 +10,52 @@ entire mechanism.
 
 Feature request: $ARGUMENTS
 
-## Stage 1 — brief
+## Stage 1a — rules brief
 
 Delegate to the `sr5-rules-analyst` subagent. In the prompt you pass it,
 include: the feature request verbatim, the instruction to read `RULINGS.md`
 first and treat existing rulings as binding, and the instruction to cite only
 printed page numbers it has actually opened in `rules/`.
 
-When it returns, write the brief to `briefs/<slug>.md` where `<slug>` is a
-short kebab-case name for the feature. Create `briefs/` if it doesn't exist.
+When it returns, write its two documents: `briefs/<slug>.md` (plain-language,
+for me) and `briefs/<slug>-spec.md` (technical, for the implementer), where
+`<slug>` is a short kebab-case name for the feature. Create `briefs/` if it
+doesn't exist.
 
-**GATE — stop here.** Show me the brief and wait. Do not proceed to Stage 2
-until I say so. If I answer the open rulings questions, add my answers into the
-brief file before continuing.
+## Stage 1b — implementation plan
+
+Delegate to the `sr5-change-scoper` subagent. Pass it: the path to
+`briefs/<slug>-spec.md` from Stage 1a, and the instruction to read
+`ARCHITECTURE.md` and `CLAUDE.md`. It does NOT re-derive rules — the analyst's
+output is the rules spec. Its job is the implementation plan: current
+behaviour with file:line references, every affected path (including places
+exhibiting the same pattern that the request didn't mention), the proposed
+approach and where the change belongs, and regression risk. It appends to both
+documents from Stage 1a — plain language to `briefs/<slug>.md`, technical
+detail to `briefs/<slug>-spec.md`.
+
+**GATE — stop here.** Show me `briefs/<slug>.md` and wait. Note that
+`briefs/<slug>-spec.md` also exists if I want to read the technical detail. Do
+not proceed to Stage 2 until I say so. If I answer the open rulings questions
+or open decisions, add my answers into `briefs/<slug>.md` before continuing.
 
 ## Stage 2 — implement
 
-Delegate to the `sr5-implementer` subagent. Pass it: the path to the brief
-file, the instruction to read `ARCHITECTURE.md` and `CLAUDE.md` before writing
-anything, and the reminder that the brief is the complete spec — it must not
-consult `rules/` or add rules knowledge of its own, and must stop and report
-gaps rather than filling them in.
+Delegate to the `sr5-implementer` subagent. Pass it: the path to
+`briefs/<slug>-spec.md`, the instruction to read `ARCHITECTURE.md` and
+`CLAUDE.md` before writing anything, and the reminder that the spec is the
+complete spec — it must not consult `rules/` or add rules knowledge of its
+own, and must stop and report gaps rather than filling them in. It must fix
+every path in the affected-paths map, not only the one that prompted the
+request.
 
 ## Stage 3 — validate
 
-Delegate to the `sr5-rules-validator` subagent. Pass it: the path to the brief,
-the paths of files changed in Stage 2, and the instruction to report only, never
-fix. It has `rules/` access and must independently re-derive every citation in
-the brief rather than trusting it.
+Delegate to the `sr5-rules-validator` subagent. Pass it: the paths to both
+`briefs/<slug>.md` and `briefs/<slug>-spec.md`, the paths of files changed in
+Stage 2, and the instruction to report only, never fix. It has `rules/` access
+and must independently re-derive every citation in the brief rather than
+trusting it.
 
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list back to a
 fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at two
@@ -60,8 +78,9 @@ Never launch a third fix round without naming which of the three this is.
 
 ## Stage 4 — approval brief
 
-Delegate to `sr5-approval-brief`. Pass it the brief path and the validator's
-report. Show me its output and stop.
+Delegate to `sr5-approval-brief`. Pass it the paths to both `briefs/<slug>.md`
+and `briefs/<slug>-spec.md`, and the validator's report. Show me its output and
+stop.
 
 ## Stage 5 — only after I approve
 

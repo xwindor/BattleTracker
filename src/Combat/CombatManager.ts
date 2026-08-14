@@ -3,6 +3,9 @@ import { ParticipantList } from "./Participants/ParticipantList";
 import { StatusEnum } from "./Participants/StatusEnum";
 import { IParticipant } from "./Participants/IParticipant";
 import { INITIATIVE_PASS_DECAY } from "./Participants/Participant";
+// Imported by module path, not through the "Grunts" barrel's consumers, so no
+// import cycle is introduced (Grunts only depends on Combat/Participants).
+import { isNpcRow, NpcRowParticipant } from "Grunts/NpcRowParticipant";
 
 class CombatManager extends Undoable {
   participants: ParticipantList;
@@ -109,6 +112,13 @@ class CombatManager extends Undoable {
       p.applyInitiativeScoreDelta(-INITIATIVE_PASS_DECAY);
       if (!p.ooc && p.status !== StatusEnum.Delaying) {
         p.status = StatusEnum.Waiting;
+      }
+      // A row's members each carry their own "has acted this pass" marker
+      // (brief "NPC Group Initiative" Decision 18); everyone still above 0 acts
+      // again in the new pass (p. 159), so the markers clear with the row's own
+      // status.
+      if (isNpcRow(p)) {
+        p.resetMemberActed();
       }
     }
   }
@@ -246,7 +256,139 @@ class CombatManager extends Undoable {
     return { base: name, index: 0 };
   }
 
+  /**
+   * Re-entrancy guard for `flagSpentNpcRows()`. `goToNextActors()` calls that
+   * method as its first step, and the method may itself need to advance the
+   * order when the participant that is currently acting turns out to be spent -
+   * which must never re-enter `goToNextActors()` from inside its own pre-step,
+   * or the newly-selected actors would immediately be marked `Finished` and
+   * skipped.
+   * Transient control state, not combat state: deliberately not routed through
+   * `Undoable.Set`.
+   */
+  private advancingActors = false;
+
+  /**
+   * Called with every linked NPC row `flagSpentNpcRows()` has just found to be
+   * newly spent, however that was triggered.
+   *
+   * There are two halves: the engine half (flag the row, pull it out of
+   * `currentActors`, done here) and the GM-component half (log it —
+   * ARCHITECTURE.md §7/§8). The second half has no business inside
+   * `CombatManager`, but it must not depend on *which* caller triggered it:
+   * this method also runs as `advanceToNextActors()`'s own pre-step, and a row
+   * that went spent from there used to go silent. One listener, set by the GM
+   * component, so both paths do exactly the same thing.
+   *
+   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
+   * state.
+   */
+  onSpentNpcRowsFlagged: ((rows: NpcRowParticipant[]) => void) | null = null;
+
+  /**
+   * Pull any linked NPC row that can no longer act out of the current-actor
+   * slot, and flag **only the ones taken out by damage** as out of combat.
+   *
+   * Two cases can leave a row with nobody left to act, and brief Decision 21
+   * (`RULINGS.md` 2026-08-13, "Emptying a row by hand is not the same as
+   * wiping it out") requires the tracker to tell them apart:
+   *
+   *  - **Wiped out by damage** (`NpcRowParticipant.isWipedOut`) — every
+   *    member is still on the roster, all of them out of action. This is the
+   *    case brief Decision 14 (`RULINGS.md` 2026-08-07, reversing Decision 8)
+   *    was written for: the row **keeps its slot in the initiative order**,
+   *    reads as out of combat through `NpcRowParticipant.ooc`, so
+   *    `getNextActors()` skips it and the GM list styles it exactly like any
+   *    other downed participant, and stays until the GM removes it with the
+   *    ordinary per-row delete control. Nothing here deletes anything, so a
+   *    member healed back up (Decision 13) still has a row to be healed back
+   *    into.
+   *  - **Emptied by hand** (removal or detaching the last member,
+   *    `!isWipedOut && isSpent`) — the row cannot act either, because it has
+   *    no members, but it must never be announced or styled as wiped out: no
+   *    red flag, no `ooc`, no `spentFlagged`. It is left as a plain empty row
+   *    for the GM to delete at leisure.
+   *
+   * A row the GM has created but not populated yet is left alone entirely
+   * (`NpcRowParticipant.isSpent`).
+   *
+   * Either way, if the row that can no longer act is the participant
+   * currently acting, it is pulled out of `currentActors` and the order is
+   * advanced the same way `btnDelay_Click` advances when `currentActors`
+   * empties - otherwise emptying the acting row (by damage or by hand) would
+   * leave `currentActors` holding a participant that can no longer act, with
+   * `passEnded` still false, and the tracker would stall with neither an
+   * "Act" button nor a "Next Initiative Pass" button.
+   *
+   * Idempotent: the flag is remembered on the row (`spentFlagged`) so repeated
+   * calls announce nothing, and it is cleared again if the row stops being
+   * wiped out - healed back up (Decision 13), or reduced to an empty row by
+   * removing its already-downed members by hand - so a second collapse is
+   * announced afresh. The flag write goes through `Undoable.Set`, so it is
+   * undoable like any other mutation; undo batching is the caller's
+   * responsibility as everywhere else (ARCHITECTURE.md §4).
+   *
+   * @returns the rows that were *newly* flagged as wiped out, for logging.
+   */
+  flagSpentNpcRows(): NpcRowParticipant[] {
+    const newlySpent: NpcRowParticipant[] = [];
+    let wasActing = false;
+    for (const p of this.participants.items.slice()) {
+      if (!isNpcRow(p)) {
+        continue;
+      }
+      if (!p.isSpent) {
+        // Healed back up (Decision 13), or given a new NPC: announce it again
+        // if it drops a second time.
+        if (p.spentFlagged) {
+          p.spentFlagged = false;
+        }
+        continue;
+      }
+      if (p.isWipedOut) {
+        if (!p.spentFlagged) {
+          p.spentFlagged = true;
+          newlySpent.push(p);
+        }
+      } else if (p.spentFlagged) {
+        // Was wiped out and flagged, then its downed members were removed by
+        // hand until none were left - the row is a plain empty row now, not
+        // a wiped-out one, so the flag comes back off (Decision 21).
+        p.spentFlagged = false;
+      }
+      // A spent row cannot act, so it must not hold the slot even though it
+      // stays in the list - true whether it is wiped out or just emptied.
+      if (this.currentActors.remove(p)) {
+        wasActing = true;
+      }
+    }
+    if (newlySpent.length > 0 && this.onSpentNpcRowsFlagged) {
+      // Before the advance, so the log reads in the order things happened: the
+      // row goes down, then the next actor comes up.
+      this.onSpentNpcRowsFlagged(newlySpent);
+    }
+    if (wasActing && this.currentActors.count === 0 && !this.advancingActors) {
+      this.goToNextActors();
+    }
+    return newlySpent;
+  }
+
   goToNextActors() {
+    const reentrant = this.advancingActors;
+    this.advancingActors = true;
+    try {
+      this.advanceToNextActors();
+    } finally {
+      this.advancingActors = reentrant;
+    }
+  }
+
+  private advanceToNextActors() {
+    // A row whose last member just dropped is flagged (and dropped out of
+    // `currentActors`) before the next actor is picked, so it can never be
+    // handed the initiative (Decision 14). Guarded above, so this can only flag
+    // here - the advance itself is what the rest of this method does.
+    this.flagSpentNpcRows();
     // Clear active participants
     if (this.currentActors.count > 0) {
       for (const a of this.currentActors.items) {

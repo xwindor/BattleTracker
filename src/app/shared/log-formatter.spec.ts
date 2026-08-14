@@ -4,6 +4,7 @@ import {
   CRITICAL_GLITCH_LABEL,
   GLITCH_LABEL,
   formatDiceRollLogText,
+  formatGroupWoundLogText,
   formatInitiativeDeltaLogText,
   formatInitiativeRollLogText,
   formatLogText,
@@ -72,7 +73,7 @@ describe('log-formatter: initiative entries', () => {
 
   it('shows Initiative attribute + dice = Initiative Score (AC19, p. 160)', () => {
     expect(formatInitiativeRollLogText('REA(3) + INT(3)', [4, 5], 15))
-      .toBe('initiative roll: REA(3) + INT(3) + [4, 5] (9) = 15');
+      .toBe('initiative roll: REA(3) + INT(3) + [4, 5] = 15');
   });
 
   it('renders a negative Initiative Score signed, never clamped to 0 (AC21, p. 160)', () => {
@@ -92,6 +93,36 @@ describe('log-formatter: initiative entries', () => {
     expect(formatPassStartLogText(1, PASS_DECAY)).toBe('Start Initiative Pass 1');
     expect(formatPassStartLogText(2, PASS_DECAY))
       .toBe('Start Initiative Pass 2 — all Initiative Scores -10');
+  });
+
+  // NPC group initiative, scenario S3: the log has to say both that the
+  // group-wide wound house rule fired and which NPC's wound fired it.
+  it('names the house rule, the NPC and the new shared score on a group wound', () => {
+    const text = formatGroupWoundLogText('Gangers', 'Ganger 3', 2, 13);
+
+    expect(text).toContain('house rule');
+    expect(text).toContain('Ganger 3');
+    expect(text).toContain('Gangers');
+    expect(text).toContain('-2');
+    expect(text).toContain('13');
+  });
+
+  it('expresses the house rule running backwards when an NPC recovers', () => {
+    // A healed / mis-keyed-hit-corrected NPC gives the row its shared penalty
+    // back, so the entry has to be able to say "+N" and a higher score. A
+    // one-way "-N" rendering would report a speed-up as a slow-down.
+    const text = formatGroupWoundLogText('Gangers', 'G1', -2, 15);
+
+    expect(text).toContain('+2');
+    expect(text).not.toContain('-2');
+    expect(text).toContain('recovery');
+    expect(text).toContain('15');
+  });
+
+  it('falls back to generic names when the row or NPC is unnamed', () => {
+    const text = formatGroupWoundLogText('', '', 1, 5);
+    expect(text).toContain('NPC row');
+    expect(text).toContain('a member');
   });
 });
 
@@ -114,8 +145,17 @@ describe('log-formatter: presentation', () => {
   it('still highlights the glitch on an entry another pattern also matches', () => {
     // "initiative roll:" returns early in the core formatter; the glitch
     // decoration is applied to every branch (p. 45 - a glitch always stands).
-    const text = formatLogText(`initiative roll: REA(3) + INT(3) + [1, 1] (2) = 8 ${GLITCH_LABEL}`);
+    const text = formatLogText(`initiative roll: REA(3) + INT(3) + [1, 1] = 8 ${GLITCH_LABEL}`);
     expect(text).toContain('log-keyword-glitch');
+  });
+
+  it('highlights the resulting score on an initiative roll line', () => {
+    // Regression: the pattern used to expect "initiative roll: <digit>"
+    // verbatim (the pre-baseLabel format) and silently stopped matching once
+    // the line grew the "REA(3) + INT(3) + [dice] (subtotal) = score" shape,
+    // leaving initiative rolls with no colour at all in the shared log.
+    const text = formatLogText('initiative roll: REA(3) + INT(3) + [3] = 9');
+    expect(text).toContain('<span class="log-keyword-roll">9</span>');
   });
 
   it('leaves existing damage/healing highlighting intact', () => {

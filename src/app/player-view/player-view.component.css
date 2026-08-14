@@ -1,3 +1,10 @@
+/* NOTE — the blocks marked "DUPLICATED (Open Decision 4)" below also exist,
+   byte-for-byte, in battle-tracker.component.css. Angular's emulated view
+   encapsulation means neither copy can see the other's component, so the
+   duplication is deliberate and must be kept in sync by hand. Do not "fix" it
+   by hoisting either copy into styles.scss without re-deciding Open Decision 4
+   — that changes encapsulation and specificity and leaks into the other view. */
+
 .player-view .card-header {
   font-weight: 600;
 }
@@ -15,6 +22,8 @@
   overflow-y: auto;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .log-entry-new {
   animation: logEntryFlash 1.5s ease-out;
 }
@@ -24,14 +33,30 @@
   100% { background-color: transparent; }
 }
 
+/* Same header/row alignment fix as the GM view's `.row.bg-dark.text-light`:
+   the participant row carries a border, the header does not, so without the
+   extra inset the header labels sit one border-width left of the columns they
+   label. Both sides now derive from the same token, so they cannot disagree.
+   The amount is --ui-header-inset, NOT --ui-participant-border directly: under
+   cyberdeck the skin draws its own border-left/right on .player-header, which
+   has already done the insetting, so that skin sets the token to 0. */
 .player-header {
   border-radius: 0.3rem;
-  padding: 0.35rem 0.2rem;
+  padding: 0.35rem calc(0.2rem + var(--ui-header-inset));
   margin-bottom: 0.35rem;
 }
 
+/* NOT duplicated in battle-tracker.component.css, and deliberately NOT a
+   mirror of that file's `.participant`: the player's initiative row draws no
+   border at all. It used to read --ui-participant-border like the GM row does,
+   but stacked on a phone the ring around every row read as clutter. The GM's
+   `.participant` keeps its border — it doubles as the `.selected` highlight,
+   which the player view has no equivalent of. The row is still separated from
+   its neighbours by `margin-bottom` and by its background.
+   The matching splits are in styles.scss, where `.participant` and
+   `.player-participant` used to share the theme's border rules. */
 .player-participant {
-  border: 2px solid #fff;
+  border: none;
   border-radius: 0.35rem;
   background: #fff;
   padding: 0.35rem 0.2rem;
@@ -49,19 +74,27 @@
 
 .participant-actions {
   display: flex;
-  gap: 0.35rem;
+  gap: var(--ui-gap);
   align-items: center;
   flex-wrap: wrap;
 }
 
+/* A <summary> painted to look like a button. It keeps its own grey colour, but
+   takes its GEOMETRY from the shared tokens so it is exactly as tall as the
+   Act and Delay buttons it sits between (AC 7). */
 .interrupt-list summary {
   cursor: pointer;
-  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ui-control-h);
+  padding: 0.125rem var(--ui-control-pad-x);
+  font-size: var(--ui-control-font);
+  line-height: 1.25;
   border: 1px solid #6c757d;
   color: #fff;
   background: #6c757d;
   border-radius: 0.25rem;
-  padding: 0.24rem 0.5rem;
   list-style: none;
 }
 
@@ -80,8 +113,11 @@
   margin-top: 0.35rem;
 }
 
+/* The global `.btn` rule centres its content; these are a menu of action names
+   and read as a list, so they opt back out. */
 .interrupt-item {
   text-align: left;
+  justify-content: flex-start;
 }
 
 .roll-banner {
@@ -111,10 +147,17 @@
   opacity: 1;
 }
 
+/* Was a hard `max-width: 12rem`, which at 390px left the two buttons beside it
+   squeezed to unreadable width. Now it takes 12rem when there is room and a
+   full line when there is not, so the buttons wrap underneath at full size
+   instead of shrinking (scenario S5). */
 .roll-input {
+  flex: 1 1 12rem;
   max-width: 12rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-category-toggle {
   display: flex;
   align-items: center;
@@ -122,6 +165,17 @@
   font-weight: 600;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. Both views bind [class.action-item-selected], so
+   the rule has to exist in both stylesheets or the Default skin shows no
+   highlight on the selected action in whichever view is missing it. */
+.action-item-selected {
+  font-weight: 700;
+  background-color: #dbeafe;
+}
+
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-validation {
   font-size: 0.85rem;
   border: 1px solid #166534;
@@ -143,6 +197,10 @@
   color: #b91c1c;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. The `padding-left` on `.action-item` indents an
+   action under the category header that discloses it; it used to live only in
+   the GM file, which left the identical player-view markup un-indented. */
 .action-modal-group .action-item {
   border-top: none;
 }
@@ -160,17 +218,23 @@
 
 .action-item {
   flex: 1 1 auto;
+  padding-left: 1.9rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-item-twirl {
-  min-width: 2rem;
-  padding: 0 0.4rem;
+  min-width: var(--ui-icon-btn-w-sm);
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .action-item-twirl[aria-expanded="true"] .fa-circle-info {
   color: #1e40af;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-item-details {
   margin: 0 0.65rem 0.5rem 0.65rem;
   padding: 0.45rem 0.55rem;
@@ -182,6 +246,8 @@
   line-height: 1.3rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-economy-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -214,22 +280,30 @@
   font-weight: 700;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-item-disabled {
   opacity: 0.45;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .twirly {
   width: 0.9rem;
   display: inline-flex;
   justify-content: center;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-check {
   color: #15803d;
   font-weight: 800;
   margin-right: 0.4rem;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .log-text {
   display: inline-block;
   padding: 0.05rem 0.25rem;
@@ -251,6 +325,8 @@
   color: #334155;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 :host ::ng-deep .log-keyword-action {
   background: #dbeafe;
   color: #1e3a8a;
@@ -287,6 +363,8 @@
 }
 
 /* Matrix action group styles */
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .action-category-matrix-parent {
   background: #f0f4ff;
   border-left: 3px solid #6366f1;
@@ -314,6 +392,8 @@
 
 /* ── Combat log readability ─────────────────────────────────────────────── */
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 /* Glitch = more than half the dice showed a 1 (p. 45). */
 :host ::ng-deep .log-keyword-glitch {
   background: #fef08a;
@@ -337,6 +417,8 @@
   color: #713f12;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .log-badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -365,6 +447,8 @@
   color: #991b1b;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 /* GM narration attached to a glitch (p. 45): indented so the flat list still
    reads as one entry commenting on another. The entry names its parent roll
    in .log-entry-ref, because the list is flat and the roll it is about may be
@@ -388,6 +472,8 @@
   border-left: 3px dashed #64748b;
 }
 
+/* DUPLICATED (Open Decision 4) — keep byte-identical with
+   battle-tracker.component.css. */
 .glitch-note-toggle {
   padding: 0;
   font-size: 0.75rem;
@@ -396,4 +482,51 @@
 
 .glitch-note-editor {
   max-width: 28rem;
+}
+
+/* ── Classes replacing template inline styles ──────────────────────────── */
+
+/* Was style="background-color:#6f42c1" — the same purple the astral badge
+   component uses for its chip. */
+.astral-projecting-chip {
+  background-color: #6f42c1;
+}
+
+/* Was style="color:#a78bfa". */
+.astral-projecting-note {
+  color: #a78bfa;
+}
+
+/* ── Responsive layout ─────────────────────────────────────────────────────
+   Same breakpoint family as the GM view and as styles.scss (AC 9). Open
+   Decision 6 puts the player view's supported floor at 360px. */
+
+/* Below sm, a participant's Act / Delay / Interrupts cannot sit side by side
+   in the actions column at a size that can be tapped accurately, so they stack
+   full width instead of shrinking below the token minimum (AC 14, S4/S5). */
+@media (max-width: 575.98px) {
+  .participant-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .participant-actions > .btn,
+  .participant-actions > .interrupt-list,
+  .participant-actions > .badge {
+    width: 100%;
+  }
+
+  .interrupt-list summary {
+    width: 100%;
+  }
+
+  .roll-banner .roll-input {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .roll-banner .btn {
+    flex: 1 1 100%;
+  }
 }
