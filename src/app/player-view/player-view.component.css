@@ -20,6 +20,9 @@
 .log-list {
   max-height: 22rem;
   overflow-y: auto;
+  background: var(--dice-bg, #fff);
+  border: 1px solid var(--dice-border, #94a3b8);
+  border-radius: 0.375rem;
 }
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
@@ -303,63 +306,37 @@
 }
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
-   battle-tracker.component.css. */
+   battle-tracker.component.css.
+   Pure-black terminal surface like the dice-roller module, text coloured by
+   category, no background pill (Xavier, 2026-08-15). This is the light-mode
+   fallback; the app's one live theme overrides all of this in styles.scss. */
 .log-text {
-  display: inline-block;
-  padding: 0.05rem 0.25rem;
-  border-radius: 0.25rem;
+  display: inline;
 }
 
 .log-text-action {
-  background: #dbeafe;
   color: #1e3a8a;
 }
 
 .log-text-roll {
-  background: #fef3c7;
   color: #92400e;
 }
 
 .log-text-system {
-  background: #e2e8f0;
   color: #334155;
 }
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
-   battle-tracker.component.css. */
-:host ::ng-deep .log-keyword-action {
-  background: #dbeafe;
-  color: #1e3a8a;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
-}
-
-:host ::ng-deep .log-keyword-roll {
-  background: #fef3c7;
-  color: #92400e;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
-}
-
-:host ::ng-deep .log-keyword-physical {
-  background: #fee2e2;
-  color: #991b1b;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
-}
-
-:host ::ng-deep .log-keyword-stun {
-  background: #ffedd5;
-  color: #9a3412;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
-}
-
+   battle-tracker.component.css.
+   Keyword spans are still in the DOM (formatLogText wraps them) but carry no
+   colour of their own now - the whole line already does. */
+:host ::ng-deep .log-keyword-action,
+:host ::ng-deep .log-keyword-roll,
+:host ::ng-deep .log-keyword-physical,
+:host ::ng-deep .log-keyword-stun,
 :host ::ng-deep .log-keyword-heal {
-  background: #dcfce7;
-  color: #166534;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
+  color: inherit;
+  font-weight: inherit;
 }
 
 /* Matrix action group styles */
@@ -394,27 +371,18 @@
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    battle-tracker.component.css. */
-/* Glitch = more than half the dice showed a 1 (p. 45). */
-:host ::ng-deep .log-keyword-glitch {
-  background: #fef08a;
-  color: #713f12;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
-  font-weight: 700;
-}
-
-/* Critical glitch = a glitch that also produced no hits (p. 45). */
+/* Glitch/critical glitch (p. 45) keep bold weight - the label always has to
+   stand out - but no colour or pill of their own; the whole line is already
+   .log-text-glitch. */
+:host ::ng-deep .log-keyword-glitch,
 :host ::ng-deep .log-keyword-critical-glitch {
-  background: #b91c1c;
-  color: #fff;
-  border-radius: 0.25rem;
-  padding: 0.03rem 0.2rem;
+  color: inherit;
   font-weight: 700;
 }
 
 .log-text-glitch {
-  background: #fef08a;
   color: #713f12;
+  font-weight: 700;
 }
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with

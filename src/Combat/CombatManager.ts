@@ -124,6 +124,9 @@ class CombatManager extends Undoable {
   }
 
   endCombatTurn() {
+    if (this.onCombatTurnEnded) {
+      this.onCombatTurnEnded(this.combatTurn);
+    }
     this.initiativePass = 1;
     this.combatTurn++;
     this.currentInitiative = NaN;
@@ -133,11 +136,27 @@ class CombatManager extends Undoable {
     this.started = false;
   }
 
+  /**
+   * End the current Initiative Pass. `passEnded` is itself the "this pass has
+   * already ended" state, so the hook fires only on its `false -> true`
+   * transition (`!alreadyEnded`) — this is what stops a Delaying participant
+   * who acts after the pass has already ended from re-firing the hook (brief
+   * "Action Log entries for combat structural boundaries" scenario S2). The
+   * `isOver()` branch emits only the turn-end line via `endCombatTurn()`
+   * (Open Decision 2): it also suppresses the phantom pass N+1 line described
+   * in that brief, since the pass `nextIniPass()` just created was never
+   * announced as starting.
+   */
   endInitiativePass() {
+    const alreadyEnded = this.passEnded;
+    const endingPass = this.initiativePass;
     this.passEnded = true;
     if (this.isOver()) {
       this.endCombatTurn();
       return;
+    }
+    if (!alreadyEnded && this.onInitiativePassEnded) {
+      this.onInitiativePassEnded(endingPass, this.combatTurn);
     }
   }
 
@@ -284,6 +303,29 @@ class CombatManager extends Undoable {
    * state.
    */
   onSpentNpcRowsFlagged: ((rows: NpcRowParticipant[]) => void) | null = null;
+
+  /**
+   * Called once, on the `false -> true` transition of `passEnded`, naming the
+   * Initiative Pass that just ended and the Combat Turn it ended within — see
+   * `endInitiativePass()`. Not fired when that same transition also ends the
+   * Combat Turn (`isOver()` true); `onCombatTurnEnded` covers that case alone
+   * (brief "Action Log entries for combat structural boundaries", Open
+   * Decision 2).
+   *
+   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
+   * state (same rationale as `onSpentNpcRowsFlagged` above).
+   */
+  onInitiativePassEnded: ((pass: number, turn: number) => void) | null = null;
+
+  /**
+   * Called from `endCombatTurn()`, before any of its mutations, naming the
+   * Combat Turn that is ending (not the incremented value) — see
+   * `endCombatTurn()`.
+   *
+   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
+   * state (same rationale as `onSpentNpcRowsFlagged` above).
+   */
+  onCombatTurnEnded: ((turn: number) => void) | null = null;
 
   /**
    * Pull any linked NPC row that can no longer act out of the current-actor

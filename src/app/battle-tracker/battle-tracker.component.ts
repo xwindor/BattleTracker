@@ -38,7 +38,8 @@ import {
   buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass,
   formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
   formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference,
-  formatGroupWoundLogText
+  formatGroupWoundLogText, formatTurnStartLogText, formatTurnEndLogText,
+  formatPassEndLogText, COMBAT_STARTED_LOG_TEXT, COMBAT_ENDED_LOG_TEXT
 } from "app/shared/log-formatter";
 import { getInitiativeRollMax, clampInitiativeRoll, classifyRoll } from "app/shared/roll-utils";
 
@@ -68,6 +69,19 @@ interface LocalLogEntry {
  * group's Professional Rating / Group Edge pool, which Decision 5 rules out.
  */
 const NPC_ROW_EDGE_RATING = 0;
+
+/**
+ * `addParticipant()`'s own seed values for `participantEdgeRatings` /
+ * `participantReactions` / `participantIntuitions` on a brand-new row. Named
+ * so `isUnusedPlaceholder()` (P2-2, durable-rooms review round 5) can compare
+ * a row's side-map entries against "still exactly what a fresh row starts
+ * with" rather than against "unset" - every row, including a genuinely
+ * untouched one, gets these three maps populated at creation time, so "unset"
+ * is never the right baseline.
+ */
+const PLACEHOLDER_EDGE_RATING_DEFAULT = 0;
+const PLACEHOLDER_REACTION_DEFAULT = 3;
+const PLACEHOLDER_INTUITION_DEFAULT = 3;
 
 /**
  * Name prefix for a grunt created with the "Add Grunt" button (brief addendum
@@ -810,6 +824,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // here means the log line happens once, in exactly the same way, whichever
     // path noticed it.
     this.combatManager.onSpentNpcRowsFlagged = rows => this.onSpentNpcRowsFlagged(rows);
+    // Structural combat boundaries (Initiative Pass end, Combat Turn end) are
+    // observed the same way: one listener, set here, so every one of the ten
+    // call paths that can reach `endInitiativePass()`/`endCombatTurn()`
+    // (ARCHITECTURE.md §2, brief "Action Log entries for combat structural
+    // boundaries") logs identically regardless of which triggered it.
+    this.combatManager.onInitiativePassEnded = pass => this.logInitiativePassEnded(pass);
+    this.combatManager.onCombatTurnEnded = turn => this.logCombatTurnEnded(turn);
   }
 
   /**
@@ -931,6 +952,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // into a tracker that is no longer on screen.
     if (this.combatManager.onSpentNpcRowsFlagged) {
       this.combatManager.onSpentNpcRowsFlagged = null;
+    }
+    if (this.combatManager.onInitiativePassEnded) {
+      this.combatManager.onInitiativePassEnded = null;
+    }
+    if (this.combatManager.onCombatTurnEnded) {
+      this.combatManager.onCombatTurnEnded = null;
     }
   }
 
@@ -1148,6 +1175,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * a different room's encounter, or one built up before any session existed -
    * the pull is destructive and is confirmed first (spec AC 15). A genuinely
    * empty tab has nothing at risk and is never prompted.
+   *
+   * **Authority model (durable-rooms review round 5, Part 1).** Two outcomes -
+   * a stale-cast divergence, or a saved encounter that could not be restored
+   * because everyone in it is OOC - are cases where this method must decide
+   * "do not push, ever, until the GM explicitly tries again", not just "do not
+   * push this once". Both are handled by *never completing the join*: neither
+   * branch below assigns `shareRoomCode`, so `syncSharedState()`'s existing
+   * `if (!this.shareRoomCode) return;` gate makes every one of this file's ~50
+   * other call sites structurally incapable of pushing to that room afterward,
+   * with no separate flag to keep in sync and no banner to trust (round-3/4's
+   * "nothing was sent to the room" text used to become false the moment any
+   * later action ran `syncSharedState()`, because `shareRoomCode` had already
+   * been set before either check ran - review defect Symptom B). The tab is
+   * fully disconnected (`sessionSync.disconnect()`) rather than left half-joined,
+   * so there is no ambiguity about whether it is "in" that room.
    */
   async btnJoinShareSession_Click() {
     this.shareError = "";
@@ -1164,6 +1206,96 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     try {
       this.sessionSync.connect();
       const { state, log } = await this.sessionSync.joinAsGm(room);
+      // Ownership is not really this tab's authoritative state at all - it is
+      // decided collaboratively by players claiming/releasing through the
+      // server, and the server can strip a claim (a disconnect, a Close/End
+      // evacuation) without this tab ever hearing about it if it was not
+      // connected at that moment. Reconcile the local cache from the server's
+      // returned copy on every (re)join, before deciding push or pull, so a
+      // stale local owner can never be re-asserted by a push (durable-rooms
+      // review round 5, Symptom A) - see `reconcileOwnershipFromServer()`.
+      this.reconcileOwnershipFromServer(state);
+      if (pushLocalState) {
+        if (this.liveEncounterDivergedFrom(room)) {
+          // Round-4 fix D6: see `liveEncounterDivergedFrom()`. Nothing this
+          // tab still recognises survives from what was fingerprinted when it
+          // last became this room's live truth, so the stale association is
+          // dropped and the join is abandoned outright - see the doc comment
+          // above for why this must not leave the tab half-connected.
+          this.sessionSync.disconnect();
+          // Explicit, not merely "never assigned": `gm:join-session` already
+          // switched this socket server-side before this check ran, so
+          // whatever room this tab's connection belonged to before this call
+          // is already gone either way - resetting `shareRoomCode` makes that
+          // fact visible instead of leaving stale bookkeeping that says
+          // otherwise.
+          this.shareRoomCode = "";
+          this.liveEncounterRooms.delete(room);
+          this.liveEncounterFingerprints.delete(room);
+          this.shareInfo = `Room ${room}'s saved encounter no longer matches what this tab is showing - `
+            + "this tab looks like it has become a different encounter since. Nothing was sent to the "
+            + `room and nothing here was changed, and this tab is not connected to room ${room}. Rejoin `
+            + `${room} again to pull its saved encounter instead, or use "End Room" if you meant to `
+            + "replace it.";
+          return;
+        }
+        // Still the live encounter for every code it was already live for,
+        // plus this one (round-3 fix 6).
+        this.shareRoomCode = room;
+        this.shareConnectionLost = false;
+        this.restoreWarning = "";
+        this.sharedLogEntries = this.mergeHiddenLogEntries(log || []);
+        this.clearSharedLogDecodeAnimations();
+        this.pendingLogScroll = true;
+        this.attachShareListeners();
+        this.markRoomLive(room);
+        this.syncSharedState();
+        this.shareInfo = `Rejoined session ${room} with this tab's live encounter - `
+          + "nothing was replaced, and players are back in sync.";
+        return;
+      }
+      if (this.snapshotHasEncounter(state)) {
+        const replaced = !!state && Array.isArray(state.participants) && state.participants.length > 0;
+        if (!replaced) {
+          // Everyone in the saved encounter is out of action, so there was
+          // nothing on the wire to rebuild - and nothing was replaced here
+          // either. Critically, this branch does **not** join: joining would
+          // leave the tab able to push this unrelated encounter over a real
+          // saved fight on the very next click (round-3 fix 5's original bug,
+          // reopened by round-3/4's "warn once, then leave the tab connected
+          // anyway" shape - durable-rooms review round 5, Symptom B, "the
+          // round-3 OOC-only branch has the same shape").
+          const ooc = this.snapshotOocCount(state);
+          this.sessionSync.disconnect();
+          this.shareRoomCode = ""; // explicit, not merely unassigned - see the diverged branch above
+          this.shareInfo = `Room ${room}'s saved encounter is ${ooc} `
+            + `participant${ooc === 1 ? "" : "s"} out of action, which are not broadcast and cannot be `
+            + `restored - nothing here was replaced, nothing was sent to the room, and this tab is not `
+            + `connected to room ${room}. Rejoin ${room} to try again.`;
+          return;
+        }
+        this.shareRoomCode = room;
+        this.shareConnectionLost = false;
+        this.restoreWarning = "";
+        this.sharedLogEntries = this.mergeHiddenLogEntries(log || []);
+        this.clearSharedLogDecodeAnimations();
+        this.pendingLogScroll = true;
+        this.attachShareListeners();
+        this.restoreFromSharedState(state);
+        // A pull *replaces* this tab's encounter, so every earlier association
+        // is now stale and the set is reset to this room alone, fingerprinted
+        // against what was just restored (round-4 fix D6) - not against what
+        // this tab had before the pull, which is exactly what was just
+        // discarded.
+        this.liveEncounterRoomCode = room;
+        this.shareInfo = `Joined session ${room}.`;
+        return;
+      }
+      // `restoreFromSharedState()` no-ops on an empty snapshot, so nothing was
+      // discarded however the confirmation read (review defect D4). Say so,
+      // and push what this tab has: the join already made this tab the live
+      // encounter for that code, and without a push the room would keep
+      // showing players its empty snapshot until the GM's next click.
       this.shareRoomCode = room;
       this.shareConnectionLost = false;
       this.restoreWarning = "";
@@ -1171,68 +1303,59 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.clearSharedLogDecodeAnimations();
       this.pendingLogScroll = true;
       this.attachShareListeners();
-      if (pushLocalState) {
-        if (this.liveEncounterDivergedFrom(room)) {
-          // Round-4 fix D6: see `liveEncounterDivergedFrom()`. Nothing this
-          // tab still recognises survives from what was fingerprinted when it
-          // last became this room's live truth, so the stale association is
-          // dropped and the GM is stopped and told, rather than the push
-          // proceeding unprompted and silently overwriting the room's real
-          // saved state.
-          this.liveEncounterRooms.delete(room);
-          this.liveEncounterFingerprints.delete(room);
-          this.shareInfo = `Room ${room}'s saved encounter no longer matches what this tab is showing - `
-            + "this tab looks like it has become a different encounter since. Nothing was sent to the "
-            + `room and nothing here was changed. Rejoin ${room} again to pull its saved encounter `
-            + "instead, or use \"End Room\" if you meant to replace it.";
-        } else {
-          // Still the live encounter for every code it was already live for,
-          // plus this one (round-3 fix 6).
-          this.markRoomLive(room);
-          this.syncSharedState();
-          this.shareInfo = `Rejoined session ${room} with this tab's live encounter - `
-            + "nothing was replaced, and players are back in sync.";
-        }
-      } else if (this.snapshotHasEncounter(state)) {
-        const ooc = this.snapshotOocCount(state);
-        const replaced = !!state && Array.isArray(state.participants) && state.participants.length > 0;
-        this.restoreFromSharedState(state);
-        // A pull *replaces* this tab's encounter, so every earlier association
-        // is now stale and the set is reset to this room alone, fingerprinted
-        // against what was just restored (round-4 fix D6) - not against what
-        // this tab had before the pull, which is exactly what was just
-        // discarded. An OOC-only snapshot replaces nothing, so those
-        // associations survive.
-        if (replaced) {
-          this.liveEncounterRoomCode = room;
-        } else {
-          this.markRoomLive(room);
-        }
-        if (!replaced) {
-          // Everyone in the saved encounter is out of action, so there was
-          // nothing on the wire to rebuild - and nothing was replaced here
-          // either. Critically, this branch does **not** push: pushing would
-          // overwrite a real saved fight with this tab's encounter, which is the
-          // silent-overwrite this fix exists to stop (round-3 fix 5).
-          this.shareInfo = `Joined session ${room}. Its saved encounter is ${ooc} `
-            + `participant${ooc === 1 ? "" : "s"} out of action, which are not broadcast and cannot be `
-            + "restored - nothing here was replaced, and nothing was sent to the room.";
-        } else {
-          this.shareInfo = `Joined session ${room}.`;
-        }
-      } else {
-        // `restoreFromSharedState()` no-ops on an empty snapshot, so nothing was
-        // discarded however the confirmation read (review defect D4). Say so,
-        // and push what this tab has: the join already made this tab the live
-        // encounter for that code, and without a push the room would keep
-        // showing players its empty snapshot until the GM's next click.
-        this.markRoomLive(room);
-        this.syncSharedState();
-        this.shareInfo = `Joined session ${room} - it had no saved encounter, so this tab's `
-          + "encounter was kept and sent to the room instead.";
-      }
+      this.markRoomLive(room);
+      this.syncSharedState();
+      this.shareInfo = `Joined session ${room} - it had no saved encounter, so this tab's `
+        + "encounter was kept and sent to the room instead.";
     } catch (err) {
       this.shareError = err instanceof Error ? err.message : "Unable to join share session.";
+    }
+  }
+
+  /**
+   * Bring this tab's local ownership cache (`participantOwners`) into
+   * agreement with the server's last-known copy whenever this tab
+   * (re)establishes its session for a room - durable-rooms review round 5,
+   * Part 1, Symptom A.
+   *
+   * Ownership is not GM-tab-authoritative state: it is decided collaboratively
+   * by players claiming/releasing through the server, and the server can
+   * *release* a claim on its own (a disconnect, a Close/End evacuation)
+   * without this tab's knowledge whenever it was not connected to hear the
+   * broadcast that announced it - which is exactly what happened in the
+   * ordering bug `evacuateRoom()` had in `server.js` (the release broadcast was
+   * emitted after every socket, including the GM's own, had already left the
+   * Socket.IO room). Reconciling here makes the stale-owner symptom
+   * structurally impossible rather than fixed only for that one ordering bug:
+   * even if a *different* future bug drops a correction on the floor, the next
+   * successful (re)join heals it, because ownership is always re-derived from
+   * the server at that point rather than trusted to still be right.
+   *
+   * Deliberately one-directional: this only ever **clears** a local owner the
+   * server no longer has (the server is the only side that can legitimately
+   * strip an ownership), never fabricates one the server has that the local
+   * cache does not. `claim_character` is relayed live through
+   * `session:command` and updates the cache the moment it happens, so a claim
+   * the server has that the cache lacks can only mean this tab is about to
+   * push a `claimable` flag the server has not seen yet (set while offline),
+   * in which case the local cache - not the stale wire copy - is correct.
+   * `participantClaimable` itself is never touched here for the same reason:
+   * the server never mutates it independently.
+   */
+  private reconcileOwnershipFromServer(state: SharedCombatState | null): void {
+    if (!state || !Array.isArray(state.participants)) {
+      return;
+    }
+    const byId = new Map<string, SharedParticipantState>(state.participants.map(sp => [ sp.id, sp ]));
+    for (const p of this.combatManager.participants.items) {
+      const sp = byId.get(this.getParticipantId(p));
+      if (!sp) {
+        continue; // not on the wire (OOC, or genuinely new locally) - nothing to reconcile against
+      }
+      const localOwner = this.participantOwners.get(p);
+      if (localOwner && !sp.ownerName) {
+        this.participantOwners.delete(p);
+      }
     }
   }
 
@@ -1319,15 +1442,60 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.participantOwners.get(p) || this.participantClaimable.get(p)) {
       return false; // claimed or made claimable - a deliberate GM decision
     }
-    return p.name === ""
-      && p.physicalDamage === 0
-      && p.stunDamage === 0
-      && p.dices === 1
-      && p.diceIni === 0
-      && !p.ooc
-      && !p.edge
-      && !p.hasPainEditor
-      && p.actionHistory.length === 0;
+    // Compared against a freshly-constructed reference rather than a
+    // hand-picked field list (P2-2, durable-rooms review round 5): the old
+    // list checked only name/physicalDamage/stunDamage/dices/diceIni/ooc/edge/
+    // hasPainEditor/actionHistory, and missed `baseIni`, the condition-monitor
+    // sizing fields, `painTolerance` and `status`/`waiting` - so a troll whose
+    // Reaction/Intuition and a 12-box Condition Monitor were set before its
+    // name was typed compared as "still a placeholder" and was silently
+    // discarded on a destructive Join with no prompt (live-reproduced).
+    // Diffing against a reference instance means a new `Participant` field
+    // added later is covered automatically, with no second list to update.
+    // `sortOrder` is deliberately excluded: `CombatManager.addParticipant()`
+    // stamps it from an incrementing counter purely by row position, so even
+    // an untouched *second* blank row never matches a fresh reference's
+    // `sortOrder` of 0 - including it would make every blank row after the
+    // first warn, which is exactly the false alarm round-4 fix D5 exists to
+    // prevent.
+    const ref = new Participant();
+    const fieldsMatch = p.name === ref.name
+      && p.physicalDamage === ref.physicalDamage
+      && p.stunDamage === ref.stunDamage
+      && p.dices === ref.dices
+      && p.diceIni === ref.diceIni
+      && p.ooc === ref.ooc
+      && p.edge === ref.edge
+      && p.hasPainEditor === ref.hasPainEditor
+      && p.actionHistory.length === ref.actionHistory.length
+      && p.baseIni === ref.baseIni
+      && p.physicalHealth === ref.physicalHealth
+      && p.stunHealth === ref.stunHealth
+      && p.overflowHealth === ref.overflowHealth
+      && p.painTolerance === ref.painTolerance
+      && p.status === ref.status
+      && p.waiting === ref.waiting;
+    if (!fieldsMatch) {
+      return false;
+    }
+    // Side-maps a GM can set before ever typing a name: a typed Edge/
+    // Reaction/Intuition rating or a pending VR mode is real setup, not
+    // placeholder noise - compared against `addParticipant()`'s own seed
+    // values, not against "unset" (every row, touched or not, has these three
+    // maps populated at creation).
+    if ((this.participantEdgeRatings.get(p) ?? PLACEHOLDER_EDGE_RATING_DEFAULT) !== PLACEHOLDER_EDGE_RATING_DEFAULT) {
+      return false;
+    }
+    if ((this.participantReactions.get(p) ?? PLACEHOLDER_REACTION_DEFAULT) !== PLACEHOLDER_REACTION_DEFAULT) {
+      return false;
+    }
+    if ((this.participantIntuitions.get(p) ?? PLACEHOLDER_INTUITION_DEFAULT) !== PLACEHOLDER_INTUITION_DEFAULT) {
+      return false;
+    }
+    if (this.pendingVrModes.has(p)) {
+      return false; // never set on a plain, untouched Participant
+    }
+    return true;
   }
 
   /**
@@ -1611,9 +1779,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     const room = this.shareRoomCode;
     try {
-      // The returned state/log are deliberately ignored: this call is an
-      // authentication, not a restore.
-      await this.sessionSync.joinAsGm(room);
+      // The returned log is deliberately ignored: this call is an
+      // authentication, not a restore. The returned *state* is not ignored -
+      // `reconcileOwnershipFromServer()` reads it to correct this tab's
+      // ownership cache before the push below re-asserts it (durable-rooms
+      // review round 5, Part 1, Symptom A: a claim released while this tab was
+      // disconnected must not be pushed back to life by the reconnect).
+      const { state } = await this.sessionSync.joinAsGm(room);
+      this.reconcileOwnershipFromServer(state);
       this.shareConnectionLost = false;
       this.shareError = "";
       this.shareInfo = `Reconnected to session ${room}; players are back in sync.`;
@@ -1790,7 +1963,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const isMatrix = payload["isMatrix"] === true;
       const dataProcessing = Number(payload["dataProcessing"] || 0);
       const vrMode = String(payload["vrMode"] || "AR");
-      const registered = this.upsertPlayerParticipant(
+      // A re-registration (sheet edit, reconnect) comes through this same path
+      // and deliberately re-announces the player - suppressing it would need a
+      // "have we seen this token" check duplicating `participantOwners`.
+      //
+      // Logged before `upsertPlayerParticipant`, using `characterName` rather
+      // than the returned participant: a type-mismatch re-registration (deck
+      // added/removed) discards and recreates the participant via
+      // `combatManager.removeParticipant()`, which can cascade into
+      // `endInitiativePass()`/`endCombatTurn()` if the old instance is the
+      // current actor, and that boundary line must not land above this one
+      // (brief "Combat boundary logging" fix round, Defect 1). `characterName`
+      // is what `upsertPlayerParticipant` writes onto `target.name` either way,
+      // so the text is identical.
+      this.appendPlayerCommandLog(characterName, PLAYER_COMMAND_LOG_TEXT.joined);
+      this.upsertPlayerParticipant(
         playerName,
         characterName,
         initiativeDice,
@@ -1804,10 +1991,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         dataProcessing,
         vrMode
       );
-      // A re-registration (sheet edit, reconnect) comes through this same path
-      // and deliberately re-announces the player - suppressing it would need a
-      // "have we seen this token" check duplicating `participantOwners`.
-      this.appendPlayerCommandLog(registered, PLAYER_COMMAND_LOG_TEXT.joined);
       this.sort();
       return;
     }
@@ -1826,13 +2009,51 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (!target) return;
       if (!isMatrix) {
         const targetName = target.name || "Player";
+        // Logged before the demote: `demoteToParticipant` -> `removeParticipant`
+        // can cascade into `endInitiativePass()`/`endCombatTurn()` if `target`
+        // is the current actor, and that boundary line must not land above
+        // this one (brief "Combat boundary logging" fix round, Defect 1). Name
+        // captured first regardless, since the demote swaps the participant
+        // instance.
+        this.appendPlayerCommandLog(targetName, PLAYER_COMMAND_LOG_TEXT.deckRemoved);
         if (target instanceof MatrixParticipant) {
           this.demoteToParticipant(target);
         }
-        // Name captured before the demote: that swaps the participant instance.
-        this.appendPlayerCommandLog(targetName, PLAYER_COMMAND_LOG_TEXT.deckRemoved);
         this.sort();
         return;
+      }
+      const targetName = target.name || "";
+      // Whether this is a first jack-in or a mode switch is decided by the
+      // *pre-swap* state: a freshly `promoteToMatrixParticipant`d instance
+      // always starts `jackedIn = false`, so this is knowable before the
+      // promote runs and does not need to read the post-swap instance.
+      const wasJackedIn = target instanceof MatrixParticipant ? target.jackedIn : false;
+      const jackIn = payload["jackIn"] === true;
+      const jackOut = !jackIn && payload["jackOut"] === true;
+      const create = !jackIn && !jackOut && payload["create"] === true;
+      let mode = VRMode.AR;
+      if (jackIn) {
+        const vrModeStr = String(payload["vrMode"] || "AR");
+        mode = vrModeStr === "hot-sim" ? VRMode.HotSim
+             : vrModeStr === "cold-sim" ? VRMode.ColdSim
+             : VRMode.AR;
+        const modeLabel = this.vrModeLabel(mode);
+        // Jacking in changes Initiative attribute *and* dice count, so it has
+        // to leave a trace in the log the players read, not only the GM's -
+        // logged before the type swap below for the same reason as the demote
+        // branch above (Defect 1: `promoteToMatrixParticipant` ->
+        // `removeParticipant` can cascade into `endInitiativePass()`/
+        // `endCombatTurn()`).
+        this.appendPlayerCommandLog(
+          targetName,
+          wasJackedIn
+            ? PLAYER_COMMAND_LOG_TEXT.switchedVrMode(modeLabel)
+            : PLAYER_COMMAND_LOG_TEXT.jackedIn(modeLabel)
+        );
+      } else if (jackOut) {
+        this.appendPlayerCommandLog(targetName, PLAYER_COMMAND_LOG_TEXT.jackedOut);
+      } else if (create) {
+        this.appendPlayerCommandLog(targetName, PLAYER_COMMAND_LOG_TEXT.deckConfigured);
       }
       if (!(target instanceof MatrixParticipant)) {
         target = this.promoteToMatrixParticipant(target);
@@ -1843,49 +2064,28 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       mp.sleaze = Math.max(0, Number(payload["sleaze"] || 0));
       mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
       mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
-      if (payload["jackIn"] === true) {
-        // Jack In / Switch Mode: apply the chosen VR mode and mark as jacked in.
-        // Read *before* applyVRMode, which writes `jackedIn`: the same payload
-        // flag covers a real jack-in and a mode switch by someone already
-        // jacked in, and only the previous state tells the two apart.
-        const wasJackedIn = mp.jackedIn;
-        const vrModeStr = String(payload["vrMode"] || "AR");
-        const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
-                   : vrModeStr === "cold-sim" ? VRMode.ColdSim
-                   : VRMode.AR;
+      if (jackIn) {
         // Lost dice (e.g. Hot Sim → Cold Sim) are rolled and applied GM-side.
         // Gained dice are not: the player client submits them as a delta
         // roll_submission {isDelta:true}, so rolling here would double-count.
         this.applyVRMode(mp, mode, { rollGainedDice: false });
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
-        // Jacking in changes Initiative attribute *and* dice count, so it has
-        // to leave a trace in the log the players read, not only the GM's.
-        const modeLabel = this.vrModeLabel(mode);
-        this.appendPlayerCommandLog(
-          mp,
-          wasJackedIn
-            ? PLAYER_COMMAND_LOG_TEXT.switchedVrMode(modeLabel)
-            : PLAYER_COMMAND_LOG_TEXT.jackedIn(modeLabel)
-        );
-      } else if (payload["jackOut"] === true || payload["create"] === true) {
+      } else if (jackOut || create) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
-        const isJackOut = payload["jackOut"] === true;
         mp.vrMode = VRMode.None;
         mp.jackedIn = false;
         mp.blocksPhysicalActions = false;
         const reaction = this.participantReactions.get(mp) ?? 0;
         const intuition = this.getParticipantIntuition(mp);
         mp.baseIni = reaction + intuition;
-        if (isJackOut) {
+        if (jackOut) {
           // Jack-out dice loss is always handled GM-side: roll the lost dice,
-          // subtract the total, log (brief F5 / criterion 8, p. 160).
+          // subtract the total (brief F5 / criterion 8, p. 160).
           this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
-          this.appendPlayerCommandLog(mp, PLAYER_COMMAND_LOG_TEXT.jackedOut);
         } else {
           // Initial deck creation is character setup, not a mid-turn dice
           // change - the player sends a full roll_submission afterwards.
           mp.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
-          this.appendPlayerCommandLog(mp, PLAYER_COMMAND_LOG_TEXT.deckConfigured);
         }
       }
       // No `else`: a bare stat-edit payload (no create/jackIn/jackOut) writes
@@ -2076,8 +2276,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       if (!target || target.status !== StatusEnum.Active) {
         return;
       }
-      this.btnDelay_Click(target);
+      // Logged before `btnDelay_Click`: delaying the sole current actor empties
+      // `currentActors` and cascades into `endInitiativePass()`/
+      // `endCombatTurn()`, which fire their own shared-log line synchronously.
+      // This line describes the cause and must not land below that effect
+      // (brief "Combat boundary logging" fix round, Defect 1).
       this.appendSharedLog(target.name || "Player", "Delay");
+      this.btnDelay_Click(target);
       return;
     }
     if (command.type === "interrupt") {
@@ -2137,6 +2342,23 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       oocParticipantCount: this.combatManager.participants.items.filter(p => p.ooc).length
     };
     this.sessionSync.broadcastState(sharedState);
+    // Symptom C fix (durable-rooms review round 5, Part 1): refresh this
+    // room's fingerprint on every successful push, not only at join/create
+    // time. `liveEncounterDivergedFrom()` compares the *current* roster
+    // against whatever was last fingerprinted - without this, ordinary
+    // incremental play (add one, remove one, many pushes over a long session)
+    // could eventually leave zero overlap with a fingerprint frozen at
+    // creation time, even though every intervening state was this tab's own
+    // legitimate, continuously-pushed history. Refreshing here means
+    // "diverged" can only ever mean "this tab stopped being the room's truth
+    // in between", never "the encounter legitimately changed while it was".
+    // Guarded on membership rather than always inserting: only a room this
+    // tab is already recorded as the live truth for (via `markRoomLive()`)
+    // gets a fingerprint at all - this must never be the thing that creates
+    // that association.
+    if (this.liveEncounterRooms.has(this.shareRoomCode)) {
+      this.liveEncounterFingerprints.set(this.shareRoomCode, this.currentParticipantIdSet());
+    }
   }
 
   private getSharedParticipants(): SharedParticipantState[] {
@@ -2318,18 +2540,37 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   /**
    * Log a participant-attributed event that either a player command or a GM
-   * button can raise (astral status, astral projection, jack in/out).
+   * button can raise — astral status, astral projection, jack in/out, and,
+   * since `briefs/action-log-readability-spec.md`, a declared Act
+   * (`performAct`) and an Interrupt (`btnAction_Click`) as well.
    *
-   * With a session open the line goes to the shared log only: the server echo
-   * mirrors every non-`"GM"` entry into `LogHandler` (see `attachShareListeners`),
-   * so writing a local line here as well would give the GM the same event
-   * twice. With no session there is no echo and no shared log, so the plain
-   * Action Log is the only place the event can be recorded.
+   * With a session open **and the socket healthy**, the line goes to the
+   * shared log only: the server echo mirrors every non-`"GM"` entry into
+   * `LogHandler` (see `attachShareListeners`), so writing a local line here
+   * as well would give the GM the same event twice.
+   *
+   * With a session open but the connection currently down
+   * (`shareConnectionLost`), `appendSharedLog`'s emit is fire-and-forget and
+   * no echo is coming back to mirror it locally — round-2 defect D1. Without
+   * a fallback the GM's own screen would show nothing for the event until (if
+   * ever) the socket reconnects and the emit is resent, even though the event
+   * genuinely happened at the table. So this also writes the same local line
+   * the no-session branch below writes, exactly as `appendGmOnlyLog` and
+   * `logRowEvent` already write a local line unconditionally. This does not
+   * reopen finding D (the row/roll double-log case, left alone per the brief)
+   * because it only fires while disconnected, when no echo is coming to
+   * duplicate it.
+   *
+   * With no session there is no echo and no shared log, so the plain Action
+   * Log is the only place the event can be recorded.
    */
   private appendParticipantEventLog(actorName: string, text: string): void {
     const actor = actorName || PLAYER_COMMAND_FALLBACK_ACTOR;
     if (this.shareRoomCode) {
       this.appendSharedLog(actor, text);
+      if (this.shareConnectionLost) {
+        LogHandler.log(this.currentBTTime, `${actor} ${text}`);
+      }
       return;
     }
     LogHandler.log(this.currentBTTime, `${actor} ${text}`);
@@ -3382,7 +3623,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
     const text = `${member.name} ${declaredAction ?? NO_DECLARED_ACTION_PHRASE}`;
-    this.logRowEvent(actor, text);
+    // Round-2 defect D5: `logRowEvent`'s local write is `${actor} ${text}`,
+    // which reads as one run-on the moment `text` itself opens with another
+    // name ("Gangers G 1 took aim twice (simple)." - `text` cannot gain a
+    // colon of its own; AC13/S2 assert the wire shape `"G 1 ... (simple)."`
+    // verbatim). So the colon goes on only this call's *local* line, matching
+    // the shared pane's own `<strong>actor</strong>: text` convention, rather
+    // than into `logRowEvent` itself - other row events routed through it
+    // (`addGrunt`'s local `"Ganger A added."`, asserted colon-free) must keep
+    // their existing local shape.
+    LogHandler.log(this.currentBTTime, `${actor}: ${text}`);
+    this.appendSharedLog(actor, text);
     member.hasActed = true;
     if (row.activeMembers.every(m => m.hasActed)) {
       this.combatManager.act(row);
@@ -3420,13 +3671,36 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, "NextPass_Click");
     this.combatManager.nextIniPass();
-    this.combatManager.goToNextActors();
-    if (this.combatManager.initiativePass > 1) {
+    // Decide, before `goToNextActors()` runs, whether the pass `nextIniPass()`
+    // just started is real (gets its own "Start Initiative Pass" line) or the
+    // phantom pass created when this same click ends the Combat Turn (never
+    // announced - Open Decision 2 / AC4). `goToNextActors()` can call
+    // `endInitiativePass()` synchronously, which reserves the *next* log
+    // line's slot immediately if it fires - so this can't be decided by
+    // checking `initiativePass` afterwards the way it used to be: that only
+    // worked because the phantom-pass case resets `initiativePass` back to 1
+    // via `endCombatTurn()`, but an ordinary "everyone still standing is
+    // Delaying" pass (a real new pass that immediately re-ends, e.g. two
+    // combatants who both held their action) does NOT reset it, and used to
+    // let the pass-end hook's line land above this method's own pass-start
+    // line for the same pass.
+    //
+    // `nextIniPass()` always increments `initiativePass`, so it is already
+    // > 1 here on every real Next Pass click - the only question left is
+    // whether the Combat Turn is over. `isOver()` is exactly the same check
+    // `endInitiativePass()` runs internally to decide the same thing, and
+    // nothing between here and there (`goToNextActors()`'s status flips and
+    // `flagSpentNpcRows()`) changes any participant's Initiative Score, so
+    // calling it now predicts that branch correctly without duplicating its
+    // logic.
+    const isRealNewPass = !this.combatManager.isOver();
+    if (isRealNewPass) {
       this.appendSharedLog(
         "GM",
         formatPassStartLogText(this.combatManager.initiativePass, INITIATIVE_PASS_DECAY)
       );
     }
+    this.combatManager.goToNextActors();
     this.sort();
   }
 
@@ -3516,7 +3790,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // The scene is over: whoever the GM was rolling for may not exist next
     // fight, so the sticky attribution does not carry across the boundary.
     this.clearGmRollAttribution();
-    this.appendSharedLog("GM", "End Combat");
+    this.appendSharedLog("GM", COMBAT_ENDED_LOG_TEXT);
     if (this.shareRoomCode) {
       this.sessionSync.sendCommand({
         type: "combat_ended",
@@ -3542,11 +3816,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     LogHandler.log(this.currentBTTime, sender.name + " LeaveCombat_Click");
     UndoHandler.StartActions();
     sender.leaveCombat();
+    // Logged before `combatManager.act()`: if `sender` is the current actor,
+    // `act()` can cascade into `endInitiativePass()`/`endCombatTurn()`, which
+    // fire their own shared-log line synchronously. This line describes the
+    // cause (leaving combat) and must not land below that effect (brief
+    // "Combat boundary logging" fix round, Defect 1).
+    this.appendSharedLog("GM", GM_LOG_TEXT.leftCombat(sender.name));
     if (this.combatManager.currentActors.contains(sender)) {
       // Remove sender from active Actors
       this.combatManager.act(sender);
     }
-    this.appendSharedLog("GM", GM_LOG_TEXT.leftCombat(sender.name));
     this.sort();
   }
 
@@ -4246,6 +4525,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantTieBreakers.set(row, Math.random());
     this.getParticipantId(row);
     this.expandedRowPanels.add(row);
+    // Logged before the removal loop: `combatManager.removeParticipant(grunt)`
+    // can cascade into `endInitiativePass()`/`endCombatTurn()` if the grunt
+    // being merged away is the current actor, and that boundary line must not
+    // land above this one describing the merge that caused it (brief "Combat
+    // boundary logging" fix round, Defect 1).
+    this.logRowEvent(row.name,
+      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")}.`);
     for (const grunt of selected) {
       this.forgetParticipant(grunt);
       this.combatManager.removeParticipant(grunt);
@@ -4253,8 +4539,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // give the GM back the same ticked selection, not an empty one.
       this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
     }
-    this.logRowEvent(row.name,
-      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")}.`);
     this.selectActor(row);
     this.syncSharedState();
     this.sort();
@@ -4321,7 +4605,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   getNpcRowBadgeTooltip(row: NpcRowParticipant): string {
     const base = "Grunt Group: several NPCs on one shared Initiative Score, "
-      + "acting back-to-back in this slot (p. 379)";
+      + "acting back-to-back in this slot (p. 379).";
     if (!row.isWipedOut) {
       return base;
     }
@@ -4688,6 +4972,35 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.logGmOnlyRowEvent(this.rowLogActor(spent), "every member is out of action.");
     }
     this.syncSharedState();
+  }
+
+  /**
+   * The GM-side half of an Initiative Pass ending: say so in the log.
+   * Registered on the CombatManager in the constructor, so every one of the
+   * ten call paths that can end a pass (ARCHITECTURE.md §2) logs identically,
+   * and the engine's `!alreadyEnded` guard keeps a delayed actor's late Act
+   * from firing this twice for the same pass (brief "Action Log entries for
+   * combat structural boundaries" scenario S2).
+   *
+   * Appends a log line and nothing else: this fires mid-transition, and every
+   * one of those ten call paths already ends with its own `sort()`/
+   * `syncSharedState()`.
+   */
+  private logInitiativePassEnded(pass: number): void {
+    this.appendSharedLog("GM", formatPassEndLogText(pass));
+  }
+
+  /**
+   * The GM-side half of a Combat Turn ending: say so in the log. Registered
+   * on the CombatManager in the constructor. Fires before
+   * `endCombatTurn()`'s own mutations, so `turn` is still the turn that is
+   * ending, not the incremented value.
+   *
+   * Appends a log line and nothing else, for the same reason as
+   * `logInitiativePassEnded` above.
+   */
+  private logCombatTurnEnded(turn: number): void {
+    this.appendSharedLog("GM", formatTurnEndLogText(turn));
   }
 
   // ── Per-NPC "has acted this pass" (brief Decisions 18 & 23) ──────────────
@@ -5086,8 +5399,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     UndoHandler.StartActions();
     // Name captured before the promote: that swaps the participant instance.
     const astralName = p.name || "";
-    const ap = this.promoteToAstralParticipant(p);
+    // Logged before the promote: `promoteToAstralParticipant` ->
+    // `removeParticipant` can cascade into `endInitiativePass()`/
+    // `endCombatTurn()` if `p` is the current actor, and that boundary line
+    // must not land above this one (brief "Combat boundary logging" fix
+    // round, Defect 1).
     this.appendParticipantEventLog(astralName, PLAYER_COMMAND_LOG_TEXT.awakened);
+    const ap = this.promoteToAstralParticipant(p);
     this.syncSharedState();
     this.sort();
     // Carry the panel expansion to the new instance
@@ -5103,8 +5421,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.expandedAstralPanels.delete(p);
     // Name captured before the demote: that swaps the participant instance.
     const astralName = p.name || "";
-    this.demoteFromAstralParticipant(p as AstralParticipant);
+    // Logged before the demote: `demoteFromAstralParticipant` ->
+    // `removeParticipant` can cascade into `endInitiativePass()`/
+    // `endCombatTurn()` if `p` is the current actor, and that boundary line
+    // must not land above this one (brief "Combat boundary logging" fix
+    // round, Defect 1).
     this.appendParticipantEventLog(astralName, PLAYER_COMMAND_LOG_TEXT.awakenedRemoved);
+    this.demoteFromAstralParticipant(p as AstralParticipant);
     this.syncSharedState();
     this.sort();
   }
@@ -5740,12 +6063,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private beginCombatTurn() {
     UndoHandler.StartActions();
     this.initiativePrepActive = false;
-    this.combatManager.startRound();
-    this.appendSharedLog("GM", `Start Combat Turn ${this.combatManager.combatTurn}`);
+    // Turn number and "is this a new combat" are captured before
+    // `startRound()` runs, and all three start lines are emitted ahead of
+    // that call — a deliberate departure from this file's usual "log after
+    // the state change" convention. `startRound()` can itself cascade
+    // straight through `endInitiativePass()` into `endCombatTurn()` when
+    // nobody can act (every participant OOC), which increments `combatTurn`
+    // before the click returns; logging after the call would print "Start
+    // Combat Turn 2" for a turn that never had anyone in it, and the new
+    // "End Combat Turn 1" line (via `onCombatTurnEnded`) would sit *above*
+    // its own start line and disagree with it by one (brief "Action Log
+    // entries for combat structural boundaries", Open Decision 5). These are
+    // announcements of a boundary the click is about to cross, not reports of
+    // a participant's state.
+    const turn = this.combatManager.combatTurn;
+    // Derived from combat state, not remembered: `endCombat()` resets
+    // `combatTurn` to 1 and `started` to false, so a second encounter
+    // re-announces "Combat started" correctly, and `endCombatTurn()`
+    // increments past 1, so turns 2..N do not re-announce it.
+    const isNewCombat = turn === 1 && !this.combatManager.started;
+    if (isNewCombat) {
+      this.appendSharedLog("GM", COMBAT_STARTED_LOG_TEXT);
+    }
+    this.appendSharedLog("GM", formatTurnStartLogText(turn));
     this.appendSharedLog(
       "GM",
       formatPassStartLogText(this.combatManager.initiativePass, INITIATIVE_PASS_DECAY)
     );
+    this.combatManager.startRound();
     this.sort();
   }
 

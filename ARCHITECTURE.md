@@ -108,6 +108,23 @@ through `Undoable.Set` so they're part of the undo chapter mechanism, §4):
 - `currentInitiative: number` (the initiative score currently being
   resolved, `NaN` when nothing is active)
 
+Both boundary transitions are observable outside the engine:
+`CombatManager.onInitiativePassEnded` and `onCombatTurnEnded` are nullable
+listener fields — a GM-component callback set once in the constructor and
+nulled again in `ngOnDestroy` because `CombatManager` is a singleton that
+outlives the component, the same wiring shape `CombatManager.onSpentNpcRowsFlagged`
+uses for row-wipe notifications (§6, "A row wiped out by damage") — fired from
+`endInitiativePass()` and `endCombatTurn()` respectively so every call path
+that can trigger a boundary (there are ten for a pass end) logs it identically
+regardless of which one fired (brief "Action Log entries for combat
+structural boundaries"). Two firing rules matter to anything that consumes
+these hooks: `onInitiativePassEnded` fires only on the `false -> true`
+transition of `passEnded` — not on every call to `endInitiativePass()`, so a
+participant who acts again after the pass has already ended (e.g. a Delaying
+participant) does not re-fire it — and it does **not** fire at all when that
+same transition also ends the Combat Turn; in that case only
+`onCombatTurnEnded` fires, never both.
+
 **Pass boundary** (`nextIniPass()`): increments `initiativePass`, sets
 `passEnded = false`, **subtracts `INITIATIVE_PASS_DECAY` (10) from every
 participant's running Initiative Score** (including OOC participants and
@@ -606,9 +623,9 @@ ordinary participant's `btnAct_Click` opens, scoped to that NPC via a new
 the row is what holds the shared Score and Action Phase the modal gates on);
 `submitActModal()` branches on `actModalRowMember` and, for a row member, calls
 `performRowMemberAct()` instead of the ordinary `performAct()` — it logs the
-declared action attributed to the NPC (`logRowEvent`, actor = the row, NPC
-named in the text, same convention as every other row log line), sets that
-member's `hasActed`, and only calls `CombatManager.act(row)` — finishing the
+declared action attributed to the NPC (actor = the row, NPC named in the text,
+same convention as every other row log line), sets that member's `hasActed`,
+and only calls `CombatManager.act(row)` — finishing the
 row's Action Phase and advancing the order, exactly what `performAct` does for
 an ordinary participant — once every member in `row.activeMembers` has acted.
 Decision 24 gates the per-member Act button on `canRowMemberAct(row)`:
@@ -647,7 +664,13 @@ which are bookkeeping about NPCs rather than events the table witnesses. Since
 `SharedLogEntry.houseRule`, which drives a GM-only "house rule" badge in the
 log pane (the words "house rule" no longer appear in the text itself, only on
 the badge) — `logGmOnlyRowEvent`/`appendGmOnlyLog` take an `extra?:
-Partial<SharedLogEntry>` for this and any future per-entry flag.
+Partial<SharedLogEntry>` for this and any future per-entry flag. One row event
+does **not** route through `logRowEvent`: `performRowMemberAct` writes its own
+local + shared pair directly, so its local copy can carry a colon between the
+row and the member (`action-log-readability-spec.md` fix-round defect D5 —
+`logRowEvent`'s colon-free local shape reads as a run-on once the text itself
+opens with the member's name, e.g. "Gangers G 1 took aim…" instead of
+"Gangers: G 1 took aim…").
 
 GM-component-side, a row is created by `addNpcRow()` and is given an Edge
 rating of `NPC_ROW_EDGE_RATING` (0), which is what makes the existing

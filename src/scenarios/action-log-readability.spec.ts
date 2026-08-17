@@ -254,6 +254,92 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     });
   });
 
+  // ── Round-2 defect D1 - a lost connection must not lose the local record ──
+  //
+  // Before this pass, `performAct`/`btnAction_Click` each wrote an
+  // unconditional local `LogHandler.log` line as well as attempting the
+  // shared broadcast. This pass moved both onto `appendParticipantEventLog`,
+  // which - with a session open - takes only the shared branch and relies on
+  // the server echo to mirror the entry back into `LogHandler`. With the
+  // socket down (`shareConnectionLost`) that echo never arrives, so the GM's
+  // own screen showed nothing for the event at all until (if ever) the socket
+  // reconnected and the emit was resent.
+
+  describe('D1 (round 2) - the socket is down while a session is still open', () => {
+    it('performAct writes a local fallback line when the connection is lost', () => {
+      const sarah = addCombatant('Sarah');
+      component.shareConnectionLost = true;
+      sent.length = 0;
+      LogHandler.logbook.length = 0;
+      component.actModalParticipant = sarah;
+      component['declaredActionSelections'].set(sarah, {
+        free: 'Drop Prone', simple: [], complex: null
+      });
+
+      component.submitActModal();
+
+      // The emit is still attempted (fire-and-forget) - unchanged behaviour.
+      expect(sent.length).toBe(1);
+      expect(sent[0].actor).toBe('Sarah');
+      expect(sent[0].text).toBe('dropped prone (free).');
+      // ...but the GM's own pane also gets a local record, since no echo is
+      // coming back to supply one.
+      const local = LogHandler.logbook.filter(e => e.text === 'Sarah dropped prone (free).');
+      expect(local.length).toBe(1);
+    });
+
+    it('btnAction_Click writes a local fallback line when the connection is lost', () => {
+      const ganger2 = addCombatant('Ganger 2');
+      ganger2.baseIni = 15;
+      component.shareConnectionLost = true;
+      sent.length = 0;
+      LogHandler.logbook.length = 0;
+
+      component.btnAction_Click(ganger2, FULL_DEFENSE);
+
+      expect(sent.length).toBe(1);
+      const local = LogHandler.logbook.filter(
+        e => e.text === 'Ganger 2 interrupted, going full defense.'
+      );
+      expect(local.length).toBe(1);
+    });
+
+    it('writes no local fallback once the connection is healthy again (no double-log regression)', () => {
+      const sarah = addCombatant('Sarah');
+      component.shareConnectionLost = false;
+      LogHandler.logbook.length = 0;
+      component.actModalParticipant = sarah;
+      component['declaredActionSelections'].set(sarah, {
+        free: 'Drop Prone', simple: [], complex: null
+      });
+
+      component.submitActModal();
+
+      // The common case is unchanged: shared-only, the echo (simulated by the
+      // test harness elsewhere) supplies the local mirror, not this helper.
+      expect(LogHandler.logbook.length).toBe(0);
+    });
+
+    // The brief also asks whether this gap reaches the helper's other
+    // callers (jack in/out, Awakened toggles, astral projection toggle).
+    // They all route through the same `appendParticipantEventLog` choke
+    // point, so the fix applies to them for free - this is the same
+    // assertion shape as the two tests above, exercised through a different
+    // caller to confirm it, not a separate code path.
+    it('enableAstral (an unrelated caller of the same helper) also gets the fallback for free', () => {
+      const mage = addCombatant('Mage');
+      component.shareConnectionLost = true;
+      sent.length = 0;
+      LogHandler.logbook.length = 0;
+
+      component.enableAstral(mage);
+
+      expect(sent.length).toBe(1);
+      const local = LogHandler.logbook.filter(e => e.text === 'Mage is now Awakened');
+      expect(local.length).toBe(1);
+    });
+  });
+
   // ── AC13 - a row member's declared action ────────────────────────────────
 
   describe('AC13 - a row member declared action is attributed to the row, names the NPC', () => {
@@ -268,6 +354,26 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       expect(sent.length).toBe(1);
       expect(sent[0].actor).toBe('Gangers');
       expect(sent[0].text).toBe('G 1 dropped prone (free).');
+    });
+
+    // Round-2 defect D5: the row-member action text (A11) opens with the NPC's
+    // own name, and `logRowEvent`'s local write is `${actor} ${text}` with no
+    // separator, so the GM's own (no-session-only) pane used to read as one
+    // run-on ("Gangers G 1 dropped prone (free)."). This asserts the fix -
+    // scoped to `performRowMemberAct`'s own local line, not to `logRowEvent`
+    // in general (other row events, e.g. `addGrunt`, assert a colon-free local
+    // line of their own - see `src/Grunts/npc-row.spec.ts`).
+    it('D5 - the local pane separates the row name from the member name with a colon', () => {
+      const row = gmRow('Gangers');
+      const g1 = component.addNpcToRow(row, 'G 1');
+      LogHandler.logbook.length = 0;
+
+      component['performRowMemberAct'](row, g1,
+        DeclaredActionEngine.buildDeclaredActionLog({ free: 'Drop Prone', simple: [], complex: null }));
+
+      const local = LogHandler.logbook.map(e => e.text);
+      expect(local).toContain('Gangers: G 1 dropped prone (free).');
+      expect(local.some(t => t.startsWith('Gangers G 1'))).toBeFalse();
     });
   });
 
@@ -303,6 +409,24 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     it('AC16 - wraps an interrupt clause', () => {
       const html = formatLogText('interrupted, going full defense.');
       expect(html).toContain('<span class="log-keyword-action">going full defense.</span>');
+    });
+
+    // Round-2 defect D2: the old lowercase-initial heuristic assumed a row
+    // member's prepended name was always capitalised. A fully-lowercase or
+    // lowercase-initial NPC name broke that assumption and got swallowed into
+    // the highlighted span along with the verb phrase.
+    it('D2 - a fully-lowercase row-member name is left out of the highlighted span', () => {
+      const html = formatLogText('ork samurai took aim twice (simple).');
+      expect(html).toBe(
+        'ork samurai <span class="log-keyword-action">took aim twice</span> (simple).'
+      );
+    });
+
+    it('D2 - a lowercase-initial row-member name (leading article) is left out of the span', () => {
+      const html = formatLogText('the bouncer dropped prone (free).');
+      expect(html).toBe(
+        'the bouncer <span class="log-keyword-action">dropped prone</span> (free).'
+      );
     });
   });
 

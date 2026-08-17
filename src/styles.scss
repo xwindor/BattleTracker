@@ -1003,37 +1003,96 @@ body .form-check-input {
   border-color: #1f3d49;
 }
 
-:root body .action-item-selected,
-:root body .log-text-action,
-:root body .log-keyword-action {
+:root body .action-item-selected {
   background: rgba(56, 216, 255, 0.2) !important;
   color: #c4f6ff !important;
 }
 
-:root body .log-text-roll,
-:root body .log-keyword-roll {
-  background: rgba(255, 195, 93, 0.2) !important;
-  color: #ffe9b5 !important;
+/* ── Action Log: pure-black terminal surface (Xavier, 2026-08-15) ──────────
+   The log used to colour a background pill behind the category text, then
+   (action-log-readability-spec.md) additionally coloured a background pill
+   behind just the verb-phrase keyword inside it — two competing pill systems
+   nested in one line. Xavier asked for the dice-roller module's look instead:
+   a plain black surface with the LINE's text coloured by category, no nested
+   keyword pills. So the panel goes black like the dice roller
+   (var(--dice-bg)) and every .log-text-* rule below is colour-only, no
+   background. The .log-keyword-* spans are still in the DOM (formatLogText
+   still wraps them) but are neutralised to inherit the line's colour, so nothing
+   downstream that reads for their presence breaks. */
+:root body .gm-log-list,
+:root body .log-list {
+  background: var(--dice-bg, #000) !important;
+  border: var(--cd-border-thin) solid var(--dice-border, var(--cd-line));
+  border-radius: var(--cd-radius-2);
+  box-shadow: var(--dice-glow, none);
+}
+
+:root body .gm-log-list .list-group-item,
+:root body .log-list .list-group-item {
+  background: transparent !important;
+  border-color: var(--dice-border-soft, rgba(0, 255, 65, 0.2));
+}
+
+:root body .gm-log-list .list-group-item:nth-of-type(odd),
+:root body .log-list .list-group-item:nth-of-type(odd) {
+  background-color: rgba(255, 255, 255, 0.025) !important;
+}
+
+:root body .gm-log-list .log-time,
+:root body .log-list .log-time {
+  color: var(--cd-text-muted);
+}
+
+:root body .gm-log-list strong,
+:root body .log-list strong {
+  color: var(--cd-text);
+}
+
+:root body .log-text-action {
+  background: none !important;
+  color: var(--cd-cyan) !important;
+  text-shadow: 0 0 0.4rem rgba(56, 216, 255, 0.55);
+}
+
+:root body .log-text-roll {
+  background: none !important;
+  color: var(--cd-amber) !important;
+  text-shadow: 0 0 0.4rem rgba(255, 195, 93, 0.55);
 }
 
 :root body .log-text-system {
-  background: rgba(43, 244, 200, 0.14);
-  color: #beffe9;
+  background: none !important;
+  color: var(--dice-fg, #00ff41) !important;
+  text-shadow: 0 0 0.4rem rgba(0, 255, 65, 0.5);
 }
 
-:root body .log-keyword-physical {
-  background: rgba(255, 95, 131, 0.24) !important;
-  color: #ffdce5 !important;
+:root body .log-text-glitch {
+  background: none !important;
+  color: var(--cd-danger) !important;
+  font-weight: 700;
+  text-shadow: 0 0 0.45rem rgba(255, 95, 131, 0.65);
 }
 
-:root body .log-keyword-stun {
-  background: rgba(255, 195, 93, 0.22) !important;
-  color: #ffe9be !important;
-}
-
+:root body .log-keyword-action,
+:root body .log-keyword-roll,
+:root body .log-keyword-physical,
+:root body .log-keyword-stun,
 :root body .log-keyword-heal {
-  background: rgba(55, 240, 169, 0.2) !important;
-  color: #ccffea !important;
+  background: none !important;
+  color: inherit !important;
+  font-weight: inherit;
+  padding: 0;
+}
+
+/* GLITCH / CRITICAL GLITCH keep bold weight - not decorative, the printed
+   rule (p. 45) says a glitch always has to stand out - but no separate
+   colour or pill; the whole line is already .log-text-glitch red. */
+:root body .log-keyword-glitch,
+:root body .log-keyword-critical-glitch {
+  background: none !important;
+  color: inherit !important;
+  font-weight: 700;
+  padding: 0;
 }
 
 :root body .action-validation {

@@ -1,4 +1,5 @@
 import { GlitchLevel, classifyRoll } from "app/shared/roll-utils";
+import { DECLARED_ACTION_VERB_PHRASES } from "app/shared/declared-actions";
 
 export const LOG_DECODE_DURATION_MS_PER_CHAR = 28;
 export const LOG_DECODE_MIN_MS = 420;
@@ -195,6 +196,39 @@ export function formatPassStartLogText(pass: number, decayPerPass: number): stri
   return `Start Initiative Pass ${pass} — all Initiative Scores -${decayPerPass}`;
 }
 
+/**
+ * Combat Turn boundary: the start line. `turn` is captured by the caller
+ * before `startRound()` runs, since `startRound()` can itself cascade
+ * straight through to `endCombatTurn()` when nobody can act (brief "Action
+ * Log entries for combat structural boundaries").
+ */
+export function formatTurnStartLogText(turn: number): string {
+  return `Start Combat Turn ${turn}`;
+}
+
+/**
+ * Combat Turn boundary: the end line. `turn` is the turn that just ended, not
+ * the incremented value `CombatManager.endCombatTurn()` leaves behind.
+ */
+export function formatTurnEndLogText(turn: number): string {
+  return `End Combat Turn ${turn}`;
+}
+
+/**
+ * Initiative Pass boundary: the end line. Deliberately does not restate the
+ * -10 decay; that is announced on the pass that receives it, at its start
+ * (`formatPassStartLogText`), which is where a GM needs it.
+ */
+export function formatPassEndLogText(pass: number): string {
+  return `End Initiative Pass ${pass}`;
+}
+
+/** Combat-start structural entry (brief "Action Log entries for combat structural boundaries"). */
+export const COMBAT_STARTED_LOG_TEXT = "Combat started";
+
+/** Combat-end structural entry, replacing the former "End Combat" button-label text. */
+export const COMBAT_ENDED_LOG_TEXT = "Combat ended";
+
 export function getLogTextClass(text: string): string {
   if (new RegExp(`${CRITICAL_GLITCH_LABEL}|${GLITCH_LABEL}`).test(text)) {
     return "log-text-glitch";
@@ -225,6 +259,116 @@ function decorateGlitchLabels(formatted: string): string {
   );
 }
 
+/** Every `(free|simple|complex)` clause tag emitted by `buildDeclaredActionLog`. */
+const ACTION_CLAUSE_TAG_PATTERN = /\((free|simple|complex)\)/gi;
+
+/**
+ * Every verb-phrase lead a `buildDeclaredActionLog` clause can ever open
+ * with, once its repeat suffix and `(free|simple|complex)` tag are stripped:
+ * every value in `DECLARED_ACTION_VERB_PHRASES` (`declared-actions.ts`), plus
+ * the literal `"used "` lead its `` `used ${name}` `` fallback always starts
+ * with regardless of what unrecognised name follows. This is the *closed*
+ * vocabulary the engine can produce - nothing else ever appears at the start
+ * of a clause - so it is sorted longest-first only for readability; matching
+ * is a plain prefix test and does not depend on the order (a shorter phrase
+ * that is itself a prefix of a longer one, e.g. "cast a spell" vs. "cast a
+ * spell recklessly", still finds the same start index either way, since the
+ * highlighted span always runs from that index to the clause's own tag, not
+ * to the end of whichever phrase matched).
+ */
+const KNOWN_VERB_PHRASE_LEADS: readonly string[] = [
+  ...Object.values(DECLARED_ACTION_VERB_PHRASES),
+  "used "
+];
+
+function clauseStartsWithKnownVerbPhrase(remainder: string): boolean {
+  return KNOWN_VERB_PHRASE_LEADS.some(lead => remainder.startsWith(lead));
+}
+
+/**
+ * Split a single declared-action clause's raw text (everything between the
+ * previous clause tag, or the start of the line, and this clause's own tag)
+ * into an unhighlighted prefix and the verb phrase to highlight.
+ *
+ * Round-2 defect D2 (`briefs/action-log-readability-spec.md`): the original
+ * heuristic treated the first lowercase-initial token as the start of the
+ * verb phrase, on the assumption that a row member's prepended name
+ * (`` `${member.name} ${sentence}` ``, `performRowMemberAct`) would always be
+ * capitalised. A fully-lowercase or lowercase-initial NPC name ("ork
+ * samurai", "the bouncer") broke that assumption and got swallowed into the
+ * highlighted span along with the verb phrase.
+ *
+ * This scans forward for the earliest point at which the *remaining* text
+ * starts matching a member of the closed verb-phrase vocabulary
+ * (`clauseStartsWithKnownVerbPhrase`) instead of guessing from
+ * capitalisation - a structural boundary rather than a refined guess, and one
+ * that does not require changing what `text` actually says (the wire shape
+ * asserted by AC13/S2 is untouched). Everything before that point - an
+ * inter-clause joiner ("and", ",") or a row member's name, in any case - is
+ * the unhighlighted prefix.
+ *
+ * Residual limitation, accepted per the brief ("acceptable to leave... if no
+ * clean structural fix is feasible without a larger change" - this one *is*
+ * feasible, but is not airtight): an NPC name that itself contains one of the
+ * known verb-phrase leads as a substring (e.g. a member literally named "the
+ * reloaded guy") can still make the scan stop one token early. This is a
+ * presentation-only, cosmetically-visible edge case with no effect on the
+ * underlying log text, and is judged rare enough not to warrant a wire-shape
+ * change (inserting a real separator into `text` would break the exact
+ * strings AC13/S2/npc-row.spec.ts already assert).
+ */
+function splitActionClausePrefix(rawClause: string): { prefix: string; verb: string } {
+  let index = 0;
+  while (index < rawClause.length) {
+    const remainder = rawClause.slice(index);
+    if (clauseStartsWithKnownVerbPhrase(remainder)) {
+      break;
+    }
+    const whitespaceMatch = /^\s+/.exec(remainder);
+    if (whitespaceMatch) {
+      index += whitespaceMatch[0].length;
+      continue;
+    }
+    const tokenMatch = /^\S+/.exec(remainder);
+    if (!tokenMatch) {
+      break;
+    }
+    index += tokenMatch[0].length;
+  }
+  return { prefix: rawClause.slice(0, index), verb: rawClause.slice(index) };
+}
+
+/**
+ * Wrap each declared-action/interrupt clause's verb phrase in
+ * `log-keyword-action`, leaving its `(free|simple|complex)` tag, any
+ * inter-clause connector, and any row-member name prefix unwrapped. Returns
+ * `null` (rather than the unmodified text) when the line carries no clause
+ * tag at all, so the caller can fall through to the remaining highlight
+ * rules.
+ */
+function highlightActionClauses(formatted: string): string | null {
+  const tags = [...formatted.matchAll(ACTION_CLAUSE_TAG_PATTERN)];
+  if (tags.length === 0) {
+    return null;
+  }
+  let result = "";
+  let cursor = 0;
+  for (const tag of tags) {
+    const tagStart = tag.index ?? 0;
+    // The tag is always preceded by the single space `buildDeclaredActionLog`
+    // inserts between the verb phrase and its "(free|simple|complex)" tag;
+    // exclude it from the clause so it renders outside the span.
+    const clauseEnd = formatted[tagStart - 1] === " " ? tagStart - 1 : tagStart;
+    const rawClause = formatted.slice(cursor, clauseEnd);
+    const { prefix, verb } = splitActionClausePrefix(rawClause);
+    result += `${prefix}<span class="log-keyword-action">${verb}</span>`;
+    result += formatted.slice(clauseEnd, tagStart + tag[0].length);
+    cursor = tagStart + tag[0].length;
+  }
+  result += formatted.slice(cursor);
+  return result;
+}
+
 export function formatLogText(text: string): string {
   return decorateGlitchLabels(formatLogTextCore(text));
 }
@@ -243,9 +387,9 @@ function formatLogTextCore(text: string): string {
   if (interruptPattern.test(formatted)) {
     return formatted.replace(interruptPattern, `$1<span class="log-keyword-action">$2</span>`);
   }
-  const categoryPattern = /([^,.;]+?)\s\((free|simple|complex)\)/gi;
-  if (categoryPattern.test(formatted)) {
-    return formatted.replace(categoryPattern, `<span class="log-keyword-action">$1</span> ($2)`);
+  const highlightedClauses = highlightActionClauses(formatted);
+  if (highlightedClauses !== null) {
+    return highlightedClauses;
   }
   formatted = formatted.replace(/(healed\s+Physical\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);
   formatted = formatted.replace(/(healed\s+Stun\s+)(\d+)/gi, `$1<span class="log-keyword-heal">$2</span>`);

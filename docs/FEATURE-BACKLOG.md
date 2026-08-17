@@ -205,14 +205,28 @@ not fixed there; each was assessed as pre-existing, an accepted trade-off, or
 out of that change's scope. All in
 `src/app/battle-tracker/battle-tracker.component.ts` unless noted.
 
-- **N2 — astral/jack log entries are lost if the socket drops mid-session.**
-  `appendSharedLog` sends and forgets: the entry only reaches the GM's own pane
-  via the server echo, so a broadcast that fails in flight leaves no record
-  anywhere. Affects `appendParticipantEventLog`'s session branch
-  (`enableAstral`, `disableAstral`, `toggleAstralProjecting`, `gmJackIn`,
-  `gmJackOut`) along with every other `appendSharedLog` caller. Accepted as
-  consistent with the existing convention; a fix means local-first writes plus
-  echo de-duplication by entry `id`.
+- **N2 — astral/jack/act/interrupt log entries are recorded but not visible if
+  the socket drops mid-session.** `appendSharedLog` sends and forgets: the
+  entry only reaches the GM's own *pane* via the server echo, so a broadcast
+  that fails in flight showed nowhere at all. `action-log-readability-spec.md`
+  fix-round defect D1 (2026-08-14) partially closed this:
+  `appendParticipantEventLog` now also writes a local `LogHandler` line when
+  `shareRoomCode` is set and `shareConnectionLost` is true, so the event is no
+  longer lost from the *data* — but the GM Action Log panel renders
+  `sharedLogEntries` whenever `shareRoomCode` is set (`battle-tracker.component.html`)
+  and never falls back to `getVisibleLogEntries()`/`LogHandler.logbook` while a
+  session is open, so that local line stays invisible on screen until the GM
+  closes the session. Affects `appendParticipantEventLog`'s callers
+  (`performAct`, `btnAction_Click`, `enableAstral`, `disableAstral`,
+  `toggleAstralProjecting`, `gmJackIn`, `gmJackOut`) along with every other
+  `appendSharedLog` caller not routed through that helper (e.g.
+  `appendPlayerCommandLog`, which has no such fallback at all). A narrower
+  related gap: `shareConnectionLost` is a reactive UI flag, not a live
+  transport check, so the *first* event after a silent authorization loss
+  (connected socket, but the server no longer treats the GM as authorized) can
+  still be lost before the flag flips. A real fix means either surfacing the
+  local pane during a disconnect, or de-duplicating by entry `id` so
+  local-first writes plus the eventual echo can coexist everywhere.
 - **N5 — `appendParticipantRollLog` and `logRowEvent` double-log.** The visible
   branch writes the line locally *and* sends it, and the server echo then
   mirrors it again for any actor other than `"GM"`. Predates the attribution
@@ -236,6 +250,30 @@ out of that change's scope. All in
   character to "Unnamed Character". Minor UX rough edge; a fix is to keep the
   current name when the incoming one is empty and the participant already
   exists.
+- **N9 — combat structural boundary lines never appear in the solo/local
+  log.** `briefs/combat-boundary-logging-spec.md` Open Decision 1 (declined):
+  the five new/changed structural entries (`Combat started`, `Combat ended`,
+  `Start`/`End Combat Turn`, `Start`/`End Initiative Pass`) all go through
+  `appendSharedLog`, matching the three that existed before that change, so
+  with no share session open they produce nothing — not even a local
+  `LogHandler` line — and a GM running solo never sees a turn/pass boundary in
+  their Action Log at all (pinned by that brief's AC 11 and scenario S6). The
+  alternative, `appendParticipantEventLog`, writes a local line when
+  `shareRoomCode` is empty, but it also writes through `appendSharedLog` while
+  a session *is* open — so switching to it changes `LogHandler.logbook`
+  contents for every spec that reads it, for a benefit that only lands in the
+  sessionless case. Declined for that reason; a real fix means making that
+  trade deliberately, not as a side effect of a logging-only change.
+- **N10 — an all-down table or repeated Start Combat Turn taps can spam the
+  log.** `briefs/combat-boundary-logging-spec.md` fix-round Defects 3/4
+  (2026-08-16): the pre-existing turn-counter-runaway quirk (`combatTurn`
+  keeps incrementing on repeated `Start Combat Turn` taps when nobody can act)
+  now also produces a repeated `Combat started` / `Start Combat Turn N` /
+  `Start Initiative Pass N` / `End Combat Turn N` quartet per mis-tap, where
+  before it was silent. The underlying state-transition bug (nothing stops a
+  Combat Turn from starting when no participant can act) is unchanged and out
+  of scope for a logging-only change; this only notes that the logging change
+  makes an existing quirk more visible at the table.
 
 ## Durable rooms — what a restore still cannot bring back (from `briefs/persistent-rooms.md`, Open Decision 4)
 

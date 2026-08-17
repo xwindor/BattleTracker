@@ -10,6 +10,11 @@ import {
   formatLogText,
   formatManualInitiativeRollLogText,
   formatPassStartLogText,
+  formatPassEndLogText,
+  formatTurnStartLogText,
+  formatTurnEndLogText,
+  COMBAT_STARTED_LOG_TEXT,
+  COMBAT_ENDED_LOG_TEXT,
   getGlitchLabel,
   getLogTextClass
 } from './log-formatter';
@@ -95,6 +100,30 @@ describe('log-formatter: initiative entries', () => {
       .toBe('Start Initiative Pass 2 — all Initiative Scores -10');
   });
 
+  // Combat structural boundaries (brief "Action Log entries for combat
+  // structural boundaries", AC16). `formatPassStartLogText` above is
+  // unchanged; these are the four new formatters/constants alongside it.
+  it('names the Combat Turn on the turn-start line (AC5, AC12)', () => {
+    expect(formatTurnStartLogText(1)).toBe('Start Combat Turn 1');
+    expect(formatTurnStartLogText(2)).toBe('Start Combat Turn 2');
+  });
+
+  it('names the turn that just ended, not the incremented value (AC2)', () => {
+    expect(formatTurnEndLogText(1)).toBe('End Combat Turn 1');
+    expect(formatTurnEndLogText(2)).toBe('End Combat Turn 2');
+  });
+
+  it('names the pass that just ended, without restating the -10 (AC1, Decision 6)', () => {
+    expect(formatPassEndLogText(1)).toBe('End Initiative Pass 1');
+    expect(formatPassEndLogText(2)).toBe('End Initiative Pass 2');
+    expect(formatPassEndLogText(2)).not.toContain('-10');
+  });
+
+  it('has plain combat-started and combat-ended constants (AC5, AC6, AC7)', () => {
+    expect(COMBAT_STARTED_LOG_TEXT).toBe('Combat started');
+    expect(COMBAT_ENDED_LOG_TEXT).toBe('Combat ended');
+  });
+
   // NPC group initiative, scenario S3: the log has to say both that the
   // group-wide house rule fired and which NPC triggered it. The row's own
   // name is not repeated in the text (it is already the entry's actor); the
@@ -164,5 +193,38 @@ describe('log-formatter: presentation', () => {
 
   it('escapes GM-authored narration rather than rendering it as markup', () => {
     expect(formatLogText('<b>gun jams</b>')).toContain('&lt;b&gt;');
+  });
+});
+
+// Regression tests for a defect found in adversarial review of
+// briefs/action-log-readability-spec.md: `categoryPattern`'s greedy,
+// lastIndex-continued match swallowed the connector word between clauses
+// ("and", ", ") and, in a row-member line, the actor name prefixed ahead of
+// the clause. These assert the *exact* span contents, not just that a span
+// exists somewhere in the output.
+describe('log-formatter: action clause highlighting (defect fix)', () => {
+
+  it('highlights exactly the verb phrase of each clause in a two-clause sentence, dropping the "and" connector', () => {
+    const html = formatLogText('dropped prone (free) and took aim twice (simple).');
+    expect(html).toBe(
+      '<span class="log-keyword-action">dropped prone</span> (free) and '
+      + '<span class="log-keyword-action">took aim twice</span> (simple).'
+    );
+  });
+
+  it('highlights exactly the verb phrase of each clause in a three-clause sentence, dropping ", " and ", and "', () => {
+    const html = formatLogText('dropped prone (free), took aim (simple), and readied a weapon (simple).');
+    expect(html).toBe(
+      '<span class="log-keyword-action">dropped prone</span> (free), '
+      + '<span class="log-keyword-action">took aim</span> (simple), and '
+      + '<span class="log-keyword-action">readied a weapon</span> (simple).'
+    );
+  });
+
+  it('excludes a row member\'s name prefix from the highlighted span', () => {
+    const html = formatLogText('Ganger 1 took aim twice (simple).');
+    expect(html).toBe(
+      'Ganger 1 <span class="log-keyword-action">took aim twice</span> (simple).'
+    );
   });
 });
