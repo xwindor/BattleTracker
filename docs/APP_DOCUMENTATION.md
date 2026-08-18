@@ -283,6 +283,25 @@ GM can toggle each participant:
 
 Players can only claim `Claimable` participants that are unowned.
 
+**Out-of-action (downed) characters.** A downed participant is normally
+withheld from the wire entirely, so players learn nothing about a downed NPC.
+The one deliberate exception: a downed **claimable** participant (a player
+character) is still broadcast, carrying `ooc: true`
+(`SharedParticipantState.ooc`, `src/app/services/session-sync.service.ts`), so
+its owner can see and reclaim it while it is down instead of it silently
+disappearing until the GM revives it. It is excluded from the player's
+initiative order regardless (`visibleParticipants` in
+`player-view.component.ts`), still offered for claim
+(`unclaimedParticipants`), still shown as the player's own if they already own
+it (`ownParticipants`/`primaryCharacter`), badged "OUT OF ACTION" wherever it
+appears, and every action control (`canAct`/`canDelay`/`canInterrupt`) is
+forced off for it — claimable does not mean playable. A GM rejoining a
+persisted room gets it back downed, never silently revived
+(`restoreFromSharedState`/`buildRestoredParticipant`,
+`battle-tracker.component.ts`). See `ARCHITECTURE.md` §7,
+"Session sync and its effect on combat state", for the full mechanism
+(`isClaimableOrOwnedOoc`, `oocOwnership`).
+
 ## 4. Player UI Behavior
 
 File: `src/app/player-view/player-view.component.ts` + `.html` + `.css`
@@ -362,14 +381,25 @@ payload names a `room` goes through `authorizeRoomPacket()`
 (`server/room-guards.js`), installed as a `socket.use` middleware in `server.js`
 so it runs before any handler — including handlers not written yet. Only the
 three events that *assign* membership (`gm:create-session`, `gm:join-session`,
-`player:join`) are exempt. Refusal reasons: `invalid-room-code`,
-`role-required: …`, `room-mismatch`, and for the two lifecycle events a
-"room not found" ack. Individual handlers deliberately do **not** repeat the
-check; that duplication is how `session:command` ended up with none, which let a
-socket aim `act`/`delay`/`interrupt`/`claim_character` at any room code it
-guessed and have that room's GM tab apply it. Close and End also clear
+`player:join`) are exempt. Refusal reasons, in order: `invalid-payload`
+(`gm:join-session`/`player:join` only — an absent/`null`/non-object payload,
+checked before anything else so it cannot reach the destructuring that used to
+crash the process), `invalid-room-code`, `role-required: …`, `room-mismatch`,
+and for the two lifecycle events a "room not found" ack ahead of the role
+check. `session:append-log` is GM-only, same as `session:update-state` (round
+5, P2-3) — no player client legitimately posts a log entry directly, every
+player-originated line reaches the wire through `session:command` instead.
+Individual handlers deliberately do **not** repeat the check; that duplication
+is how `session:command` ended up with none, which let a socket aim
+`act`/`delay`/`interrupt`/`claim_character` at any room code it guessed and
+have that room's GM tab apply it. Close and End also clear
 `socket.data.room`/`role` on every socket attached to the room, not just its
 Socket.IO membership — otherwise a second GM tab could recreate an ended room.
+Note this choke point only covers events whose payload names a room; it does
+not, by itself, stop an unrelated future handler from crashing on a malformed
+payload — see ARCHITECTURE.md §7 "Crash containment" for the two things that
+actually do (defensive `= {}` defaults, and a process-level
+`uncaughtException` guard).
 - `session:gm-presence` — `{ room, connected }`, emitted when the last GM socket
   leaves or the first one arrives. Drives the player view's "GM not connected"
   notice on a persisted room nobody is running.
@@ -393,13 +423,39 @@ set is additive, so **Create Player Session no longer breaks its own advice**:
 after a mis-tap, rejoining the room that was live pushes the encounter back
 rather than pulling the old room's snapshot over it. Note the push overwrites
 that room's stored snapshot with what is on screen — which is the point, but it
-is a push, not a merge.
+is a push, not a merge. Membership is also refreshed continuously, not only at
+join time: `syncSharedState()` re-fingerprints a room's roster on every
+successful push (round 5), so a room this tab has been the truth for
+throughout a long session with heavy roster churn never falsely reads as
+"diverged" on a later Close+rejoin — see ARCHITECTURE.md §7 "Authority: who is
+the truth for a room" for the full model.
 
-A room whose participants are *all* out of action broadcasts an empty
-`participants` array (OOC participants are never on the wire) plus
-`oocParticipantCount`. Joining such a room neither restores nor pushes: there is
-nothing on the wire to rebuild, and pushing would overwrite a real saved fight.
-The GM is told what the room held.
+**A join this tab cannot safely complete does not complete at all** (round 5,
+fixing a defect where the GM was warned once — "nothing was sent to the
+room" — and then the tab stayed connected anyway, so the very next click
+pushed regardless). Two cases: the tab's on-screen roster has diverged from
+what it last fingerprinted for that room (a wholesale cast swap with no push
+in between), or the room's saved encounter is entirely out-of-action
+participants and so cannot be restored. **Corrected (D-D, durable-rooms review
+round 7): this paragraph used to describe round-5 behaviour that round 6
+replaced — a full, load-bearing account of both cases, current as of round 6,
+lives in `ARCHITECTURE.md` §7 ("What happens on a diverged rejoin…" and the
+"Round 6 correction" that follows it); this section only summarises it so the
+two documents cannot drift apart again.** In short: the divergence case is
+decided client-side *before* `sessionSync.joinAsGm` is ever called, so a
+refused diverged join never touches this tab's connection at all — nothing is
+torn down and nothing needs restoring. The OOC-only case can only be discovered
+*after* the switch has already happened server-side, so it is handled by
+reversal instead: `abandonJoinAndRestore()` re-authenticates the same live
+socket back to the room this tab was already running, on the existing
+transport, restoring `shareRoomCode` and every listener together. The tab is
+left fully disconnected (`sessionSync.disconnect()`, `shareRoomCode` cleared)
+only if that reconnect attempt itself fails on a genuine network problem — not
+as the ordinary outcome of either case — and the GM is told with an
+error-level banner naming the room to rejoin. "End Room to replace it
+outright" is not offered: destroying a room the GM may still want is exactly
+the destructive-by-default behaviour this whole change (Open Decision 3)
+removed.
 
 Player:
 
@@ -468,7 +524,7 @@ GM UI exposes undo/redo controls in toolbar.
 | Node | v22.22.0 |
 | npm | 10.9.4 |
 | Room data directory | `/var/www/sr5e/data/rooms` (override with `SR5E_DATA_DIR`) |
-| Proxy trust | `SR5E_TRUST_PROXY=1` **required** behind nginx (see below); default is "no proxy" |
+| Proxy trust | `SR5E_TRUST_PROXY=1` **required** behind nginx (see below); default is "no proxy". Set in the committed `ecosystem.config.js`, not a shell `export` — see "Deploying updates" |
 
 ### Room data directory (durable rooms)
 
@@ -548,7 +604,7 @@ properly:
 - Back it up by copying the directory: `tar czf rooms-$(date +%F).tgz data/rooms`.
 - Clear one room: delete its `<ROOM>.room.json` (do this with the server
   stopped, or the in-memory copy will simply write it back).
-- Clear everything: `pm2 stop sr5e && rm -rf data/rooms && pm2 start sr5e`.
+- Clear everything: `pm2 stop sr5e && rm -rf data/rooms && pm2 start ecosystem.config.js`.
 - Retention: **indefinite, with one exception** (round-4 defect D7: this used
   to read as unconditionally indefinite, which stopped being fully true once
   capacity eviction existed - see "Total rooms are capped" above). No room is
@@ -567,7 +623,21 @@ properly:
   "was removed on <date>" rather than a bare "Room not found"), and any marker
   that is corrupt.
 - A truncated or hand-mangled room file is skipped at startup with a logged
-  error — the server still boots and every other room still loads.
+  error — the server still boots and every other room still loads. As of
+  review defect D10 (durable-rooms review round 6), the unreadable file is
+  also renamed to `<ROOM>.corrupt.json` at that point, so it is not
+  re-scanned, re-failed and re-logged on every future boot forever, and the
+  room code it held is immediately reusable. Quarantined files are **not**
+  swept automatically — they are kept in case the bytes are worth hand
+  inspection or repair. Delete them yourself once you have confirmed there is
+  nothing worth keeping: `rm data/rooms/*.corrupt.json`.
+- A room code that was evicted for capacity (review defect D9, durable-rooms
+  review round 6) cannot be handed out again to a new `gm:create-session`
+  while its tombstone (`<ROOM>.expired.json`) still exists — `gm:create-session`
+  regenerates past both an in-memory collision and a tombstoned code. Without
+  this, a reconnecting GM whose room was evicted could, at roughly 1-in-2.2-billion
+  odds, land in a stranger's freshly-created room of the same code and start
+  pushing state over it.
 
 ### Deploying updates
 
@@ -584,10 +654,51 @@ ssh root@146.190.245.110
 cd /var/www/sr5e
 git pull origin main
 npx ng build
-pm2 restart sr5e
+pm2 restart ecosystem.config.js --update-env
 ```
 
 `npm install` is only needed if `package.json` changed.
+
+**Always pass `--update-env`, every restart — the ecosystem file alone is not
+enough** (P2-6 round 5, corrected as review defect D6, durable-rooms review
+round 6: the round-5 text below was wrong and is kept struck-through so the
+mistake and its correction are both on record). `pm2 restart <name-or-file>`
+— **with or without** naming `ecosystem.config.js` — reuses whatever
+environment pm2 already has stored for that process from the last time it was
+started or explicitly updated; it does **not** re-read the `env` block out of
+the ecosystem file on an ordinary restart. `--update-env` is the flag that
+makes pm2 actually re-read it. Passing `ecosystem.config.js` on the command
+line only matters for a **first** `pm2 start` (or after `pm2 delete`) — it
+does nothing extra on a `restart` by itself.
+~~Restarting against the committed file every time removes that failure
+mode.~~ It does not — verified against pm2's own documented restart
+semantics, not tested against a syntax that merely looked safer. Omitting
+`--update-env` on a deploy that changed `ecosystem.config.js`'s `env` block
+(or on the very first restart after adopting this file at all) silently keeps
+serving the *previous* stored environment, which is exactly the
+"server runs fine; it just silently falls back to 'no proxy' and mis-keys the
+room-creation rate limit" failure this file exists to eliminate (see §9) —
+just moved one flag later instead of removed.
+
+**One-time migration for the existing droplet.** The droplet in the table
+above was started as a bare `pm2 start server.js --name sr5e`, before
+`ecosystem.config.js` existed — pm2 has never stored `SR5E_TRUST_PROXY`/
+`SR5E_PROXY_HOPS` for that process at all, from any source, so even
+`pm2 restart ecosystem.config.js --update-env` restarts a process whose
+*current* stored environment has neither set. Do this once:
+
+```bash
+pm2 delete sr5e
+pm2 start ecosystem.config.js
+```
+
+`pm2 start` (unlike `restart`) always reads the file fresh, so this both
+adopts the committed environment for the first time and makes every future
+`pm2 restart ecosystem.config.js --update-env` correct from then on. Confirm
+it worked with `pm2 env sr5e` (or `pm2 show sr5e`) and check
+`SR5E_TRUST_PROXY` is `1` — do this once after the migration and again after
+any future change to `ecosystem.config.js`'s `env` block, since a deploy that
+forgets `--update-env` fails exactly this silently.
 
 ### Static serving and socket same-origin
 
@@ -629,12 +740,29 @@ Current limitations:
   free capacity for a new one (retention is indefinite except for that one case;
   see "Room data directory" above). `gm:create-session` needs not even a room
   code, so it is bounded three ways instead: an empty room is memory-only until
-  it has real content, creation is rate-limited per origin (keyed on the
-  rightmost `X-Forwarded-For` entry, which the caller cannot choose) and per
-  connection, and the total number of rooms held is hard-capped at 500, with
-  unused rooms reaped from memory after 10 minutes. The content check alone was
-  never sufficient — a create-loop that immediately gives each room content
-  walks straight past it — and this document previously claimed otherwise.
+  it has real content, creation is rate-limited per origin and per connection,
+  and the total number of rooms held is hard-capped at 500, with unused rooms
+  reaped from memory after 10 minutes. The content check alone was never
+  sufficient — a create-loop that immediately gives each room content walks
+  straight past it — and this document previously claimed otherwise.
+  **The origin key for the rate limit is the rightmost `X-Forwarded-For` entry
+  only when `SR5E_TRUST_PROXY=1` is set** (see "Room data directory" above,
+  and 8's Infrastructure table) — that is a deliberately opt-in trust
+  decision, not the default. Unset, the header is ignored entirely and the key
+  is the raw socket remote address, which a caller genuinely cannot choose
+  either, but which collapses to one shared key (`127.0.0.1`) for every socket
+  behind a reverse proxy that does not set the flag — safe against spoofing,
+  but blunt: one busy GM can rate-limit another until the operator sets the
+  flag. Do not read this bullet as saying `X-Forwarded-For` is trusted by
+  default; it is not.
+- Log entries (`session:append-log`) are GM-only, same as state broadcasts
+  (round 5, P2-3): a player-role socket used to be able to post a shared log
+  line with an arbitrary `actor` field, including `"GM"` or another player's
+  name — the schema check validates shape, not identity, and unlike
+  `session:command` there is no player-identity field on this payload to
+  check `actor` against. No legitimate player client ever sends this event, so
+  the fix is restricting the role rather than adding an identity check that
+  has nothing to compare against.
 - `cors()` allows all origins on session server.
 - Room state is persisted to disk (see "Room data directory" above), so it now
   survives a restart — and outlives the process. It is stored unencrypted, in

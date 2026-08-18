@@ -32,6 +32,23 @@ export interface SharedParticipantState {
   playerControlled: boolean;
   claimable?: boolean;
   ownerName?: string;
+  /**
+   * Out of action (downed). Absent/false for the ordinary case.
+   *
+   * A participant is normally withheld from `participants` entirely while
+   * `ooc` (see `getSharedParticipants()`), so this field is only ever `true`
+   * for the one exception: a **claimable** out-of-action participant - i.e. a
+   * player character - which is deliberately still put on the wire so its
+   * owner can see and reclaim it (GM decision, durable-rooms follow-up; see
+   * `ARCHITECTURE.md` §7 "OOC participants and the wire"). A downed non-player
+   * participant never appears in `participants` at all, `ooc` field or not -
+   * this flag does not change that privacy property, it only lets the one
+   * exception be told apart from an active participant once it is on the
+   * wire. Consumers must gate any action affordance (`canAct`/`canDelay`/
+   * `canInterrupt`) off `ooc` explicitly - a claimable downed character must
+   * stay claimable without becoming playable.
+   */
+  ooc?: boolean;
   canAct?: boolean;
   canDelay?: boolean;
   canInterrupt?: boolean;
@@ -111,6 +128,13 @@ export interface SharedMatrixTarget {
   directConnection?: boolean;
 }
 
+/** One entry of `SharedCombatState.oocOwnership` - see its doc comment. */
+export interface SharedOocOwnershipState {
+  id: string;
+  ownerName?: string;
+  claimable?: boolean;
+}
+
 export interface SharedCombatState {
   round: number;
   pass: number;
@@ -124,18 +148,60 @@ export interface SharedCombatState {
    * `participants` because they are out of action.
    *
    * `getSharedParticipants()` filters OOC participants out of the broadcast
-   * (spec Open Decision 4 - restoring them is a known, accepted gap), which
-   * means an encounter where everybody has been dropped serialises as
-   * `participants: []` and is indistinguishable on the wire from a room that
-   * never had an encounter at all. A GM joining that code was therefore never
-   * warned, and the join's empty-snapshot branch pushed local state over a real
-   * saved fight (round-3 fix 5).
+   * (spec Open Decision 4 - restoring them is a known, accepted gap) **unless
+   * a participant is claimable** (GM decision, durable-rooms follow-up: a
+   * player must be able to reclaim their own downed character - see
+   * `ARCHITECTURE.md` §7). So this count is specifically the OOC participants
+   * still withheld - non-claimable ones, almost always NPCs - not every OOC
+   * participant the encounter holds; a claimable OOC participant is counted
+   * by `participants.length` instead, same as any other. Either way an
+   * encounter where everybody is out of action and nobody is claimable still
+   * serialises as `participants: []`, indistinguishable on the wire from a
+   * room that never had an encounter at all, which is what this field exists
+   * to disambiguate. A GM joining that code was therefore never warned, and
+   * the join's empty-snapshot branch pushed local state over a real saved
+   * fight (round-3 fix 5).
    *
    * Persistence/overwrite-guard use only. Nothing renders it, and no
-   * "active participants" logic reads it - those exclusions of OOC are
-   * deliberate and unchanged.
+   * "active participants" logic reads it - those exclusions of (non-claimable)
+   * OOC are deliberate and unchanged.
    */
   oocParticipantCount?: number;
+
+  /**
+   * Ownership-only shadow list for OOC participants (review defect D2,
+   * durable-rooms review round 6).
+   *
+   * A **claimable** OOC participant is now also present in `participants`
+   * directly, with its own `ownerName`/`claimable`/`ooc` (GM decision,
+   * durable-rooms follow-up), which makes this shadow redundant for that
+   * case - `reconcileOwnershipFromServer()` finds the same information in
+   * `participants` first and never needs to fall back here for it. This list
+   * is still populated and still needed for the one case that overlap does
+   * not cover: an OOC participant whose `participantOwners` entry has
+   * outlived its `claimable` flag (e.g. a GM authoring decision changes it,
+   * or wire data from before this flag existed) - `ownerName` set without
+   * `claimable` true means it is withheld from `participants` (claimable-or-
+   * nothing is the wire-visibility rule) but still needs reconciling so a
+   * stale local owner does not survive a rejoin. See the `getSharedParticipants`/
+   * `syncSharedState`/`oocOwnership` predicate in `battle-tracker.component.ts`
+   * (one shared helper, both call sites) - it is intentionally broader than
+   * "claimable" alone for exactly this reason.
+   *
+   * Deliberately minimal, unlike `SharedParticipantState`: only `id` and
+   * `ownerName`/`claimable`, never health, damage or any other OOC
+   * participant state. The fuller per-participant shape stays withheld from
+   * non-claimable OOC participants on purpose - widening *that* would worsen
+   * the leak `docs/FEATURE-BACKLOG.md` already records (`getSharedParticipants`
+   * leaks state to players regardless of the GM's roll-visibility toggle;
+   * spec Open Decision 4 explicitly weighed and rejected extending the full
+   * broadcast to non-claimable OOC participants for this reason - claimable
+   * ones are the deliberate, later exception). An owner name is not
+   * meaningfully more sensitive than the count already broadcast, and the
+   * server does not currently attempt to hide "who owns which participant"
+   * from other players in any other case.
+   */
+  oocOwnership?: SharedOocOwnershipState[];
 
   // Matrix extensions (Phase 4 wires broadcasting; defined here so the
   // shared types are stable from Phase 1 onward).

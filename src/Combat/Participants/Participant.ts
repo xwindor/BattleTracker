@@ -28,6 +28,20 @@ export const MIN_INITIATIVE_DICE = 1;
 export const MAX_INITIATIVE_DICE = 5;
 
 /**
+ * Construction default for `_baseIni` before a GM has typed a real Reaction/
+ * Intuition. Not a rules value - just "no attribute entered yet, assume the
+ * table average" bookkeeping - but named rather than left as a bare `6` in
+ * the constructor because `battle-tracker.component.ts`'s `isUnusedPlaceholder()`
+ * depends on it exactly matching `PLACEHOLDER_REACTION_DEFAULT +
+ * PLACEHOLDER_INTUITION_DEFAULT` there (D-K, durable-rooms review round 7):
+ * that GM-tab constant used to be a second, un-derived `3 + 3 = 6` with
+ * nothing tying the two together, so changing either default alone would
+ * silently make every fresh row read as "touched" (reopening round-4 defect
+ * D5) with no test or assertion catching it.
+ */
+export const PARTICIPANT_DEFAULT_BASE_INI = 6;
+
+/**
  * Base Initiative Dice for Physical initiative, i.e. what a participant drops
  * back to when they lose a deck / astral form (brief "Precise Definitions":
  * "Base is 1D6 Physical", printed p. 159).
@@ -471,7 +485,7 @@ export class Participant extends Undoable implements IParticipant {
     this._waiting = false;
     this._finished = false;
     this._active = false;
-    this._baseIni = 6;
+    this._baseIni = PARTICIPANT_DEFAULT_BASE_INI;
     this._diceIni = 0;
     this._dices = 1;
     this._ooc = false;

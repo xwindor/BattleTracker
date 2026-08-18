@@ -383,7 +383,25 @@ const ROOM_ENTRY_PAYLOAD_EVENTS = new Set([
  */
 const ROOM_SCOPED_EVENTS = new Map([
   [ "session:update-state", { roles: [ "gm" ] } ],
-  [ "session:append-log", { roles: [ "gm", "player" ] } ],
+  // GM-only (P2-3, durable-rooms review round 5): `isSharedLogEntry` type-checks
+  // `entry.actor` but never compares it to the caller's authenticated identity
+  // the way `session:command` compares `command.player` below - and unlike a
+  // command, a log entry has no player-identity field at all to check `actor`
+  // against (`actor` is a free-text display name, e.g. a character's name or
+  // "GM", not a token). Live-reproduced from a `role:"player"` socket:
+  // `{"actor":"GM","text":"..."}"` and an arbitrary `actor` string were both
+  // broadcast and persisted verbatim, and under indefinite retention the
+  // forgery is permanent. No player client ever legitimately emits this event
+  // - `sessionSync.appendLog()` is called from exactly one place in the whole
+  // app, `BattleTrackerComponent.appendSharedLog()`, which only the GM tab
+  // runs; every player-originated log line reaches the wire via
+  // `session:command`, which the GM tab turns into a shared-log entry itself
+  // after validating it (`handleSessionCommand`, `appendPlayerCommandLog`).
+  // So the fix is not a per-entry identity check (there is no player identity
+  // field on this payload shape to check it against) - it is closing the role
+  // to what the real client actually does, the same "one write path checks,
+  // the other doesn't" pattern `session:command`'s fix closed for commands.
+  [ "session:append-log", { roles: [ "gm" ] } ],
   // The hole this whole choke point exists for.
   [ "session:command", { roles: [ "gm", "player" ] } ],
   // Lifecycle events answer "room not found" ahead of the membership check, so
@@ -500,6 +518,77 @@ function reapContentlessRooms(sessions, options = {}) {
   return reaped;
 }
 
+/**
+ * Drop every persisted character claim at boot.
+ *
+ * A claim is only meaningful while the socket that made it is connected: the
+ * `disconnect` handler releases claims precisely because a departed player no
+ * longer holds anything. Nothing is connected to a process that has just
+ * started, so every `ownerName` restored from disk is by definition stale.
+ *
+ * Lives here rather than in `server.js` so it is reachable from the spec
+ * suite: `server.js` cannot be loaded by the browser-sandboxed Karma runner,
+ * and an untested boot-time invariant is exactly how this defect survived
+ * eight rounds of review.
+ *
+ * `disconnect` alone is not enough to keep that invariant. It never runs when
+ * the process dies - `shutdown()` flushes state and exits, and a crash or
+ * SIGKILL does not even get that far - so a room persisted while a player held
+ * a claim came back with that claim intact. The player's token is regenerated
+ * per page load (`player-view.component.ts`, `pl-<random>`), so on return they
+ * are a different name asking for a character that still looks taken, and
+ * `claim_character` denies them: spec AC 5 ("a returning player can re-claim
+ * through the existing `claim_character` command with no GM action") failed
+ * across exactly the restart this feature exists to survive. Found in manual
+ * QA; every automated and live check had exercised a player tab closing, where
+ * `disconnect` does run, and none had exercised the server restarting under a
+ * live claim.
+ *
+ * Repairing on load rather than in `shutdown()` is deliberate: it covers the
+ * crash and SIGKILL paths that no shutdown hook can, and it states the
+ * invariant where it is cheapest to see - a freshly loaded room has no
+ * connected players, therefore it has no owners.
+ *
+ * Deliberately does not `touchSession`: the in-memory state is what serves
+ * every join, and the correction reaches disk on the room's next ordinary
+ * write. A room nobody touches again keeps a stale `ownerName` on disk that is
+ * cleared again on the next boot, which is harmless and saves a write burst
+ * across every restored room at startup.
+ */
+function releaseAllClaimsOnBoot(sessionMap) {
+  let rooms = 0;
+  for (const session of sessionMap.values()) {
+    const state = session && session.state;
+    if (!state) {
+      continue;
+    }
+    let changed = false;
+    if (Array.isArray(state.participants)) {
+      for (const participant of state.participants) {
+        if (participant && participant.ownerName !== undefined) {
+          participant.ownerName = undefined;
+          changed = true;
+        }
+      }
+    }
+    if (Array.isArray(state.oocOwnership)) {
+      for (const entry of state.oocOwnership) {
+        if (entry && entry.ownerName !== undefined) {
+          entry.ownerName = undefined;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      rooms += 1;
+    }
+  }
+  if (rooms > 0) {
+    console.log(`[rooms] released stale character claims in ${rooms} restored room(s)`);
+  }
+  return rooms;
+}
+
 module.exports = {
   createRoomCreationLimiter,
   creationOriginKey,
@@ -508,6 +597,7 @@ module.exports = {
   authorizeRoomPacket,
   detachFromPreviousRoom,
   reapContentlessRooms,
+  releaseAllClaimsOnBoot,
   ROOM_ENTRY_EVENTS,
   ROOM_ENTRY_PAYLOAD_EVENTS,
   ROOM_SCOPED_EVENTS,

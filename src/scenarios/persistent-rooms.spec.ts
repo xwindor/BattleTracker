@@ -10,14 +10,14 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BattleTrackerComponent } from 'app/battle-tracker/battle-tracker.component';
 import { PlayerViewComponent } from 'app/player-view/player-view.component';
 import { appConfig } from 'app/app.config';
-import { CombatManager } from 'Combat';
+import { CombatManager, IParticipant, StatusEnum } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
 import { AstralParticipant } from 'Magic';
 import { UndoHandler } from 'Common';
 import {
-  SessionSyncService, SessionCommand, SharedCombatState, SharedLogEntry
+  SessionSyncService, SessionCommand, SharedCombatState, SharedLogEntry, SharedParticipantState
 } from 'app/services/session-sync.service';
 import {
   createSessionStore, createRoomCode, isRoomCode, hasPersistableContent,
@@ -28,6 +28,7 @@ import {
 import {
   createRoomCreationLimiter, creationOriginKey, roomCapReached, findEvictableRoom,
   authorizeRoomPacket, detachFromPreviousRoom, reapContentlessRooms,
+  releaseAllClaimsOnBoot,
   ROOM_CREATE_LIMIT, ROOM_CREATE_WINDOW_MS, CONTENTLESS_ROOM_TTL_MS, TOTAL_ROOM_CAP,
   ROOM_ENTRY_EVENTS, ROOM_ENTRY_PAYLOAD_EVENTS, ROOM_SCOPED_EVENTS,
   RoomCreationLimiter
@@ -1064,6 +1065,24 @@ describe('Durable rooms - the shared room-ownership rule (round-3 fixes 1, 2)', 
       expect(authorizeRoomPacket('some:ping', { note: 'hi' }, {}, OPTS).ok).toBeTrue();
     });
 
+    // P2-1 (round 5): documents the honest boundary of the choke point's
+    // guarantee, after a live probe found the previous "a future handler
+    // cannot reintroduce this hole" comment overstated it. An event with no
+    // `room` in its payload at all - including an absent/null/non-object
+    // payload - is not room-scoped by this rule's own definition, so it is
+    // waved through exactly like any other non-room event. This is expected,
+    // not a regression: the actual defence against a not-yet-written handler
+    // crashing on that payload is the `= {}` default on every handler that
+    // destructures one, plus `process.on("uncaughtException", ...)` in
+    // server.js as the last resort - neither of which this pure function can
+    // provide, and ARCHITECTURE.md's "Crash containment" section says so.
+    it('P2-1: an unregistered event with an absent/null/non-object payload is not room-scoped - by design, not a hole in this rule', () => {
+      for (const payload of [ undefined, null, 'a string', 42 ]) {
+        const verdict = authorizeRoomPacket('future:new-room-event', payload, gm('AAAAAA'), OPTS);
+        expect(verdict.ok).withContext(String(payload)).toBeTrue();
+      }
+    });
+
     it('exempts exactly the three events that assign membership', () => {
       expect(Array.from(ROOM_ENTRY_EVENTS).sort())
         .toEqual([ 'gm:create-session', 'gm:join-session', 'player:join' ]);
@@ -1073,11 +1092,18 @@ describe('Durable rooms - the shared room-ownership rule (round-3 fixes 1, 2)', 
       }
     });
 
-    it('keeps the per-event role requirement (state broadcasts are GM-only)', () => {
+    it('keeps the per-event role requirement (state broadcasts and log entries are GM-only)', () => {
       expect(authorizeRoomPacket('session:update-state', { room: 'AAAAAA' }, player('AAAAAA'), OPTS))
         .toEqual(jasmine.objectContaining({ ok: false, reason: 'role-required: gm' }));
-      expect(authorizeRoomPacket('session:append-log', { room: 'AAAAAA' }, player('AAAAAA'), OPTS).ok)
-        .toBeTrue();
+      // P2-3 (durable-rooms review round 5): no player client ever legitimately
+      // emits this event - every player-originated log line reaches the wire
+      // through `session:command`, which the GM tab validates and turns into a
+      // shared-log entry itself. A player-role socket sending `session:append-log`
+      // directly used to be allowed through to the (identity-blind) schema
+      // check, letting a forged `actor` ("GM", another player's name) broadcast
+      // and persist verbatim.
+      expect(authorizeRoomPacket('session:append-log', { room: 'AAAAAA' }, player('AAAAAA'), OPTS))
+        .toEqual(jasmine.objectContaining({ ok: false, reason: 'role-required: gm' }));
     });
 
     it('rejects a malformed room code before anything else', () => {
@@ -1259,6 +1285,19 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
   let broadcasts: SharedCombatState[];
 
   beforeEach(async () => {
+    // Moved before `TestBed.createComponent` (test hygiene, durable-rooms
+    // review round 6, Part 3), matching the `Round 4 - D5: a genuine fresh
+    // tab...` block below. Calling it *after* `fixture.detectChanges()`, as
+    // this block used to, discarded the constructor's own placeholder
+    // participant and left every test in this block starting from a literal
+    // zero-participant roster a real fresh tab never has -
+    // `holdsLiveEncounterFor()` requires `items.length > 0`, so a test written
+    // against that fabricated "empty" precondition takes the PULL branch here
+    // while a real app instance (always 1 placeholder) would take PUSH - the
+    // exact mechanism that hid round-4's D5. Still resets *before*
+    // construction too, so a participant left behind by an earlier spec
+    // cannot masquerade as "the" placeholder.
+    resetCombat();
     await TestBed.configureTestingModule({
       imports: [BattleTrackerComponent],
       providers: appConfig.providers
@@ -1267,7 +1306,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     fixture = TestBed.createComponent(BattleTrackerComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
-    resetCombat();
 
     sync = TestBed.inject(SessionSyncService);
     broadcasts = [];
@@ -1280,8 +1318,19 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     resetCombat();
   });
 
-  /** The live encounter from scenario S1: turn 2, pass 2, decker + OOC NPC. */
+  /**
+   * The live encounter from scenario S1: turn 2, pass 2, decker + OOC NPC.
+   *
+   * Clears the roster first (test hygiene, durable-rooms review round 6, Part
+   * 3): `beforeEach` no longer wipes the constructor's placeholder
+   * participant after construction, so every caller of this helper builds on
+   * top of exactly the one blank row a real fresh tab has unless it clears it
+   * first - this is the one place in the block that seeds a specific,
+   * exactly-three-participant roster, so it is also the one place that needs
+   * to.
+   */
   function buildLiveEncounter() {
+    resetCombat();
     CombatManager.combatTurn = 2;
     CombatManager.initiativePass = 2;
     CombatManager.started = true;
@@ -1417,6 +1466,80 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(joinSpy).toHaveBeenCalledWith('ABC123');
       expect(component.shareConnectionLost).toBeFalse();
       expect(broadcasts.length).toBe(1);
+    });
+
+    // D-C, durable-rooms review round 7: a lost/timed-out ack for
+    // gm:join-session or gm:create-session can leave the server having
+    // already switched `socket.data.room` while this tab's `shareRoomCode`/
+    // `SessionSyncService.currentRoom` never learned that (the promise
+    // rejected before either was updated). Every subsequent broadcast then
+    // names a room the socket is no longer authorized for, which
+    // `authorizeRoomPacket` refuses as `room-mismatch` - a distinct reason
+    // from `role-required` because the role is fine, only the room
+    // disagrees. Before this fix only `role-required` triggered automatic
+    // recovery, so `room-mismatch` wedged the GM with every broadcast
+    // silently discarded (the exact frozen-players failure mode AC 10
+    // exists to prevent) until they noticed and manually rejoined.
+    it('treats a room-mismatch the same as a lost role and re-authenticates', async () => {
+      buildLiveEncounter();
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+
+      component['handleSessionError']({ event: 'session:update-state', reason: 'room-mismatch' });
+
+      // Flagged immediately, so the GM sees it even if the recovery fails...
+      expect(component.shareConnectionLost).toBeTrue();
+      expect(component.shareError).toContain('Re-authenticating');
+
+      await fixture.whenStable();
+
+      // ...and cleared once the re-authentication (to this tab's own belief,
+      // shareRoomCode) and push succeed - correcting socket.data.room
+      // server-side and SessionSyncService.currentRoom client-side back into
+      // agreement, and catching players back up in the same call.
+      expect(joinSpy).toHaveBeenCalledWith('ABC123');
+      expect(component.shareConnectionLost).toBeFalse();
+      expect(broadcasts.length).toBe(1);
+    });
+
+    // Durable-rooms review round 8, item 1. Repro: two GM tabs in room A;
+    // tab 2 taps Close or End. Tab 1 gets `session:closed` -
+    // `handleSessionClosedExternally` blanks `shareRoomCode` (the room notice
+    // named is this tab's own room). A push tab 1 had already emitted comes
+    // back refused (`role-required: gm`, because the server's evacuation
+    // cleared `socket.data.role`) *after* `shareRoomCode` was already
+    // blanked. Without the guard, `handleSessionError` would set
+    // `shareConnectionLost`/the reconnect-language `shareError` and call
+    // `handleSessionReconnected()`, which itself no-ops on an empty
+    // `shareRoomCode` - so nothing would ever clear the banner it just set.
+    it('ignores a refusal for a room this tab already left via an external close', async () => {
+      const joinSpy = spyOn(sync, 'joinAsGm');
+      buildLiveEncounter();
+      component['handleSessionClosedExternally']({ room: 'ABC123', persisted: true });
+      expect(component.shareRoomCode).toBe('');
+
+      component['handleSessionError']({ event: 'session:update-state', reason: 'role-required: gm' });
+      await fixture.whenStable();
+
+      expect(component.shareConnectionLost).toBeFalse();
+      expect(joinSpy).not.toHaveBeenCalled();
+      // The green "kept" notice from the close survives - no red banner ever
+      // gets written over it, and no reconnect-language error is left behind
+      // either.
+      expect(component.shareInfo).toContain('kept');
+      expect(component.shareError).not.toContain('Re-authenticating');
+    });
+
+    it('ignores a role-required refusal while this tab is itself mid-close', async () => {
+      const joinSpy = spyOn(sync, 'joinAsGm');
+      buildLiveEncounter();
+      component.shareRoomCode = 'ABC123';
+      component['isClosingSession'] = true;
+
+      component['handleSessionError']({ event: 'session:update-state', reason: 'role-required: gm' });
+      await fixture.whenStable();
+
+      expect(component.shareConnectionLost).toBeFalse();
+      expect(joinSpy).not.toHaveBeenCalled();
     });
 
     it('registers the listener when share listeners are attached', () => {
@@ -1558,6 +1681,135 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(component.restoreWarning).toContain('undo history');
       const warning = fixture.nativeElement.querySelector('[data-testid="restore-warning"]');
       expect(warning).not.toBeNull();
+    });
+  });
+
+  // ── Durable-rooms follow-up (2026-08-18): "a player must be able to
+  // reclaim their character while it is out of action" - see the amendment
+  // dated 2026-08-18 in briefs/persistent-rooms.md. ─────────────────────────
+  describe('Durable rooms follow-up - a claimable OOC participant is broadcast, inert, and restores downed', () => {
+    // The outer block's `beforeEach` deliberately keeps the constructor's own
+    // placeholder participant (test hygiene note above), but every test here
+    // seeds its own specific roster (`addOoc`) or its own `restoreFromSharedState`
+    // payload (which clears the roster itself) - clear the placeholder first so
+    // `getSharedParticipants()`'s length assertions describe only what each test
+    // actually added, matching `buildLiveEncounter()`'s convention elsewhere in
+    // this block.
+    beforeEach(() => resetCombat());
+
+    function addOoc(name: string, opts: { claimable?: boolean; owner?: string } = {}): Participant {
+      const p = new Participant();
+      p.name = name;
+      CombatManager.participants.insert(p, false);
+      p.physicalHealth = 10;
+      p.physicalDamage = 10; // OOC
+      if (opts.claimable) {
+        component['participantClaimable'].set(p, true);
+      }
+      if (opts.owner) {
+        component['participantOwners'].set(p, opts.owner);
+      }
+      return p;
+    }
+
+    it('getSharedParticipants broadcasts a claimable OOC participant with ooc: true, and withholds a non-claimable one', () => {
+      const pc = addOoc('Downed PC', { claimable: true, owner: 'pl-1' });
+      addOoc('Downed Ganger'); // never claimable, never owned
+
+      const shared = component['getSharedParticipants']();
+
+      expect(shared.length).toBe(1);
+      expect(shared[0].name).toBe('Downed PC');
+      expect(shared[0].ooc).toBeTrue();
+      expect(shared[0].claimable).toBeTrue();
+      expect(shared[0].ownerName).toBe('pl-1');
+      // Sanity: the id used to look the PC up really is `pc`'s, not a fluke
+      // of there being only one entry.
+      expect(shared[0].id).toBe(component['getParticipantId'](pc));
+    });
+
+    it('a claimable OOC participant is never offered as playable: canAct/canDelay/canInterrupt all false regardless of status or Score', () => {
+      const pc = addOoc('Downed PC', { claimable: true, owner: 'pl-1' });
+      // Force the underlying engine fields to whatever would normally make
+      // every one of these true, to prove the `ooc` gate - not a status/Score
+      // coincidence - is what is holding them off.
+      pc.setDicesWithoutRoll(3);
+      pc.baseIni = 10;
+      pc.diceIni = 12; // large positive running Score
+      pc.status = StatusEnum.Active;
+
+      const shared = component['getSharedParticipants']()[0];
+
+      expect(shared.canAct).toBeFalse();
+      expect(shared.canDelay).toBeFalse();
+      expect(shared.canInterrupt).toBeFalse();
+    });
+
+    it('non-claimable OOC participants never reach the wire at all - a player:join/session:state consumer sees nothing about them (AC 9 privacy)', () => {
+      addOoc('Downed Ganger'); // NPC, never claimable
+      component.shareRoomCode = 'ABC123';
+      const broadcastSpy = sync.broadcastState as jasmine.Spy;
+
+      component['syncSharedState']();
+
+      const sent = broadcastSpy.calls.mostRecent().args[0] as SharedCombatState;
+      expect(sent.participants).toEqual([]);
+      expect(JSON.stringify(sent)).not.toContain('Downed Ganger');
+    });
+
+    function claimableOocState(ownerName?: string): SharedCombatState {
+      return {
+        round: 2, pass: 1, started: true, passEnded: false, currentInitiative: 5,
+        participants: [{
+          id: 'p-downed-pc', name: 'Wombat', order: 1, active: false, initiativeScore: 5,
+          playerControlled: !!ownerName, claimable: true, ownerName,
+          ooc: true, initiativeDice: 1, pendingRoll: false, rolledInitiativeTotal: 3,
+          reaction: 3, intuition: 3
+        }]
+      };
+    }
+
+    // Requirement 7 - the highest-risk part of the change: a GM rejoining
+    // must get a downed PC back downed, never silently revived.
+    it('restoreFromSharedState brings a claimable OOC participant back down, not revived (requirement 7)', () => {
+      component['restoreFromSharedState'](claimableOocState('pl-1'));
+
+      const restored = CombatManager.participants.items[0];
+      expect(restored.name).toBe('Wombat');
+      expect(restored.ooc).toBeTrue();
+      // And it stays down on the very next broadcast - a restore that came
+      // back revived would show up here as `ooc: false`.
+      expect(component['getSharedParticipants']()[0].ooc).toBeTrue();
+      expect(component['getSharedParticipants']()[0].canAct).toBeFalse();
+    });
+
+    it('a restored claimable OOC participant is still claimable and owned exactly as broadcast', () => {
+      component['restoreFromSharedState'](claimableOocState('pl-1'));
+
+      const restored = CombatManager.participants.items[0];
+      expect(component['participantClaimable'].get(restored)).toBeTrue();
+      expect(component['participantOwners'].get(restored)).toBe('pl-1');
+    });
+
+    // AC 5's "no GM action" promise, for the revive case specifically: once
+    // the GM revives a restored-downed PC, a returning player can claim it
+    // through the ordinary claim_character command with nothing else done.
+    it('AC 5 still holds for the revive case: reviving a restored downed PC lets a returning player claim it with no extra GM action', () => {
+      component['restoreFromSharedState'](claimableOocState(undefined)); // unclaimed when restored
+      const restored = CombatManager.participants.items[0];
+      expect(restored.ooc).toBeTrue();
+
+      component.btnEnterCombat_Click(restored); // GM revives it
+      expect(restored.ooc).toBeFalse();
+
+      component['handleSessionCommand']({
+        type: 'claim_character',
+        player: 'pl-returning',
+        payload: { participantId: 'p-downed-pc' },
+        timestamp: new Date().toISOString()
+      });
+
+      expect(component['participantOwners'].get(restored)).toBe('pl-returning');
     });
   });
 
@@ -1815,6 +2067,25 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(component.shareInfo).toContain('deleted');
     });
 
+    // Durable-rooms review round 8, item 1: a stale `shareConnectionLost`
+    // (set by a transport blip, or by a `handleSessionError` call moments
+    // earlier for the room this notice is about) must not survive an
+    // external close notice - there is nothing left to reconnect to once
+    // this tab has left the room, so a lingering red "not receiving updates"
+    // banner next to the green "kept" notice would be permanent.
+    it('clears a stale connection-lost flag on an external close notice', () => {
+      spyOn(sync, 'disconnect');
+      component.shareRoomCode = 'ABC123';
+      component.shareConnectionLost = true;
+      component.shareError = 'Session server refused session:update-state (role-required: gm) - '
+        + 'players are not receiving updates. Re-authenticating...';
+
+      component['handleSessionClosedExternally']({ room: 'ABC123', persisted: true });
+
+      expect(component.shareConnectionLost).toBeFalse();
+      expect(component.shareError).toBe('');
+    });
+
     it('assumes the room survives when an older server omits the flag', () => {
       spyOn(sync, 'disconnect');
       component.shareRoomCode = 'ABC123';
@@ -2004,16 +2275,16 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(component.shareInfo).toContain('Kept this tab\'s encounter');
     });
 
-    it('AC 15: a genuinely fresh tab is not prompted', async () => {
-      component.shareJoinCode = 'ZZZ999';                // no participants at all
-      const confirmSpy = spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
-      spyOn(sync, 'joinAsGm').and.resolveTo({ state: serverSnapshot(), log: [] });
-
-      await component.btnJoinShareSession_Click();
-
-      expect(confirmSpy).not.toHaveBeenCalled();
-      expect(CombatManager.participants.items.map(p => p.name)).toEqual(['Server Copy']);
-    });
+    // "AC 15: a genuinely fresh tab is not prompted" removed (test hygiene,
+    // durable-rooms review round 6, Part 3): this block's `beforeEach` calls
+    // `resetCombat()` *after* `fixture.detectChanges()`, so "no participants
+    // at all" here is a fabricated precondition a real fresh tab never has -
+    // the constructor's own `addParticipant()` always seeds one placeholder
+    // row. `Round 4 - D5: a genuine fresh tab is never shown the
+    // destructive-join warning` (below `resetCombat()` moved *before*
+    // `TestBed.createComponent`) is the honest version of this same
+    // assertion, using the real precondition; this duplicate is redundant
+    // now that it exists.
 
     it('AC 15: rejoining the room this tab already holds still pushes, unprompted', async () => {
       buildLiveEncounter();
@@ -2372,6 +2643,10 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     const OWNER = 'pl-owner';
 
     function claimedParticipant() {
+      // Clears the constructor's placeholder first (test hygiene, durable-rooms
+      // review round 6, Part 3) so `p` is the only, and therefore the 0th,
+      // participant on the wire - this test indexes `participants[0]`.
+      resetCombat();
       const p = new Participant();
       p.name = 'Wombat';
       CombatManager.participants.insert(p, false);
@@ -2625,14 +2900,42 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       await component.btnJoinShareSession_Click();
 
       expect(joinSpy).toHaveBeenCalledWith('ABC123');
-      // No AC-15 "this will be discarded" prompt: nothing is at risk on a push.
-      expect(confirmSpy).not.toHaveBeenCalled();
+      // D-B (durable-rooms review round 7): a push that abandons a *different*
+      // room this tab is currently connected to (NEW999) must still confirm -
+      // nothing on this screen is at risk, but NEW999's players are, since
+      // this tab disconnecting from it leaves them with no GM connected. This
+      // used to be codified as "never confirms on a push", which was the D-B
+      // defect itself, not a real guarantee.
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(confirmSpy.calls.mostRecent().args[0]).toContain('NEW999');
       expect(restoreSpy).not.toHaveBeenCalled();
       expect(broadcasts.length).toBe(1);
       expect(broadcasts[0].participants.map(p => p.name)).toEqual(['Slice', 'Ganger']);
       expect(CombatManager.participants.items.length).toBe(3);
       expect(decker.currentInitiativeScore).toBe(scoreBefore);
       expect(component.shareInfo).toContain('nothing was replaced');
+    });
+
+    // D-B, durable-rooms review round 7: declining the new abandonment
+    // confirmation on the push path must behave exactly like declining any
+    // other confirmation in this file - abort the join, touch nothing.
+    it('D-B: declining the abandonment confirmation on a push keeps the previous room running and does not join', async () => {
+      await misTapCreate();
+      const joinSpy = spyOn(sync, 'joinAsGm');
+      const confirmSpy = component['confirmationDialog'].confirm as jasmine.Spy;
+      confirmSpy.calls.reset();
+      confirmSpy.and.resolveTo(false); // decline this time
+      broadcasts.length = 0;
+      component.shareJoinCode = 'ABC123';
+
+      await component.btnJoinShareSession_Click();
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      expect(joinSpy).not.toHaveBeenCalled(); // nothing touched server-side
+      expect(broadcasts.length).toBe(0);
+      expect(component.shareRoomCode).toBe('NEW999'); // still connected to NEW999
+      expect(component['holdsLiveEncounterFor']('ABC123')).toBeTrue(); // ABC123 still recoverable
+      expect(component.shareInfo).toContain('NEW999');
     });
 
     it('fix 6: undo history survives the mis-tap and the recovery', async () => {
@@ -2685,6 +2988,303 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
 
       expect(confirmSpy).toHaveBeenCalled();
       expect(CombatManager.participants.items.map(p => p.name)).toEqual(['Stale Copy']);
+    });
+  });
+
+  // ── D-A, durable-rooms review round 7: ownership is a per-room fact ──────
+  // Rounds 3-6 each closed one instance of a per-room fact expressed through a
+  // global variable shared across every room this tab is simultaneously live
+  // for (`liveEncounterRooms` - one CombatManager, several room codes, because
+  // Create Player Session and a "no saved encounter" Join both leave the
+  // on-screen encounter unchanged while adding a new code to broadcast it to).
+  // Round 6's D8 fix "closed" ownership by *destroying* `participantOwners`
+  // outright on Create rather than making it representable per room - the
+  // round-6 review verdict was "relocated, not closed". These tests exercise
+  // the fix: `switchActiveOwnershipRoom`/`ownershipByRoom`.
+  describe('D-A - per-room ownership survives a mistaken Create and a cross-room push', () => {
+    function armCreate(room: string) {
+      spyOn(sync, 'onCommand');
+      spyOn(sync, 'onLog');
+      spyOn(sync, 'onSessionClosed');
+      spyOn(sync, 'onDisconnect');
+      spyOn(sync, 'onReconnect');
+      spyOn(sync, 'onError');
+      return spyOn(sync, 'createSession').and.resolveTo({ room });
+    }
+
+    /** Four claimed characters, mirroring the brief's D-A repro. */
+    function buildFourClaimedCharacters() {
+      const { decker, street } = buildLiveEncounter();
+      const mage = new Participant();
+      mage.name = 'Mage';
+      mage.baseIni = 9;
+      CombatManager.participants.insert(mage, false);
+      const rigger = new Participant();
+      rigger.name = 'Rigger';
+      rigger.baseIni = 7;
+      CombatManager.participants.insert(rigger, false);
+      component['participantClaimable'].set(decker, true);
+      component['participantClaimable'].set(street, true);
+      component['participantClaimable'].set(mage, true);
+      component['participantClaimable'].set(rigger, true);
+      component['participantOwners'].set(decker, 'pl-decker');
+      component['participantOwners'].set(street, 'pl-street');
+      component['participantOwners'].set(mage, 'pl-mage');
+      component['participantOwners'].set(rigger, 'pl-rigger');
+      return { decker, street, mage, rigger };
+    }
+
+    it('D-A repro: mis-tap Create with four live claims, then rejoin - all four owners intact, nothing pushed to the abandoned room after the mistake', async () => {
+      const { decker, street, mage, rigger } = buildFourClaimedCharacters();
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      armCreate('NEW999');
+      component['liveEncounterRoomCode'] = 'ABC123';
+
+      // Mis-tap: Create Player Session.
+      await component.btnCreateShareSession_Click();
+
+      // The room the GM meant to keep running has none of its real owners
+      // leaked into the brand-new room's first push - "the new room simply
+      // has no ownership yet" (spec, Part 1).
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants.every(p => !p.ownerName)).toBeTrue();
+      expect(component['participantOwners'].size).toBe(0);
+
+      // GM notices, types the real room code back in and rejoins.
+      const serverState: SharedCombatState = {
+        round: 2, pass: 2, started: true, passEnded: false, currentInitiative: 10,
+        participants: [
+          { id: component['getParticipantId'](decker), name: 'Slice', order: 1, active: false, initiativeScore: 26, playerControlled: true, claimable: true, ownerName: 'pl-decker', initiativeDice: 4 },
+          { id: component['getParticipantId'](street), name: 'Ganger', order: 2, active: false, initiativeScore: 11, playerControlled: true, claimable: true, ownerName: 'pl-street', initiativeDice: 1 },
+          { id: component['getParticipantId'](mage), name: 'Mage', order: 3, active: false, initiativeScore: 9, playerControlled: true, claimable: true, ownerName: 'pl-mage', initiativeDice: 1 },
+          { id: component['getParticipantId'](rigger), name: 'Rigger', order: 4, active: false, initiativeScore: 7, playerControlled: true, claimable: true, ownerName: 'pl-rigger', initiativeDice: 1 }
+        ]
+      };
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: serverState, log: [] });
+      broadcasts.length = 0;
+      component.shareJoinCode = 'ABC123';
+
+      await component.btnJoinShareSession_Click();
+
+      expect(joinSpy).toHaveBeenCalledWith('ABC123');
+      // All four owners intact - none of the mis-tap ever reached a player.
+      expect(component['participantOwners'].get(decker)).toBe('pl-decker');
+      expect(component['participantOwners'].get(street)).toBe('pl-street');
+      expect(component['participantOwners'].get(mage)).toBe('pl-mage');
+      expect(component['participantOwners'].get(rigger)).toBe('pl-rigger');
+      // The push to ABC123 after the recovery carries every real owner - no
+      // player there ever sees "The GM released X" (player-view.component.ts).
+      expect(broadcasts.length).toBe(1);
+      const byName = new Map(broadcasts[0].participants.map(p => [ p.name, p.ownerName ]));
+      expect(byName.get('Slice')).toBe('pl-decker');
+      expect(byName.get('Ganger')).toBe('pl-street');
+      expect(byName.get('Mage')).toBe('pl-mage');
+      expect(byName.get('Rigger')).toBe('pl-rigger');
+    });
+
+    it('cross-room leak: pushing to room B after Create never carries room A\'s owners, even mid-session', async () => {
+      const { decker, street } = buildLiveEncounter(); // shareRoomCode = 'ABC123'
+      component['participantClaimable'].set(decker, true);
+      component['participantOwners'].set(decker, 'pl-a-decker');
+      component['participantClaimable'].set(street, true);
+      component['participantOwners'].set(street, 'pl-a-street');
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      armCreate('ROOMB1');
+      component['liveEncounterRoomCode'] = 'ABC123';
+      broadcasts.length = 0;
+
+      await component.btnCreateShareSession_Click(); // now live in A and B; active room is B
+
+      // The very first push to B (from Create itself) carries no A tokens.
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants.every(p => !p.ownerName)).toBeTrue();
+
+      // Room B's own players claim characters - a completely different cast
+      // of tokens, scoped only to B.
+      component['handleSessionCommand']({
+        type: 'claim_character', player: 'pl-b-decker',
+        payload: { participantId: component['getParticipantId'](decker), playerName: 'B-Player' },
+        timestamp: new Date().toISOString()
+      });
+      broadcasts.length = 0;
+      component['syncSharedState']();
+
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants.find(p => p.name === 'Slice')?.ownerName).toBe('pl-b-decker');
+      // Room A's real owner was never on this push, and is not lost - it is
+      // shelved, not destroyed, until this tab switches back to A.
+      expect(component['participantOwners'].get(street)).toBeUndefined();
+
+      // Switching back to room A (push, since this tab still holds A's live
+      // encounter) restores A's real owners and never carries B's.
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+      broadcasts.length = 0;
+      component.shareJoinCode = 'ABC123';
+
+      await component.btnJoinShareSession_Click();
+
+      expect(joinSpy).toHaveBeenCalledWith('ABC123');
+      expect(component['participantOwners'].get(decker)).toBe('pl-a-decker');
+      expect(component['participantOwners'].get(street)).toBe('pl-a-street');
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants.find(p => p.name === 'Slice')?.ownerName).toBe('pl-a-decker');
+      expect(broadcasts[0].participants.find(p => p.name === 'Ganger')?.ownerName).toBe('pl-a-street');
+    });
+
+    it('a room ended while it holds shelved ownership forgets that ownership too (no orphaned shelf)', async () => {
+      buildLiveEncounter(); // shareRoomCode = 'ABC123'
+      const decker = CombatManager.participants.items[0];
+      component['participantClaimable'].set(decker, true);
+      component['participantOwners'].set(decker, 'pl-a-decker');
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      armCreate('ROOMB1');
+      component['liveEncounterRoomCode'] = 'ABC123';
+      await component.btnCreateShareSession_Click(); // shelves ABC123's ownership; active room is ROOMB1
+
+      spyOn(sync, 'endSession').and.resolveTo();
+      spyOn(sync, 'disconnect');
+      component.shareRoomCode = 'ABC123'; // pretend this tab is the one ending ABC123
+      await component.btnEndShareSession_Click();
+
+      expect(component['ownershipByRoom'].has('ABC123')).toBeFalse();
+    });
+
+    // Durable-rooms review round 8, item 2. Repro from the brief: "Raven" is
+    // claimed in room A, ownership shelves when the GM creates room B,
+    // Raven's claimable flag is then toggled off *in room B* (claimable is
+    // deliberately not shelved per room, round 7's judgment call - see
+    // `snapshotActiveOwnership`'s doc comment), and rejoining A must not
+    // reload a shelved owner onto a participant that is not currently
+    // claimable. Before this fix, `loadShelvedOwnership` restored the owner
+    // regardless of `participantClaimable`, producing `ownerName` set with
+    // `claimable: false` on the wire - a combination the server's
+    // `releasePlayerClaims`/`release_claims` (both gate on
+    // `claimable === true`) and the claim-request handler cannot process, so
+    // neither a disconnecting nor a returning player could ever clear it.
+    it('does not restore a shelved owner onto a participant made non-claimable in another room', async () => {
+      const { decker: raven } = buildLiveEncounter(); // shareRoomCode = 'ABC123' ("room A")
+      component['participantClaimable'].set(raven, true);
+      component['participantOwners'].set(raven, 'pl-1');
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      armCreate('ROOMB1');
+      component['liveEncounterRoomCode'] = 'ABC123';
+
+      // GM creates room B by mistake/on purpose - A's ownership shelves.
+      await component.btnCreateShareSession_Click();
+      expect(component['ownershipByRoom'].get('ABC123')?.get(component['getParticipantId'](raven))).toBe('pl-1');
+      // `claimable` is not shelved - it is still true here, in room B.
+      expect(component['participantClaimable'].get(raven)).toBeTrue();
+
+      // In room B, the GM decides Raven is a straight NPC.
+      component.btnToggleClaimable_Click(raven);
+      expect(component['participantClaimable'].get(raven)).toBeFalse();
+
+      // GM rejoins room A.
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+      broadcasts.length = 0;
+      component.shareJoinCode = 'ABC123';
+      await component.btnJoinShareSession_Click();
+
+      expect(joinSpy).toHaveBeenCalledWith('ABC123');
+      // The shelved owner is NOT restored, because Raven is not currently
+      // claimable - so `ownerName` can never again be broadcast alongside
+      // `claimable: false`.
+      expect(component['participantOwners'].get(raven)).toBeUndefined();
+      expect(component.isParticipantClaimed(raven)).toBeFalse();
+      expect(broadcasts.length).toBe(1);
+      const pushed = broadcasts[0].participants.find(p => p.name === 'Slice');
+      expect(pushed?.ownerName).toBeFalsy();
+      expect(pushed?.claimable).toBeFalse();
+
+      // The shelf entry itself is untouched (mis-tap recovery guarantee): if
+      // claimable is switched back on, the original owner reappears on the
+      // next switch into the room.
+      expect(component['ownershipByRoom'].get('ABC123')?.get(component['getParticipantId'](raven))).toBe('pl-1');
+    });
+  });
+
+  // ── Durable-rooms review round 8, item 3: hidden log entries are a
+  // per-room fact held in one global. ─────────────────────────────────────
+  // `sharedLogEntries` is a single flat array describing whichever room is
+  // currently active - `getHiddenLogEntries()` filters it for the GM-local
+  // subset. Every join branch merges that subset into the server's log via
+  // `mergeHiddenLogEntries()`, so a hidden note authored in one room survives
+  // a room switch inside that array and rides along into a later, unrelated
+  // room's merged log unless it is shelved and swapped the same way
+  // `participantOwners` already is (D-A, round 7).
+  describe('Hidden GM log entries are a per-room fact (item 3, round 8)', () => {
+    function hiddenNote(id: string, text: string): SharedLogEntry {
+      return { actor: 'GM', text, timestamp: new Date().toISOString(), id, hiddenFromPlayers: true };
+    }
+
+    function armListeners() {
+      spyOn(sync, 'onCommand');
+      spyOn(sync, 'onLog');
+      spyOn(sync, 'onSessionClosed');
+      spyOn(sync, 'onDisconnect');
+      spyOn(sync, 'onReconnect');
+      spyOn(sync, 'onError');
+    }
+
+    it('brief repro: a hidden note from room B does not ride along into room A on rejoin', async () => {
+      armListeners();
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      buildLiveEncounter(); // shareRoomCode = 'ABC123' ("room A")
+      component['liveEncounterRoomCode'] = 'ABC123'; // establishes A as activeOwnershipRoom
+      component.sharedLogEntries = [ hiddenNote('a-1', 'the ganger is a doppelganger') ];
+
+      // GM taps Close Room - hidden entries are deliberately kept (AC 9).
+      spyOn(sync, 'closeSession').and.resolveTo();
+      spyOn(sync, 'disconnect');
+      await component.btnCloseShareSession_Click();
+      expect(component.sharedLogEntries.map(e => e.text)).toEqual([ 'the ganger is a doppelganger' ]);
+
+      // GM joins a different room B - a different table, nothing saved for
+      // it server-side.
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+      component.shareJoinCode = 'ROOMB1';
+      await component.btnJoinShareSession_Click();
+      expect(joinSpy).toHaveBeenCalledWith('ROOMB1');
+      // Room A's hidden note must not have followed into room B's view.
+      expect(component.sharedLogEntries.some(e => e.text === 'the ganger is a doppelganger')).toBeFalse();
+
+      // GM adds a hidden note while running room B.
+      component.sharedLogEntries = [ ...component.sharedLogEntries, hiddenNote('b-1', 'B secret') ];
+
+      // GM rejoins room A, which has its own real server log this time.
+      const serverLogA: SharedLogEntry[] = [
+        { actor: 'GM', text: 'Combat started', timestamp: new Date().toISOString(), id: 'a-visible-1' }
+      ];
+      joinSpy.and.resolveTo({ state: null, log: serverLogA });
+      component.shareJoinCode = 'ABC123';
+      await component.btnJoinShareSession_Click();
+
+      expect(joinSpy).toHaveBeenCalledWith('ABC123');
+      const texts = component.sharedLogEntries.map(e => e.text);
+      // A's own hidden note comes back...
+      expect(texts).toContain('the ganger is a doppelganger');
+      // ...but B's does not - the leak this item closes.
+      expect(texts).not.toContain('B secret');
+      expect(texts).toContain('Combat started');
+    });
+
+    it('a room ended while holding shelved hidden entries forgets them too (no orphaned shelf)', async () => {
+      armListeners();
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      buildLiveEncounter(); // shareRoomCode = 'ABC123'
+      component['liveEncounterRoomCode'] = 'ABC123';
+      component.sharedLogEntries = [ hiddenNote('a-1', 'A secret') ];
+      const createSpy = spyOn(sync, 'createSession').and.resolveTo({ room: 'ROOMB1' });
+      await component.btnCreateShareSession_Click(); // shelves A's hidden note; active room is ROOMB1
+      expect(createSpy).toHaveBeenCalled();
+      expect(component['hiddenLogEntriesByRoom'].has('ABC123')).toBeTrue();
+
+      spyOn(sync, 'endSession').and.resolveTo();
+      spyOn(sync, 'disconnect');
+      component.shareRoomCode = 'ABC123'; // pretend this tab is the one ending ABC123
+      await component.btnEndShareSession_Click();
+
+      expect(component['hiddenLogEntriesByRoom'].has('ABC123')).toBeFalse();
     });
   });
 });
@@ -2941,6 +3541,90 @@ describe('Durable rooms - player client (AC 6, S4; Open Decision 7)', () => {
     expect(component.state?.round).toBe(2);
     // The mid-roll submission lost during the outage is visibly still pending.
     expect(component.state?.participants[0].pendingRoll).toBeTrue();
+  });
+
+  // ── Durable-rooms follow-up (2026-08-18): "a player must be able to
+  // reclaim their character while it is out of action". ────────────────────
+  describe('Durable rooms follow-up - a downed character is claimable/owned but never in the initiative order or playable', () => {
+    const OOC_ID = 'p-downed';
+
+    function stateWith(overrides: Partial<SharedParticipantState>): SharedCombatState {
+      return {
+        round: 1, pass: 1, started: true, passEnded: false,
+        participants: [
+          {
+            id: OOC_ID, name: 'Wombat', order: 1, active: false,
+            playerControlled: false, ooc: true, claimable: true,
+            canAct: false, canDelay: false, canInterrupt: false,
+            ...overrides
+          },
+          {
+            id: 'p-active', name: 'Ganger', order: 2, active: false,
+            playerControlled: false, ooc: false,
+            canAct: true, canDelay: true, canInterrupt: true
+          }
+        ]
+      };
+    }
+
+    it('a downed character is excluded from the initiative order (visibleParticipants), whether or not it is claimable/owned', () => {
+      component['applyIncomingState'](stateWith({ claimable: true }));
+
+      expect(component.visibleParticipants.map(p => p.id)).toEqual([ 'p-active' ]);
+    });
+
+    it('unclaimedParticipants includes a claimable downed character, so a returning player can reclaim it', () => {
+      component['applyIncomingState'](stateWith({ claimable: true, ownerName: undefined }));
+
+      expect(component.unclaimedParticipants.map(p => p.id)).toEqual([ OOC_ID ]);
+    });
+
+    it('ownParticipants/primaryCharacter include the player\'s own downed character, so they see they still hold it', () => {
+      const mine = component['playerToken'];
+      component['applyIncomingState'](stateWith({ claimable: true, ownerName: mine }));
+
+      expect(component.ownParticipants.map(p => p.id)).toEqual([ OOC_ID ]);
+      expect(component.primaryCharacter?.id).toBe(OOC_ID);
+      expect(component.primaryCharacter?.ooc).toBeTrue();
+    });
+
+    it('a downed character never offers Act/Delay/Interrupt even to its own owner (it is excluded from the rendered order entirely)', () => {
+      const mine = component['playerToken'];
+      component.connected = true;
+      component['applyIncomingState'](stateWith({ claimable: true, ownerName: mine, canAct: true, canDelay: true, canInterrupt: true }));
+      fixture.detectChanges();
+
+      // Even a wire payload that (incorrectly) claims canAct/canDelay/canInterrupt
+      // true for a downed character cannot make it playable here: it is not in
+      // `visibleParticipants`, so no Act/Delay/Interrupt row is ever rendered
+      // for it at all - belt-and-braces on top of the GM-side broadcast gate.
+      expect(component.visibleParticipants.find(p => p.id === OOC_ID)).toBeUndefined();
+      const rows = fixture.nativeElement.querySelectorAll('.player-participant');
+      for (const row of Array.from(rows) as HTMLElement[]) {
+        expect(row.textContent).not.toContain('Wombat');
+      }
+    });
+
+    it('badges a downed character on its own claim-list entry, so nobody claims one thinking it is up', () => {
+      component.connected = true;
+      component['applyIncomingState'](stateWith({ claimable: true, ownerName: undefined }));
+      fixture.detectChanges();
+
+      const options: HTMLOptionElement[] = Array.from(fixture.nativeElement.querySelectorAll('option'));
+      const option = options.map(o => o.textContent).find(t => !!t && t.includes('Wombat'));
+      expect(option).toContain('Out of Action');
+    });
+
+    it('badges the player\'s own downed character on the "Your Character" panel', () => {
+      const mine = component['playerToken'];
+      component.connected = true;
+      component['applyIncomingState'](stateWith({ claimable: true, ownerName: mine }));
+      fixture.detectChanges();
+
+      const badge = fixture.nativeElement.querySelector('[data-testid="player-badge-ooc"]');
+      expect(badge).not.toBeNull();
+      expect(badge.textContent).toContain('OUT OF ACTION');
+    });
   });
 });
 
@@ -3307,6 +3991,14 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
   let fixture: ComponentFixture<BattleTrackerComponent>;
 
   beforeEach(async () => {
+    // Moved before `TestBed.createComponent` (test hygiene, durable-rooms
+    // review round 6, Part 3), for consistency with the other two blocks in
+    // this file that had a `resetCombat()` after construction - harmless here
+    // specifically, since every test in this block seeds its own row via
+    // `placeholder()` rather than relying on whatever construction happened
+    // to leave behind, but a stray leftover row from an earlier spec should
+    // not be able to reach these tests either.
+    resetCombat();
     await TestBed.configureTestingModule({
       imports: [BattleTrackerComponent],
       providers: appConfig.providers
@@ -3314,7 +4006,6 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
     fixture = TestBed.createComponent(BattleTrackerComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
-    resetCombat();
   });
 
   afterEach(() => resetCombat());
@@ -3342,6 +4033,64 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
     expect(component['isUnusedPlaceholder'](p)).toBeFalse();
   });
 
+  // P2-2 (round 5): the field list used to be a hand-picked eight and missed
+  // these. Live-reproduced repro: a troll's Reaction/Intuition/12-box
+  // Condition Monitor set before its name was typed compared as "still a
+  // placeholder" and was silently discarded with no prompt.
+  it('P2-2: a widened Condition Monitor (physicalHealth) disqualifies it', () => {
+    const p = placeholder();
+    p.physicalHealth = 12; // a troll's Physical track, still unnamed
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a widened stun track disqualifies it', () => {
+    const p = placeholder();
+    p.stunHealth = 12;
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a changed overflow track disqualifies it', () => {
+    const p = placeholder();
+    p.overflowHealth = 6;
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a set Pain Tolerance disqualifies it', () => {
+    const p = placeholder();
+    p.painTolerance = 2;
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a changed baseIni disqualifies it', () => {
+    const p = placeholder();
+    p.baseIni = 10;
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a typed Reaction rating disqualifies it', () => {
+    const p = placeholder();
+    component['participantReactions'].set(p, 5);
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a typed Intuition rating disqualifies it', () => {
+    const p = placeholder();
+    component['participantIntuitions'].set(p, 5);
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: a typed Edge rating disqualifies it', () => {
+    const p = placeholder();
+    component['participantEdgeRatings'].set(p, 3);
+    expect(component['isUnusedPlaceholder'](p)).toBeFalse();
+  });
+
+  it('P2-2: sortOrder alone does NOT disqualify a second untouched blank row (avoids reopening D5)', () => {
+    placeholder(); // row 1, sortOrder 0
+    const second = placeholder(); // row 2, sortOrder 1 - untouched, but not position 0
+    expect(component['isUnusedPlaceholder'](second)).toBeTrue();
+  });
+
   it('D5: rolling initiative disqualifies it', () => {
     const p = placeholder();
     p.diceIni = 4;
@@ -3361,11 +4110,12 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
   });
 
   it('D5: confirmDestructiveJoin treats a lone untouched placeholder the same as literally empty', async () => {
+    resetCombat(); // this test's own point is "lone" - clear the constructor's placeholder first
     placeholder();
     expect(CombatManager.participants.items.length).toBe(1);
     const confirmSpy = spyOn(component['confirmationDialog'], 'confirm');
 
-    const proceed = await component['confirmDestructiveJoin']('ZZZ999');
+    const proceed = await component['confirmDestructiveJoin']('ZZZ999', '');
 
     expect(proceed).toBeTrue();
     expect(confirmSpy).not.toHaveBeenCalled();
@@ -3378,7 +4128,7 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
     CombatManager.participants.insert(named, false);
     const confirmSpy = spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(false);
 
-    await component['confirmDestructiveJoin']('ZZZ999');
+    await component['confirmDestructiveJoin']('ZZZ999', '');
 
     expect(confirmSpy).toHaveBeenCalled();
     const message = confirmSpy.calls.mostRecent().args[0];
@@ -3439,42 +4189,97 @@ describe('Round 4 - D6: a stale live-encounter association cannot silently overw
     expect(component.shareInfo).toContain('nothing was replaced');
   });
 
-  it('D6: building a completely different encounter under another room, then rejoining the old code, warns instead of silently overwriting', async () => {
+  // Rewritten for review defect D1 (durable-rooms review round 6): this is
+  // that repro almost verbatim (room A / room B, an hour of unrelated play in
+  // B, then the GM types A's old code back in). The old version of this test
+  // asserted the pre-D1 behaviour - a silent, zero-confirmation server-side
+  // room switch that then refused to push - which is exactly the shape the
+  // review found abandoned room B with no warning and no way back. Split into
+  // the two outcomes `confirmDivergedJoin` now gates: decline (nothing
+  // touched, B keeps running) and confirm (falls through to the ordinary
+  // destructive-pull flow).
+  it('D1/D6: rejoining a diverged room the GM declines never touches the server, and the room this tab was running keeps broadcasting', async () => {
     // GM runs room A.
     addNamed('Slice');
     addNamed('Ganger');
     component.shareRoomCode = 'ABC123';
     component['liveEncounterRoomCode'] = 'ABC123'; // room A's fingerprint: Slice, Ganger
 
-    // Mis-tap: Create Player Session makes a second room B. Still the same
-    // encounter for now (round-3 fix 6) - additive, so A is untouched.
+    // Create Player Session makes a second room B. Still the same encounter
+    // for now (round-3 fix 6) - additive, so A is untouched.
     spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
     spyOn(sync, 'createSession').and.resolveTo({ room: 'BBBBBB' });
     await component.btnCreateShareSession_Click();
+    expect(component.shareRoomCode).toBe('BBBBBB');
     expect(component['holdsLiveEncounterFor']('ABC123')).toBeTrue();
 
     // Builds a *completely different* encounter under B "over the following
-    // hour": the original cast leaves, an unrelated one arrives.
+    // hour": the original cast leaves, an unrelated one arrives. Every real
+    // mutation path pushes, so B keeps receiving this tab's broadcasts.
     CombatManager.removeParticipant(CombatManager.participants.items[1]);
     CombatManager.removeParticipant(CombatManager.participants.items[0]);
     addNamed('Troll Bouncer');
     addNamed('Rigger');
     broadcasts.length = 0;
 
-    // Later, rejoins A by typing its code.
+    // GM misremembers and types room A's old code back in - but this time
+    // declines the divergence warning.
+    const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+    const confirmSpy = component['confirmationDialog'].confirm as jasmine.Spy;
+    confirmSpy.and.resolveTo(false);
+    component.shareJoinCode = 'ABC123';
+
+    await component.btnJoinShareSession_Click();
+
+    // The server was never even asked: this tab's connection to B is
+    // completely untouched, not merely "recovered afterward".
+    expect(joinSpy).not.toHaveBeenCalled();
+    expect(component.shareRoomCode).toBe('BBBBBB');
+    expect(component.shareError).toContain("Did not join ABC123");
+    expect(component.shareError).toContain('BBBBBB');
+    expect(component['holdsLiveEncounterFor']('ABC123')).toBeTrue(); // association not dropped on decline
+    // On-screen encounter completely untouched.
+    expect(CombatManager.participants.items.map(p => p.name)).toEqual(['Troll Bouncer', 'Rigger']);
+
+    // The critical D1 regression check: further play still reaches room B.
+    // The old defect's whole shape was "further play produces 0 broadcasts".
+    addNamed('Reinforcement');
+    component['syncSharedState']();
+    expect(broadcasts.length).toBe(1);
+    expect(broadcasts[0].participants.map(p => p.name)).toEqual(['Troll Bouncer', 'Rigger', 'Reinforcement']);
+  });
+
+  it('D1: confirming past the divergence warning falls through to the ordinary destructive-pull confirmation and flow', async () => {
+    addNamed('Slice');
+    addNamed('Ganger');
+    component.shareRoomCode = 'ABC123';
+    component['liveEncounterRoomCode'] = 'ABC123';
+    spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+    spyOn(sync, 'createSession').and.resolveTo({ room: 'BBBBBB' });
+    await component.btnCreateShareSession_Click();
+
+    CombatManager.removeParticipant(CombatManager.participants.items[1]);
+    CombatManager.removeParticipant(CombatManager.participants.items[0]);
+    addNamed('Troll Bouncer');
+    addNamed('Rigger');
+    broadcasts.length = 0;
+
+    // Room A turns out to have no saved encounter at all - so the fallthrough
+    // pull is a no-op and this tab's (diverged) cast is pushed to A instead.
     spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
     component.shareJoinCode = 'ABC123';
 
     await component.btnJoinShareSession_Click();
 
-    // Not pushed: room A's real saved state was not silently overwritten by
-    // the unrelated cast now on screen.
-    expect(broadcasts.length).toBe(0);
-    expect(component.shareInfo).toContain('no longer matches');
-    expect(component['holdsLiveEncounterFor']('ABC123')).toBeFalse();
-    // This is a refusal to push, not a pull - the on-screen encounter itself
-    // is completely untouched.
-    expect(CombatManager.participants.items.map(p => p.name)).toEqual(['Troll Bouncer', 'Rigger']);
+    // Confirmed twice (divergence warning, then the ordinary destructive-join
+    // confirmation - which also names room B, since it is being abandoned).
+    const confirmSpy = component['confirmationDialog'].confirm as jasmine.Spy;
+    expect(confirmSpy.calls.count()).toBe(3); // 1 for Create Player Session, 2 here
+    const destructiveMessage = confirmSpy.calls.mostRecent().args[0];
+    expect(destructiveMessage).toContain('BBBBBB');
+    expect(component.shareRoomCode).toBe('ABC123');
+    expect(broadcasts.length).toBe(1);
+    expect(broadcasts[0].participants.map(p => p.name)).toEqual(['Troll Bouncer', 'Rigger']);
   });
 
   it('D6: adding and removing individual participants from the same fight is not treated as divergence', async () => {
@@ -3523,17 +4328,49 @@ describe('Round 4 - D6: a stale live-encounter association cannot silently overw
     expect(component['liveEncounterDivergedFrom']('ZZZ999')).toBeFalse();
   });
 
-  it('D6: liveEncounterDivergedFrom is true only once zero participants survive from the fingerprint', () => {
+  // Corrected round 5 (durable-rooms review, Symptom C): the original version
+  // of this test asserted "zero survivors from the fingerprint" as
+  // unconditionally correct, with no push in between the swap - which is not
+  // representative of real play, where every mutation pushes
+  // (`syncSharedState()`). Read that way, the test encoded exactly the bug
+  // Symptom C describes: it does not distinguish "this tab stopped being the
+  // room's truth" from "the encounter legitimately, incrementally changed
+  // while this tab was continuously pushing it". The two cases below make
+  // that distinction explicit.
+  it('D6: with no push in between, full cast turnover still counts as divergence (no evidence of ongoing legitimate play)', () => {
     const slice = addNamed('Slice');
     component['markRoomLive']('ABC123');
 
+    // Local-only edits, never pushed - this tab could have gone offline and
+    // done anything in between.
     CombatManager.removeParticipant(slice);
     addNamed('Someone Else');
 
     expect(component['liveEncounterDivergedFrom']('ABC123')).toBeTrue();
   });
 
-  it('D6: ending the diverged room\'s association does not disturb any other room this tab still holds', async () => {
+  it('D6/Symptom C: ordinary incremental play - each change pushed as it happens - never diverges, even once the original cast is entirely gone', () => {
+    const slice = addNamed('Slice');
+    component.shareRoomCode = 'ABC123';
+    component['markRoomLive']('ABC123');
+
+    // The party is swapped out one participant at a time over a long session,
+    // each change pushed immediately (`syncSharedState()`, called by every
+    // real mutation path in this file) - never a single wholesale "different
+    // encounter" replacement. Every push refreshes the room's fingerprint to
+    // the roster at that moment (fix for Symptom C).
+    CombatManager.removeParticipant(slice);
+    component['syncSharedState']();
+    addNamed('Someone Else');
+    component['syncSharedState']();
+
+    // Literally none of the participants fingerprinted when the room was
+    // joined survive - but every step in between was this tab's own pushed
+    // history, not a silent swap, so this must not read as divergence.
+    expect(component['liveEncounterDivergedFrom']('ABC123')).toBeFalse();
+  });
+
+  it('D6/D1: confirming past a diverged rejoin that turns out unrestorable drops only that room\'s association, not any other room this tab still holds', async () => {
     addNamed('Slice');
     component.shareRoomCode = 'ABC123';
     component['markRoomLive']('ABC123');
@@ -3541,13 +4378,612 @@ describe('Round 4 - D6: a stale live-encounter association cannot silently overw
 
     CombatManager.removeParticipant(CombatManager.participants.items[0]);
     addNamed('Someone Else');
-    spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+    // Confirms both the divergence warning and the destructive-join
+    // confirmation that follows it (review defect D1, durable-rooms review
+    // round 6 - divergence no longer skips confirmation).
+    spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+    // Room A's real saved state turns out to be entirely OOC - nothing to
+    // pull, so the join is abandoned without ever re-associating this tab
+    // with ABC123.
+    spyOn(sync, 'joinAsGm').and.resolveTo({
+      state: { round: 1, pass: 1, participants: [], oocParticipantCount: 1 },
+      log: []
+    });
     component.shareJoinCode = 'ABC123';
 
     await component.btnJoinShareSession_Click();
 
     expect(component['holdsLiveEncounterFor']('ABC123')).toBeFalse();
     expect(component['holdsLiveEncounterFor']('KEEPME')).toBeTrue();
+  });
+});
+
+describe('Round 5 - Part 1: the GM tab / room authority model (Symptoms A, B, C)', () => {
+  let component: BattleTrackerComponent;
+  let fixture: ComponentFixture<BattleTrackerComponent>;
+  let sync: SessionSyncService;
+  let broadcasts: SharedCombatState[];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [BattleTrackerComponent],
+      providers: appConfig.providers
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(BattleTrackerComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    resetCombat();
+
+    sync = TestBed.inject(SessionSyncService);
+    broadcasts = [];
+    spyOn(sync, 'broadcastState').and.callFake((s: SharedCombatState) => { broadcasts.push(s); });
+    spyOn(sync, 'appendLog');
+    spyOn(sync, 'connect');
+    spyOn(sync, 'disconnect');
+    spyOn(sync, 'onCommand');
+    spyOn(sync, 'onLog');
+    spyOn(sync, 'onSessionClosed');
+    spyOn(sync, 'onError');
+    spyOn(sync, 'onDisconnect');
+    spyOn(sync, 'onReconnect');
+  });
+
+  afterEach(() => resetCombat());
+
+  function addNamed(name: string): Participant {
+    const p = new Participant();
+    p.name = name;
+    CombatManager.participants.insert(p, false);
+    return p;
+  }
+
+  function claim(p: IParticipant, playerName: string) {
+    component['participantClaimable'].set(p, true);
+    component['participantOwners'].set(p, playerName);
+  }
+
+  function sharedStateFor(p: IParticipant, overrides: Partial<SharedParticipantState> = {}): SharedCombatState {
+    return {
+      round: 1, pass: 1, started: false, passEnded: true, currentInitiative: 0,
+      participants: [{
+        id: component['getParticipantId'](p),
+        name: p.name, order: 1, active: false, initiativeScore: 3,
+        playerControlled: false, claimable: true, initiativeDice: 1, pendingRoll: true,
+        ...overrides
+      }]
+    };
+  }
+
+  // ── Symptom A: a stale local owner must never be re-asserted by a push ────
+  describe('Symptom A - ownership reconciles from the server before any push', () => {
+    it('a release the tab missed is applied before the reconnect push re-broadcasts', async () => {
+      const p = addNamed('Ganger');
+      claim(p, 'pl-old-token');
+      component.shareRoomCode = 'ABC123';
+      component['markRoomLive']('ABC123');
+      // The server's own copy shows the claim already released (a Close/End
+      // evacuation, or a disconnect, that this tab was not connected to hear
+      // about) - the exact shape `evacuateRoom()`'s ordering fix and this
+      // reconciliation are both aimed at.
+      spyOn(sync, 'joinAsGm').and.resolveTo({ state: sharedStateFor(p, { ownerName: undefined }), log: [] });
+
+      await component['handleSessionReconnected']();
+
+      expect(component['participantOwners'].get(p)).toBeUndefined();
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants[0].ownerName).toBeUndefined();
+    });
+
+    it('a release the tab missed is applied before a rejoin push re-broadcasts', async () => {
+      const p = addNamed('Ganger');
+      claim(p, 'pl-old-token');
+      component['liveEncounterRoomCode'] = 'ABC123';
+      component.shareJoinCode = 'ABC123';
+      spyOn(sync, 'joinAsGm').and.resolveTo({ state: sharedStateFor(p, { ownerName: undefined }), log: [] });
+
+      await component.btnJoinShareSession_Click();
+
+      expect(component['participantOwners'].get(p)).toBeUndefined();
+      expect(broadcasts.length).toBe(1);
+      expect(broadcasts[0].participants[0].ownerName).toBeUndefined();
+    });
+
+    it('does not fabricate a claim the server has that this tab does not (one-directional)', async () => {
+      const p = addNamed('Ganger');
+      component['participantClaimable'].set(p, true); // claimable, not yet owned locally
+      component['liveEncounterRoomCode'] = 'ABC123';
+      component.shareJoinCode = 'ABC123';
+      // The server shows an owner this tab never recorded - must not be
+      // adopted from the wire; a live `claim_character` command is the only
+      // path that is allowed to set it.
+      spyOn(sync, 'joinAsGm').and.resolveTo({ state: sharedStateFor(p, { ownerName: 'pl-someone-else' }), log: [] });
+
+      await component.btnJoinShareSession_Click();
+
+      expect(component['participantOwners'].get(p)).toBeUndefined();
+    });
+
+    it('leaves an owner alone when the server still agrees', async () => {
+      const p = addNamed('Ganger');
+      claim(p, 'pl-current');
+      component['liveEncounterRoomCode'] = 'ABC123';
+      component.shareJoinCode = 'ABC123';
+      spyOn(sync, 'joinAsGm').and.resolveTo({ state: sharedStateFor(p, { ownerName: 'pl-current' }), log: [] });
+
+      await component.btnJoinShareSession_Click();
+
+      expect(component['participantOwners'].get(p)).toBe('pl-current');
+    });
+  });
+
+  // ── Symptom B: a blocked push must be impossible to fall into, not just warned about ──
+  describe('Symptom B - a join that declines to push never leaves the tab able to push later', () => {
+    // Rewritten for review defect D1 (durable-rooms review round 6): a
+    // diverged join used to skip confirmation whenever `holdsLiveEncounterFor`
+    // was true and, on refusal, fully disconnect the tab from whatever room it
+    // was already running - which is exactly the "abandoned with no warning
+    // and no recovery" shape the review reproduced. The fix moves the
+    // divergence check *before* any server-side room switch, so declining it
+    // now touches nothing at all: no `joinAsGm` call, no disconnect, the
+    // original room keeps broadcasting uninterrupted.
+    it('a diverged rejoin the GM declines never touches the server and never disconnects the tab from what it was running', async () => {
+      addNamed('Slice');
+      component.shareRoomCode = 'ABC123';
+      component['markRoomLive']('ABC123'); // fingerprints {Slice}
+
+      CombatManager.removeParticipant(CombatManager.participants.items[0]);
+      addNamed('Someone Else'); // wholesale cast swap, no push in between
+      const joinSpy = spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(false);
+      component.shareJoinCode = 'ABC123';
+      broadcasts.length = 0;
+
+      await component.btnJoinShareSession_Click();
+
+      expect(joinSpy).not.toHaveBeenCalled();
+      expect(component.shareRoomCode).toBe('ABC123'); // untouched, not abandoned
+      expect(sync.disconnect).not.toHaveBeenCalled();
+      expect(component.shareError).toContain('Did not join ABC123');
+
+      // The opposite of the old defect: further play still reaches the room
+      // this tab was running, because it was never disconnected from it in
+      // the first place.
+      component.addParticipant();
+      expect(broadcasts.length).toBe(1);
+    });
+
+    it('a saved encounter that is entirely OOC (nothing to restore) also declines the join outright', async () => {
+      const local = addNamed('Local Encounter');
+      component.shareRoomCode = '';
+      component.shareJoinCode = 'ZZZ999';
+      spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+      spyOn(sync, 'joinAsGm').and.resolveTo({
+        state: { round: 1, pass: 1, participants: [], oocParticipantCount: 2 },
+        log: []
+      });
+      broadcasts.length = 0;
+
+      await component.btnJoinShareSession_Click();
+
+      expect(component.shareRoomCode).toBe('');
+      expect(sync.disconnect).toHaveBeenCalled();
+      expect(CombatManager.participants.items).toContain(local);
+
+      // Same durability requirement as the diverged case: nothing later pushes
+      // to the room this join declined to join.
+      component.addParticipant();
+      expect(broadcasts.length).toBe(0);
+    });
+  });
+
+  // ── Symptom C: the fingerprint must stay accurate through ordinary play ───
+  describe('Symptom C - the fingerprint is refreshed by every successful push', () => {
+    it('syncSharedState() refreshes the fingerprint for the room currently held live', () => {
+      addNamed('Slice');
+      component.shareRoomCode = 'ABC123';
+      component['markRoomLive']('ABC123');
+      const before = component['liveEncounterFingerprints'].get('ABC123');
+
+      addNamed('Reinforcement');
+      component['syncSharedState']();
+
+      const after = component['liveEncounterFingerprints'].get('ABC123');
+      expect(after?.size).toBe(before ? before.size + 1 : 1);
+      expect(after?.has(component['getParticipantId'](CombatManager.participants.items[1]))).toBeTrue();
+    });
+
+    it('does not fingerprint a room this tab is not recorded as the live truth for', () => {
+      addNamed('Slice');
+      component.shareRoomCode = 'ABC123'; // connected, but never markRoomLive'd
+
+      component['syncSharedState']();
+
+      expect(component['liveEncounterFingerprints'].has('ABC123')).toBeFalse();
+    });
+
+    it('a long session of one-at-a-time roster churn, each change pushed, never diverges on a later Close+rejoin', async () => {
+      const first = addNamed('Starting Party Member');
+      component.shareRoomCode = 'ABC123';
+      component['markRoomLive']('ABC123');
+
+      // Ordinary play over "a long session": every change is followed by the
+      // push every real mutation path in this file performs.
+      CombatManager.removeParticipant(first);
+      addNamed('Replacement 1');
+      component['syncSharedState']();
+      CombatManager.removeParticipant(CombatManager.participants.items[0]);
+      addNamed('Replacement 2');
+      component['syncSharedState']();
+
+      expect(component['liveEncounterDivergedFrom']('ABC123')).toBeFalse();
+
+      // Close, then rejoin - the push path must still be taken, unprompted.
+      spyOn(sync, 'closeSession').and.resolveTo();
+      await component.btnCloseShareSession_Click();
+      spyOn(sync, 'joinAsGm').and.resolveTo({ state: null, log: [] });
+      component.shareJoinCode = 'ABC123';
+      broadcasts.length = 0;
+
+      await component.btnJoinShareSession_Click();
+
+      expect(broadcasts.length).toBe(1);
+      expect(component.shareInfo).toContain('nothing was replaced');
+    });
+  });
+});
+
+describe('Round 6 - review defect D1: the OOC-only abandonment path (durable-rooms review round 6)', () => {
+  let component: BattleTrackerComponent;
+  let fixture: ComponentFixture<BattleTrackerComponent>;
+  let sync: SessionSyncService;
+  let broadcasts: SharedCombatState[];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [BattleTrackerComponent],
+      providers: appConfig.providers
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(BattleTrackerComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    resetCombat();
+
+    sync = TestBed.inject(SessionSyncService);
+    broadcasts = [];
+    spyOn(sync, 'broadcastState').and.callFake((s: SharedCombatState) => { broadcasts.push(s); });
+    spyOn(sync, 'appendLog');
+    spyOn(sync, 'connect');
+    spyOn(sync, 'onCommand');
+    spyOn(sync, 'onLog');
+    spyOn(sync, 'onSessionClosed');
+    spyOn(sync, 'onError');
+    spyOn(sync, 'onDisconnect');
+    spyOn(sync, 'onReconnect');
+  });
+
+  afterEach(() => resetCombat());
+
+  function addNamed(name: string): Participant {
+    const p = new Participant();
+    p.name = name;
+    CombatManager.participants.insert(p, false);
+    return p;
+  }
+
+  // The brief's own words: "The OOC-only branch has the identical shape and is
+  // reachable from a live room after the GM confirms a destructive join."
+  // Unlike the diverged case, this cannot be caught before `joinAsGm` runs -
+  // the target room's snapshot is only known after the server answers - so
+  // the fix is the atomic-reversible-restore half of D1's remedy
+  // (`abandonJoinAndRestore`/`restorePreviousRoomConnection`), not a pre-check.
+  it('discovering the target room is OOC-only after abandoning a live room automatically reconnects to it, with an error-level banner naming both rooms', async () => {
+    // This tab is running room B (BBBBBB).
+    addNamed('Reinforcement');
+    component.shareRoomCode = 'BBBBBB';
+    component['markRoomLive']('BBBBBB');
+    const disconnectSpy = spyOn(sync, 'disconnect');
+    const joinSpy = spyOn(sync, 'joinAsGm').and.callFake((room: string) => {
+      if (room === 'BBBBBB') {
+        // The reconnect this fix performs.
+        return Promise.resolve({ state: null, log: [] });
+      }
+      // Room A (ZZZ999) turns out to be entirely OOC.
+      return Promise.resolve({
+        state: { round: 1, pass: 1, participants: [], oocParticipantCount: 2 },
+        log: []
+      });
+    });
+    // Local state is at risk (one real participant), so the destructive-join
+    // dialog fires and is confirmed.
+    spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+    component.shareJoinCode = 'ZZZ999';
+    broadcasts.length = 0;
+
+    await component.btnJoinShareSession_Click();
+
+    // Reconnected to B, not left disconnected from everything.
+    expect(joinSpy.calls.allArgs().map(a => a[0])).toEqual(['ZZZ999', 'BBBBBB']);
+    expect(disconnectSpy).not.toHaveBeenCalled(); // never fully torn down - reclaimed instead
+    expect(component.shareRoomCode).toBe('BBBBBB');
+    // Error-level banner (`shareError`, not `shareInfo`), naming both rooms -
+    // never the old "rejoin to pull" advice, which would have been
+    // destructive to whichever room was rejoined.
+    expect(component.shareError).toContain('ZZZ999');
+    expect(component.shareError).toContain('BBBBBB');
+    expect(component.shareError.toLowerCase()).not.toContain('rejoin zzz999 again to pull');
+    // And it is actually live again: the automatic reconnect itself already
+    // pushed once, and further play keeps reaching B after that.
+    expect(broadcasts.length).toBe(1);
+    broadcasts.length = 0;
+    component.addParticipant();
+    expect(broadcasts.length).toBe(1);
+  });
+
+  it('when there is no other room to reconnect to, the notice stays informational (nothing was actually abandoned)', async () => {
+    addNamed('Local Encounter');
+    component.shareRoomCode = ''; // nothing running before this join attempt
+    spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+    spyOn(sync, 'joinAsGm').and.resolveTo({
+      state: { round: 1, pass: 1, participants: [], oocParticipantCount: 1 },
+      log: []
+    });
+    const disconnectSpy = spyOn(sync, 'disconnect');
+    component.shareJoinCode = 'ZZZ999';
+
+    await component.btnJoinShareSession_Click();
+
+    expect(component.shareRoomCode).toBe('');
+    expect(disconnectSpy).toHaveBeenCalled();
+    expect(component.shareInfo).toContain('nothing here was replaced');
+    expect(component.shareError).toBe('');
+  });
+
+  it('an automatic reconnect failure is reported as an unmistakable error, not swallowed', async () => {
+    addNamed('Reinforcement');
+    component.shareRoomCode = 'BBBBBB';
+    component['markRoomLive']('BBBBBB');
+    spyOn(sync, 'disconnect');
+    spyOn(sync, 'joinAsGm').and.callFake((room: string) => {
+      if (room === 'BBBBBB') {
+        return Promise.reject(new Error('room-mismatch')); // the reconnect itself fails
+      }
+      return Promise.resolve({
+        state: { round: 1, pass: 1, participants: [], oocParticipantCount: 1 },
+        log: []
+      });
+    });
+    spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(true);
+    component.shareJoinCode = 'ZZZ999';
+
+    await component.btnJoinShareSession_Click();
+
+    expect(component.shareRoomCode).toBe('');
+    expect(component.shareConnectionLost).toBeTrue();
+    expect(component.shareError).toContain('BBBBBB');
+    expect(component.shareError).toContain('NOT');
+  });
+});
+
+describe('Round 6 - review defect D2: ownership reconciliation covers OOC participants', () => {
+  let component: BattleTrackerComponent;
+  let fixture: ComponentFixture<BattleTrackerComponent>;
+  let sync: SessionSyncService;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [BattleTrackerComponent],
+      providers: appConfig.providers
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(BattleTrackerComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    resetCombat();
+
+    sync = TestBed.inject(SessionSyncService);
+    spyOn(sync, 'broadcastState');
+    spyOn(sync, 'appendLog');
+    spyOn(sync, 'connect');
+    spyOn(sync, 'onCommand');
+    spyOn(sync, 'onLog');
+    spyOn(sync, 'onSessionClosed');
+    spyOn(sync, 'onError');
+    spyOn(sync, 'onDisconnect');
+    spyOn(sync, 'onReconnect');
+  });
+
+  afterEach(() => resetCombat());
+
+  function addNamed(name: string): Participant {
+    const p = new Participant();
+    p.name = name;
+    CombatManager.participants.insert(p, false);
+    return p;
+  }
+
+  // Durable-rooms follow-up (2026-08-18): a claimable OOC participant is now
+  // deliberately ALSO put on the main `participants` list (`ooc: true`), not
+  // just the ownership-only shadow - see `briefs/persistent-rooms.md`'s
+  // "Amendment 2026-08-18". The shadow itself is unchanged and still fires.
+  it('syncSharedState broadcasts a claimed/claimable OOC participant on the main list too, plus the ownership shadow', () => {
+    const wraith = addNamed('Wraith');
+    wraith.physicalHealth = 10;
+    wraith.physicalDamage = 10; // OOC
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-token-1');
+    component.shareRoomCode = 'ABC123';
+    const broadcastSpy = sync.broadcastState as jasmine.Spy;
+
+    component['syncSharedState']();
+
+    const sent = broadcastSpy.calls.mostRecent().args[0] as SharedCombatState;
+    expect(sent.participants.length).toBe(1);
+    expect(sent.participants[0].ooc).toBeTrue();
+    expect(sent.participants[0].claimable).toBeTrue();
+    expect(sent.participants[0].ownerName).toBe('pl-token-1');
+    expect(sent.oocOwnership).toEqual([
+      { id: component['getParticipantId'](wraith), ownerName: 'pl-token-1', claimable: true }
+    ]);
+  });
+
+  it('an OOC participant nobody has ever made claimable earns no oocOwnership entry, and stays off the main list (privacy, AC 9)', () => {
+    const npc = addNamed('Downed Ganger');
+    npc.physicalHealth = 10;
+    npc.physicalDamage = 10;
+    component.shareRoomCode = 'ABC123';
+    const broadcastSpy = sync.broadcastState as jasmine.Spy;
+
+    component['syncSharedState']();
+
+    const sent = broadcastSpy.calls.mostRecent().args[0] as SharedCombatState;
+    expect(sent.oocOwnership).toEqual([]);
+    expect(sent.participants.length).toBe(0);
+  });
+
+  // The exact repro from the review: a claimed character goes OOC, the GM
+  // closes and later rejoins (the server's snapshot never carried this
+  // participant's owner because it was filtered out while OOC), then the GM
+  // revives it - which must not re-broadcast the stale local owner.
+  it('reconcileOwnershipFromServer clears a stale local owner for a participant that is currently OOC', () => {
+    const wraith = addNamed('Wraith');
+    wraith.physicalHealth = 10;
+    wraith.physicalDamage = 10; // still OOC on this tab
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-dead-token');
+
+    // The server's last-known state shows the claim already released (or
+    // never carried it in the first place) via the ownership-only shadow.
+    component['reconcileOwnershipFromServer']({
+      round: 1, pass: 1, participants: [],
+      oocOwnership: [{ id: component['getParticipantId'](wraith), ownerName: undefined, claimable: true }]
+    });
+
+    expect(component['participantOwners'].get(wraith)).toBeUndefined();
+  });
+
+  it('reconcileOwnershipFromServer leaves an OOC owner alone when the server still agrees', () => {
+    const wraith = addNamed('Wraith');
+    wraith.physicalHealth = 10;
+    wraith.physicalDamage = 10;
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-current');
+
+    component['reconcileOwnershipFromServer']({
+      round: 1, pass: 1, participants: [],
+      oocOwnership: [{ id: component['getParticipantId'](wraith), ownerName: 'pl-current', claimable: true }]
+    });
+
+    expect(component['participantOwners'].get(wraith)).toBe('pl-current');
+  });
+
+  it('full sequence: revive after a reconciled release no longer re-broadcasts the dead token, so a returning player can re-claim', async () => {
+    const wraith = addNamed('Wraith');
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-dead-token');
+    wraith.physicalHealth = 10;
+    wraith.physicalDamage = 10; // OOC when the GM (re)joins
+
+    // The server's last-known state: something released this claim (a player
+    // disconnect) while this tab was not connected to hear it - the same
+    // shape Symptom A (round 5) fixed for a non-OOC participant.
+    spyOn(sync, 'joinAsGm').and.resolveTo({
+      state: {
+        round: 1, pass: 1, participants: [],
+        oocOwnership: [{ id: component['getParticipantId'](wraith), ownerName: undefined, claimable: true }]
+      },
+      log: []
+    });
+    component['liveEncounterRoomCode'] = 'ABC123';
+    component.shareJoinCode = 'ABC123';
+
+    await component.btnJoinShareSession_Click();
+
+    // Revive, then push - the point at which the old defect put the stale
+    // owner on the wire.
+    wraith.physicalDamage = 0;
+    const broadcastSpy = sync.broadcastState as jasmine.Spy;
+    component['syncSharedState']();
+
+    const sent = broadcastSpy.calls.mostRecent().args[0] as SharedCombatState;
+    expect(sent.participants.find(p => p.id === component['getParticipantId'](wraith))?.ownerName).toBeUndefined();
+  });
+});
+
+describe('Round 6 - review defect D8: Create Player Session does not inherit ownership from the previous room', () => {
+  let component: BattleTrackerComponent;
+  let fixture: ComponentFixture<BattleTrackerComponent>;
+  let sync: SessionSyncService;
+  let broadcasts: SharedCombatState[];
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [BattleTrackerComponent],
+      providers: appConfig.providers
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(BattleTrackerComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    resetCombat();
+
+    sync = TestBed.inject(SessionSyncService);
+    broadcasts = [];
+    spyOn(sync, 'broadcastState').and.callFake((s: SharedCombatState) => { broadcasts.push(s); });
+    spyOn(sync, 'appendLog');
+    spyOn(sync, 'connect');
+    spyOn(sync, 'onCommand');
+    spyOn(sync, 'onLog');
+    spyOn(sync, 'onSessionClosed');
+    spyOn(sync, 'onError');
+    spyOn(sync, 'onDisconnect');
+    spyOn(sync, 'onReconnect');
+  });
+
+  afterEach(() => resetCombat());
+
+  function addNamed(name: string): Participant {
+    const p = new Participant();
+    p.name = name;
+    CombatManager.participants.insert(p, false);
+    return p;
+  }
+
+  it('a fresh room created after players claimed characters in a previous room starts with no owners on the wire', async () => {
+    const wraith = addNamed('Wraith');
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-old-session-token');
+    component.shareRoomCode = ''; // no confirmation dialog needed for this part of the test
+    spyOn(sync, 'createSession').and.resolveTo({ room: 'NEW999' });
+    broadcasts.length = 0;
+
+    await component.btnCreateShareSession_Click();
+
+    expect(component['participantOwners'].get(wraith)).toBeUndefined();
+    expect(broadcasts.length).toBe(1);
+    expect(broadcasts[0].participants[0].ownerName).toBeUndefined();
+    expect(broadcasts[0].participants[0].claimable).toBeTrue(); // claimable flag itself is untouched
+  });
+
+  it('a returning player can claim_character cleanly against the fresh room with no GM action', async () => {
+    const wraith = addNamed('Wraith');
+    component['participantClaimable'].set(wraith, true);
+    component['participantOwners'].set(wraith, 'pl-old-session-token');
+    component.shareRoomCode = '';
+    spyOn(sync, 'createSession').and.resolveTo({ room: 'NEW999' });
+    await component.btnCreateShareSession_Click();
+
+    // A brand-new player token claims the same character - must not hit the
+    // stale `existingOwner` denial (server.js's claim handling relays this as
+    // a `session:command` the GM tab applies).
+    component['handleSessionCommand']({
+      type: 'claim_character', player: 'pl-new-token',
+      payload: { participantId: component['getParticipantId'](wraith), playerName: 'Newcomer' },
+      timestamp: new Date().toISOString()
+    });
+
+    expect(component['participantOwners'].get(wraith)).toBe('pl-new-token');
   });
 });
 
@@ -3627,5 +5063,111 @@ describe('Round 4 - D7: capacity eviction leaves a tombstone; End Room leaves no
     store.evict('ABC123', 'removed to free capacity for a new room');
 
     expect(store.expiryOf('ABC123')?.expiredAt).toBe(clockNow);
+  });
+});
+
+
+/**
+ * Manual-QA regression (step 6 of the durable-rooms QA pass).
+ *
+ * A claim only means anything while the socket that made it is connected, so
+ * nothing restored from disk at boot can legitimately still be owned. The
+ * `disconnect` handler enforced that for a departing player but never for a
+ * departing *process*: `shutdown()` flushes state and exits without releasing,
+ * and a crash or SIGKILL never gets that far. The room therefore came back with
+ * the claim intact, and because the player view mints a fresh `pl-<random>`
+ * token on every page load, the returning player was a different name asking
+ * for a character that still looked taken - denied, with the GM having to clear
+ * it by hand. Spec AC 5 failed across exactly the restart this feature exists
+ * to survive.
+ *
+ * Every earlier automated and live check exercised a player tab closing, where
+ * `disconnect` does run. None exercised the server restarting underneath a live
+ * claim, which is why eight rounds of review missed it and a human found it in
+ * ten minutes.
+ */
+describe('releaseAllClaimsOnBoot', () => {
+  function roomWith(participants: any[], oocOwnership?: any[]): any {
+    return {
+      state: {
+        round: 1, pass: 1, started: true, passEnded: false, currentInitiative: 0,
+        participants,
+        ...(oocOwnership ? { oocOwnership } : {})
+      },
+      log: [],
+      lastActivity: 1
+    };
+  }
+
+  it('QA step 6: a claim held when the server died does not survive the restart', () => {
+    const sessions = new Map<string, any>([
+      ['ABC123', roomWith([{ id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old' }])]
+    ]);
+
+    const rooms = releaseAllClaimsOnBoot(sessions);
+
+    expect(rooms).toBe(1);
+    expect(sessions.get('ABC123').state.participants[0].ownerName).toBeUndefined();
+  });
+
+  it('clears the GM-only OOC ownership shadow too, so a revived character is claimable', () => {
+    const sessions = new Map<string, any>([
+      ['ABC123', roomWith(
+        [{ id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old' }],
+        [{ id: 'p2', ownerName: 'pl-old', claimable: true }]
+      )]
+    ]);
+
+    releaseAllClaimsOnBoot(sessions);
+
+    expect(sessions.get('ABC123').state.oocOwnership[0].ownerName).toBeUndefined();
+  });
+
+  it('leaves everything except ownership alone', () => {
+    const sessions = new Map<string, any>([
+      ['ABC123', roomWith([
+        { id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old', physicalDamage: 5, ooc: true }
+      ])]
+    ]);
+
+    releaseAllClaimsOnBoot(sessions);
+
+    const p = sessions.get('ABC123').state.participants[0];
+    expect(p.name).toBe('Wraith');
+    expect(p.claimable).toBeTrue();
+    expect(p.physicalDamage).toBe(5);
+    expect(p.ooc).toBeTrue();
+    expect(sessions.get('ABC123').state.round).toBe(1);
+  });
+
+  it('reports only the rooms it actually changed', () => {
+    const sessions = new Map<string, any>([
+      ['AAAAAA', roomWith([{ id: 'p1', claimable: true, ownerName: 'pl-old' }])],
+      ['BBBBBB', roomWith([{ id: 'p1', claimable: true }])],
+      ['CCCCCC', roomWith([{ id: 'p1', claimable: false }])]
+    ]);
+
+    expect(releaseAllClaimsOnBoot(sessions)).toBe(1);
+  });
+
+  it('survives rooms with no state, no participants, or a null entry', () => {
+    const sessions = new Map<string, any>([
+      ['AAAAAA', { state: null, log: [], lastActivity: 1 }],
+      ['BBBBBB', roomWith([])],
+      ['CCCCCC', roomWith([null as any, { id: 'p1', claimable: true, ownerName: 'pl-old' }])]
+    ]);
+
+    expect(() => releaseAllClaimsOnBoot(sessions)).not.toThrow();
+    expect(sessions.get('CCCCCC').state.participants[1].ownerName).toBeUndefined();
+  });
+
+  it('is a no-op on a second boot with nothing left to release', () => {
+    const sessions = new Map<string, any>([
+      ['ABC123', roomWith([{ id: 'p1', claimable: true, ownerName: 'pl-old' }])]
+    ]);
+
+    releaseAllClaimsOnBoot(sessions);
+
+    expect(releaseAllClaimsOnBoot(sessions)).toBe(0);
   });
 });

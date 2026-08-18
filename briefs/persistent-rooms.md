@@ -388,6 +388,44 @@ count and missing two-GM-tabs caveat), D6 (disconnect banner conflated with
 items, not acceptance criteria for this pass — log them in
 `docs/FEATURE-BACKLOG.md` if not already covered.
 
+### Amendment 2026-08-18 — a player must be able to reclaim a downed character
+
+Manual QA of the shipped feature surfaced a gap Open Decision 4 recorded but
+did not itself decide: `getSharedParticipants()`'s `.filter(p => !p.ooc)`
+(the same filter Open Decision 4 chose to leave in place for the *restore*
+question) also has the incidental effect of removing an out-of-action
+character from the player's screen entirely — not merely from the initiative
+order, but from `unclaimedParticipants` and `ownParticipants` too. A player
+whose character goes down cannot see it is still theirs, and a returning
+player cannot reclaim a character that went down while they were away, until
+the GM manually revives it. Xavier's ruling: **a player must be able to
+reclaim their character while it is out of action.** This is a deliberate,
+user-approved change to the OOC-filter's player-visibility behaviour, not a
+bug fix to Open Decision 4's restore scope (which is otherwise unchanged —
+damage/health still do not round-trip; see `docs/FEATURE-BACKLOG.md`).
+
+**The change, precisely:** `getSharedParticipants()` now broadcasts an
+out-of-action participant when it is **claimable** (or already owned) — the
+same predicate `oocOwnership` already used for the analogous ownership-shadow
+problem, factored into one shared helper (`isClaimableOrOwnedOoc`) rather than
+duplicated. A downed **non-player** participant (never claimable, never
+owned) is not broadcast, unchanged from before — the privacy property (a
+player learns nothing about a downed NPC) is preserved; only a downed PC is
+now visible, and only to the room its owner is in. `SharedParticipantState`
+gained `ooc?: boolean` so the player view can tell a downed character apart
+from an active one, exclude it from the initiative order specifically
+(`visibleParticipants`), still offer/show it for claim/ownership purposes
+(`unclaimedParticipants`/`ownParticipants`), badge it, and force off every
+action affordance (`canAct`/`canDelay`/`canInterrupt`) regardless of its
+underlying engine state — claimable must never mean playable.
+`restoreFromSharedState()`/`buildRestoredParticipant()` apply `ooc` back onto
+the rebuilt participant, so a GM rejoining a room gets a downed PC back
+downed, never silently revived — flagged in the original brief's own words as
+"the highest-risk part of the change," since a GM finding a downed PC
+standing up again would be worse than the original complaint. See
+`ARCHITECTURE.md` §7 for the full mechanism and the `oocOwnership` shadow's
+narrowed-but-still-necessary role.
+
 ## Regression risk
 
 | Risk | Why | Cover |

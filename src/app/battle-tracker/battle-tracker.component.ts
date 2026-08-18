@@ -7,7 +7,8 @@ import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import {
   Participant, PARTICIPANT_BASE_BACKING_FIELDS, MIN_DISPLAYED_DICE_TOTAL,
   PHYSICAL_INITIATIVE_DICE, DiceCountChangeResult, NO_DICE_COUNT_CHANGE,
-  clampInitiativeDiceCount, rollInitiativeDie, INITIATIVE_PASS_DECAY
+  clampInitiativeDiceCount, rollInitiativeDie, INITIATIVE_PASS_DECAY,
+  PARTICIPANT_DEFAULT_BASE_INI
 } from "Combat/Participants/Participant";
 import { LogHandler } from "Logging";
 import { Action } from "Interfaces/Action";
@@ -81,7 +82,27 @@ const NPC_ROW_EDGE_RATING = 0;
  */
 const PLACEHOLDER_EDGE_RATING_DEFAULT = 0;
 const PLACEHOLDER_REACTION_DEFAULT = 3;
-const PLACEHOLDER_INTUITION_DEFAULT = 3;
+/**
+ * Derived from `PARTICIPANT_DEFAULT_BASE_INI`, not a second independent `3`
+ * (D-K, durable-rooms review round 7). `isUnusedPlaceholder()` below only
+ * correctly recognises a fresh row because `PLACEHOLDER_REACTION_DEFAULT +
+ * PLACEHOLDER_INTUITION_DEFAULT` happens to equal the constructor's
+ * `_baseIni` default - previously true only by coincidence, with nothing
+ * enforcing it, so changing either number alone would have silently made
+ * every fresh row read as "touched" (reopening round-4 defect D5) with no
+ * compiler or test catching it. Deriving one from the other makes that
+ * impossible instead of merely documented.
+ */
+const PLACEHOLDER_INTUITION_DEFAULT = PARTICIPANT_DEFAULT_BASE_INI - PLACEHOLDER_REACTION_DEFAULT;
+
+/**
+ * The one `PARTICIPANT_BASE_BACKING_FIELDS` entry `isUnusedPlaceholder()`
+ * must skip (review defect D4, durable-rooms review round 6): see that
+ * method's doc comment for why `_sortOrder` is excluded from the "is this row
+ * still untouched" comparison. Named so the exclusion cannot silently stop
+ * matching a renamed backing field.
+ */
+const PLACEHOLDER_SORT_ORDER_FIELD = "_sortOrder";
 
 /**
  * Name prefix for a grunt created with the "Add Grunt" button (brief addendum
@@ -690,8 +711,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private liveEncounterRooms = new Set<string>();
 
   /**
-   * Per-room snapshot of participant IDs, taken whenever a room is added to
-   * `liveEncounterRooms` (round-4 fix D6).
+   * Per-room snapshot of participant IDs, seeded whenever a room is added to
+   * `liveEncounterRooms` (round-4 fix D6) and **refreshed on every successful
+   * push** inside `syncSharedState()` (round 5, fixing Symptom C - D-E,
+   * durable-rooms review round 7, corrects this comment and the one on
+   * `liveEncounterDivergedFrom()` below, which both used to say the opposite
+   * and cited each other as the reason).
    *
    * `liveEncounterRooms` membership is additive and never expires on its own
    * (round-3 fix 6, by design - see the doc comment above), which is provably
@@ -699,10 +724,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * *different* encounter under a different room code: the two share nothing,
    * but a blind push would still silently overwrite the old room's real saved
    * state with the new, unrelated one. `liveEncounterDivergedFrom()` compares
-   * the current on-screen participants against what was fingerprinted "as
-   * when the room was joined/created" (not continuously updated while play
-   * continues there - see that method's doc comment for why) to tell the two
-   * cases apart.
+   * the current on-screen participants against this fingerprint to tell the
+   * two cases apart - and because `syncSharedState()` keeps the fingerprint
+   * current with every push this tab makes for that room, ordinary play (add
+   * one, remove one, many pushes over a long session) never trips it; only a
+   * wholesale cast swap with no push in between does.
    */
   private liveEncounterFingerprints = new Map<string, Set<string>>();
 
@@ -721,6 +747,29 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private set liveEncounterRoomCode(room: string) {
     this.liveEncounterRooms.clear();
     this.liveEncounterFingerprints.clear();
+    // A pull genuinely replaces this tab's encounter (every earlier
+    // association is now stale - see the getter's doc comment), so every
+    // other room's shelved ownership becomes unreachable garbage the moment
+    // this runs: `switchActiveOwnershipRoom` can only ever be reached for a
+    // room this tab still `holdsLiveEncounterFor`, and this call is what
+    // erases that membership for everything except `room` itself (D-A,
+    // durable-rooms review round 7). `restoreFromSharedState()` (the only
+    // caller that assigns a non-empty `room` here) has already rebuilt the
+    // active `participantOwners`/`participantClaimable` maps directly from
+    // the server's own copy by the time this setter runs, so `room` becomes
+    // `activeOwnershipRoom` as a bookkeeping fact only - nothing here touches
+    // those maps' content.
+    this.ownershipByRoom.clear();
+    // Same reasoning, same moment, for the hidden-log shelf (durable-rooms
+    // review round 8, item 3): every other room's shelved hidden entries are
+    // equally unreachable once this runs, since only a room this tab
+    // `holdsLiveEncounterFor` can ever be switched into via
+    // `switchActiveOwnershipRoom` again. Whatever `room` itself had shelved
+    // was already folded into `sharedLogEntries` by the caller before this
+    // setter runs (see the join branch that assigns here), so nothing is
+    // lost by clearing the shelf out from under it.
+    this.hiddenLogEntriesByRoom.clear();
+    this.activeOwnershipRoom = room;
     if (room) {
       this.markRoomLive(room);
     }
@@ -782,8 +831,82 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private readonly gruntDamageValues = new Map<IParticipant, number>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
   private readonly participantIds = new Map<IParticipant, string>();
+  /**
+   * Who owns each participant, for whichever room `activeOwnershipRoom`
+   * currently names - see that field's doc comment for the full per-room
+   * model (D-A, durable-rooms review round 7). Every read/write site in this
+   * file that is not part of a room switch treats this map exactly as it
+   * always has: a flat `Map<IParticipant, string>` for "the room this tab is
+   * broadcasting to right now". That invariant - the map always describes
+   * `activeOwnershipRoom`, which a room switch keeps equal to `shareRoomCode`
+   * - is what lets ~60 existing call sites stay untouched while the
+   * underlying fact becomes per-room.
+   */
   private readonly participantOwners = new Map<IParticipant, string>();
+  /**
+   * Whether each participant is available for a player to claim at all - a GM
+   * authoring decision, and deliberately **not** room-scoped the way
+   * `participantOwners` is (D-A, durable-rooms review round 7): a character
+   * marked claimable stays claimable across a room switch (round 6's D8
+   * tests fix this as tested, unmodified, behaviour), only *who currently
+   * holds* the claim resets per room. See `snapshotActiveOwnership`'s doc
+   * comment for the full reasoning.
+   */
   private readonly participantClaimable = new Map<IParticipant, boolean>();
+  /**
+   * Per-room shelf for ownership (`participantOwners` only - see
+   * `participantClaimable`'s doc comment for why that map is excluded),
+   * keyed by the stable participant id (`getParticipantId`), not object
+   * identity - object identity cannot distinguish rooms here, because one
+   * `CombatManager` (and so one set of `Participant` objects) can legitimately
+   * be the live source of truth for several room codes at once
+   * (`liveEncounterRooms`). Only one room's ownership can be the *active*
+   * `participantOwners` content at a time - see `activeOwnershipRoom` - so
+   * this is where every other room's ownership lives while it is not.
+   *
+   * Written only by `shelveActiveOwnership`/`switchActiveOwnershipRoom`, read
+   * only by `loadShelvedOwnership`/`switchActiveOwnershipRoom`. Entries leave
+   * on the same two events `liveEncounterRooms` membership does (a full pull
+   * replacing this tab's encounter, or the room being permanently ended) -
+   * see the call sites of each for why.
+   */
+  private readonly ownershipByRoom = new Map<string, Map<string, string>>();
+  /**
+   * Per-room shelf for GM-local hidden log entries (durable-rooms review
+   * round 8, item 3) - the same "one flat variable holding a per-room fact"
+   * shape `ownershipByRoom` closed for ownership in round 7, closed here for
+   * `sharedLogEntries`'s hidden subset. `sharedLogEntries` is a single global
+   * array holding whichever room is currently active's whole log (hidden and
+   * visible entries together, see `getHiddenLogEntries`); without this shelf
+   * a hidden note written while running room B survives a switch to room A
+   * inside that global array and `mergeHiddenLogEntries` folds it into room
+   * A's server log on the next join - a GM-visible-only leak (nothing reaches
+   * players), but cumulative across further switches.
+   *
+   * Written/read at the exact same seams as `ownershipByRoom`:
+   * `switchActiveOwnershipRoom` (every join/create branch that keeps this
+   * tab's own local state live) and the `liveEncounterRoomCode` setter (the
+   * destructive-pull branch, which invalidates every other room's shelf the
+   * same way it already does for ownership - see that setter's doc comment).
+   * Keyed by room code, same lifecycle as `ownershipByRoom`: entries leave on
+   * a full pull replacing this tab's encounter, or the room being
+   * permanently ended.
+   */
+  private readonly hiddenLogEntriesByRoom = new Map<string, SharedLogEntry[]>();
+  /**
+   * Which room code the flat `participantOwners`/`participantClaimable` maps
+   * currently describe. **Not the same field as `shareRoomCode`** (D-A,
+   * durable-rooms review round 7) - deliberately: `shareRoomCode` can be
+   * blanked (a Close, an external close notice) while this tab's in-memory
+   * ownership for that room is still perfectly correct and does not need
+   * shelving or reloading, only a later push needs `shareRoomCode` restored.
+   * Conflating the two was the original defect: "is this tab authorized to
+   * broadcast to room X" (`shareRoomCode`, see ARCHITECTURE §7) and "which
+   * room's ownership do the flat maps hold" are two different per-room facts
+   * that do not always change together, and D-A's repro was exactly a path
+   * that changed the first without the second ever being represented at all.
+   */
+  private activeOwnershipRoom = "";
   private readonly participantEdgeRatings = new Map<IParticipant, number>();
   private readonly participantReactions = new Map<IParticipant, number>();
   private readonly participantIntuitions = new Map<IParticipant, number>();
@@ -997,6 +1120,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       const { room } = await this.sessionSync.createSession();
       this.shareRoomCode = room;
       this.shareJoinCode = room;
+      // Review defect D8 (durable-rooms review round 6): a brand-new room has
+      // no state to reconcile ownership against - `reconcileOwnershipFromServer`
+      // only ever runs on `gm:join-session`, and a fresh `gm:create-session`
+      // never calls it - so the very first push to the new room must not carry
+      // any `ownerName` still cached from whichever players were claimed in
+      // the *previous* room; a stale token there would deny every returning
+      // player's `claim_character` against the server's `existingOwner` check
+      // with no GM action able to explain why.
+      //
+      // Round 6 closed that by *destroying* `participantOwners` outright - a
+      // GM who creates a room by mistake and immediately rejoins `previousRoom`
+      // to recover (the round-3 fix 6 flow the confirmation dialog above
+      // describes) found that room's real, still-valid owners gone too. That
+      // was disclosed as a deliberate trade-off, not a bug, but it was the same
+      // global-variable-for-a-per-room-fact substitution review round 6 kept
+      // finding through new doors elsewhere in this file: `participantOwners`
+      // is one flat map shared across every room this tab is simultaneously
+      // live for, so the only way to give the new room a clean slate was to
+      // wipe every room's slate.
+      //
+      // `switchActiveOwnershipRoom` (D-A, durable-rooms review round 7) closes
+      // it at the representation instead: it shelves `previousRoom`'s current
+      // ownership under its own code before resetting the active maps to
+      // empty for `room`, so "the new room has no ownership yet" and "the
+      // previous room's ownership remains intact for its own later rejoin" are
+      // both true at once, with nothing to disclose as a trade-off. See that
+      // method's doc comment and `activeOwnershipRoom`'s for the full model.
+      this.switchActiveOwnershipRoom(room);
       // From here on this tab is the live source of truth for that code, so a
       // later Close + Join of the same code pushes rather than pulls.
       //
@@ -1113,6 +1264,187 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
+   * Snapshot the *active* `participantOwners` content, keyed by stable
+   * participant id rather than object identity (D-A, durable-rooms review
+   * round 7). Object identity is exactly what a per-room shelf cannot key on:
+   * the same `Participant` objects are what gets shelved under one room code
+   * and reloaded under another, so keying on the object itself would make
+   * every entry collide.
+   *
+   * **`participantClaimable` is deliberately excluded** - it is not a
+   * per-room fact the way `ownerName` is. `claimable` marks a GM authoring
+   * decision ("this character is available for a player to claim at all"),
+   * not which specific player-token in which specific room claimed it; the
+   * pre-existing, tested contract (round 6's D8 tests, kept passing
+   * unmodified by this round) is that Create Player Session leaves it
+   * untouched while clearing ownership. A brand-new room's characters are
+   * therefore still claimable by its own (new) players by default, exactly
+   * as before - only *who* claimed them is room-scoped.
+   */
+  private snapshotActiveOwnership(): Map<string, string> {
+    const snapshot = new Map<string, string>();
+    for (const p of this.combatManager.participants.items) {
+      const ownerName = this.participantOwners.get(p);
+      if (ownerName !== undefined) {
+        snapshot.set(this.getParticipantId(p), ownerName);
+      }
+    }
+    return snapshot;
+  }
+
+  /**
+   * Shelve `room`'s ownership - the *current* content of the active
+   * `participantOwners` map - under its own key in `ownershipByRoom`, so it
+   * survives becoming inactive. A no-op for an empty room code (nothing to
+   * shelve under). An empty snapshot removes any stale shelf entry rather
+   * than storing one, so a room that has been fully un-owned since it was
+   * last active does not resurrect old owners on a later reload.
+   */
+  private shelveActiveOwnership(room: string): void {
+    if (!room) {
+      return;
+    }
+    const snapshot = this.snapshotActiveOwnership();
+    if (snapshot.size === 0) {
+      this.ownershipByRoom.delete(room);
+      return;
+    }
+    this.ownershipByRoom.set(room, snapshot);
+  }
+
+  /**
+   * Replace `participantOwners`' content with `room`'s shelved ownership, or
+   * with nothing if `room` has none shelved - "the new room simply has no
+   * ownership yet" (spec, Part 1) is exactly the no-shelf case, not a special
+   * case of it. Every currently-owned participant not present in the loaded
+   * shelf ends up with no owner, matching the room whose ownership is being
+   * loaded rather than whatever was active a moment ago. `participantClaimable`
+   * is untouched - see `snapshotActiveOwnership`'s doc comment for why.
+   *
+   * **A shelved owner is only restored onto a participant that is currently
+   * claimable** (durable-rooms review round 8, item 2). `participantClaimable`
+   * is deliberately not shelved per room (see `snapshotActiveOwnership`), so
+   * it can legitimately be toggled off in a *different* room than the one
+   * whose ownership shelf still names an owner for that same character id -
+   * e.g. "Raven" claimed by a player in room A, then re-authored as a
+   * straight NPC (claimable off) while room B is active. Without this guard,
+   * switching back to A would reload `{Raven -> pl-1}` with
+   * `claimable === false`, a combination the rest of the app assumes cannot
+   * happen: the server's `releasePlayerClaims`/`release_claims` and the
+   * claim-request handler all gate on `claimable === true`
+   * (`server.js`), so a disconnecting or returning player could neither
+   * release nor reclaim it, leaving a permanently "Claimed" chip on a dead
+   * token clearable only by a manual Release. Skipping the entry here keeps
+   * the invariant "an owner implies claimable" true immediately after every
+   * room switch instead of only after the GM notices and manually releases
+   * it. The shelf entry itself is left alone - if claimable is switched back
+   * on later, the original owner reappears on the next switch into the room,
+   * matching the mis-tap-recovery guarantee the rest of this shelf gives.
+   */
+  private loadShelvedOwnership(room: string): void {
+    this.participantOwners.clear();
+    const snapshot = room ? this.ownershipByRoom.get(room) : undefined;
+    if (!snapshot) {
+      return;
+    }
+    for (const p of this.combatManager.participants.items) {
+      const ownerName = snapshot.get(this.getParticipantId(p));
+      if (ownerName && this.participantClaimable.get(p) === true) {
+        this.participantOwners.set(p, ownerName);
+      }
+    }
+  }
+
+  /**
+   * Shelve `room`'s currently-active hidden log entries (the GM-local subset
+   * of `sharedLogEntries` - see `getHiddenLogEntries`) under their own room
+   * key, mirroring `shelveActiveOwnership` exactly. A no-op for an empty room
+   * code. An empty snapshot removes any stale shelf entry rather than storing
+   * one, same reasoning as `shelveActiveOwnership`: a room with no hidden
+   * entries left as of this switch should not resurrect old ones on a later
+   * reload.
+   */
+  private shelveActiveHiddenLog(room: string): void {
+    if (!room) {
+      return;
+    }
+    const hidden = this.getHiddenLogEntries();
+    if (hidden.length === 0) {
+      this.hiddenLogEntriesByRoom.delete(room);
+      return;
+    }
+    this.hiddenLogEntriesByRoom.set(room, hidden);
+  }
+
+  /** `room`'s shelved hidden entries, or none if it has never held any. */
+  private loadShelvedHiddenLog(room: string): SharedLogEntry[] {
+    const shelved = room ? this.hiddenLogEntriesByRoom.get(room) : undefined;
+    return shelved ? [ ...shelved ] : [];
+  }
+
+  /**
+   * Switch which room the flat `participantOwners` map describes, from
+   * `activeOwnershipRoom` to `toRoom` (D-A, durable-rooms review round 7 -
+   * the fix for review defect D-A / "the class is relocated, not closed").
+   * `participantClaimable` is never switched - see `snapshotActiveOwnership`'s
+   * doc comment.
+   *
+   * This is the one place ownership becomes representable per room instead of
+   * being a single global the next room switch either destroys or
+   * mis-attributes: shelve whatever is currently active under its own room
+   * code (so a later switch back finds it again - the mis-tap recovery the
+   * Create Player Session dialog promises), then load `toRoom`'s own shelf (or
+   * nothing, if `toRoom` has never been active before - "the new room simply
+   * has no ownership yet", exactly as the spec requires, with the previous
+   * room's ownership left completely alone).
+   *
+   * A no-op when `toRoom` already **is** `activeOwnershipRoom` - not merely an
+   * optimisation. Without this guard a room that is still active (its
+   * ownership was never shelved out, e.g. `shareRoomCode` was blanked by a
+   * Close without ever switching which room's ownership is active - see
+   * `activeOwnershipRoom`'s doc comment) would have its own, still-correct
+   * content shelved into itself and then immediately reloaded from an empty
+   * shelf, silently wiping every current owner.
+   *
+   * Callers pass only the target room; `activeOwnershipRoom` is the
+   * authoritative "from" so it can never drift out of sync with what the map
+   * actually holds, the way tracking it via a second local variable at each
+   * call site could.
+   *
+   * **Also switches GM-local hidden log entries** (durable-rooms review
+   * round 8, item 3), reusing this exact seam rather than a second one: every
+   * caller of this method calls `mergeHiddenLogEntries()` immediately
+   * afterward, so `sharedLogEntries`'s hidden subset must already be
+   * `toRoom`'s own by the time that merge runs, or a hidden note written
+   * while `activeOwnershipRoom` was some other room rides along into
+   * `toRoom`'s merged log - see `hiddenLogEntriesByRoom`'s doc comment for
+   * the full repro this closes.
+   */
+  private switchActiveOwnershipRoom(toRoom: string): void {
+    if (toRoom === this.activeOwnershipRoom) {
+      return;
+    }
+    this.shelveActiveOwnership(this.activeOwnershipRoom);
+    // `activeOwnershipRoom` only ever reads "" before this tab's very first
+    // room switch - it is set to a real room code below and, unlike
+    // `shareRoomCode`, is never blanked again afterward (see its doc
+    // comment), so "" here can only mean this tab has not yet associated
+    // `sharedLogEntries` with any room at all. Any hidden entries sitting in
+    // it are therefore unscoped, not room B's leftovers - swapping them out
+    // for `toRoom`'s (likely nonexistent) shelf would silently discard
+    // hidden notes a GM wrote before ever creating or joining a room, which
+    // is exactly what a plain, pre-round-8 fresh tab used to carry through
+    // to its first join. Only swap the hidden-entry pool once there is an
+    // actual previous room to shelve it under.
+    if (this.activeOwnershipRoom) {
+      this.shelveActiveHiddenLog(this.activeOwnershipRoom);
+      this.sharedLogEntries = this.reseedLogOrder(this.loadShelvedHiddenLog(toRoom));
+    }
+    this.loadShelvedOwnership(toRoom);
+    this.activeOwnershipRoom = toRoom;
+  }
+
+  /**
    * Has this tab's on-screen encounter drifted far enough from `room`'s
    * fingerprint that a blind push (`holdsLiveEncounterFor()` says yes) would
    * actually be a silent, undetected overwrite of that room's real saved
@@ -1131,13 +1463,18 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * refusing to push on missing evidence would regress the ordinary
    * mis-tap-and-immediately-recover case (round-3 fix 6) that gave no reason
    * to doubt the association in the first place. Otherwise "diverged" means
-   * **zero** participant IDs survive in common with what was fingerprinted
-   * "as when the room was joined/created" (spec wording, not a continuously
-   * rolling window - see `liveEncounterFingerprints`): ordinary play, adding
-   * or removing individual participants from the *same* fight, always leaves
-   * at least one survivor. Only a wholesale cast swap zeroes it out, and that
-   * is deliberately the only thing this catches - the threshold is a judgment
-   * call, documented here per the review defect.
+   * **zero** participant IDs survive in common with the fingerprint -
+   * `liveEncounterFingerprints` is refreshed on every successful push
+   * (`syncSharedState()`, round 5, fixing Symptom C), not frozen "as when the
+   * room was joined/created" (D-E, durable-rooms review round 7: this comment
+   * and `liveEncounterFingerprints`'s own doc comment used to say the
+   * opposite, each citing the other as the reason) - so ordinary play, adding
+   * or removing individual participants from the *same* fight over however
+   * long a session, always leaves at least one survivor no matter how long
+   * ago the room was joined or created. Only a wholesale cast swap with no
+   * push in between zeroes it out, and that is deliberately the only thing
+   * this catches - the threshold is a judgment call, documented here per the
+   * review defect.
    */
   private liveEncounterDivergedFrom(room: string): boolean {
     const fingerprint = this.liveEncounterFingerprints.get(room);
@@ -1199,46 +1536,95 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.shareError = "Enter a room code to join.";
       return;
     }
-    const pushLocalState = this.holdsLiveEncounterFor(room);
-    if (!pushLocalState && !await this.confirmDestructiveJoin(room)) {
+    // The room this tab is currently connected to and broadcasting for, if
+    // any - captured before anything below can change it, so every
+    // abandonment path in this method can name it and, where possible,
+    // restore it (review defect D1, durable-rooms review round 6).
+    const previousRoom = this.shareRoomCode;
+    let pushLocalState = this.holdsLiveEncounterFor(room);
+    if (pushLocalState && this.liveEncounterDivergedFrom(room)) {
+      // Checked BEFORE any server-side room switch (review defect D1): the
+      // old code called `sessionSync.joinAsGm(room)` first - which detaches
+      // this socket from `previousRoom` server-side and broadcasts
+      // `session:gm-presence {connected: false}` to it - and only discovered
+      // the divergence afterward, by which point `previousRoom` had already
+      // been silently abandoned with zero confirmation and zero recovery
+      // (live-reproduced: run room B for an hour with a different cast, then
+      // type room A's old code back in; the tab ended up connected to
+      // neither, with `shareRoomCode` cleared and every later broadcast
+      // silently discarded). Deciding here means a refused join never touches
+      // this tab's connection at all.
+      if (!await this.confirmDivergedJoin(room, previousRoom)) {
+        return; // nothing touched - whatever this tab was connected to still is
+      }
+      // GM chose to proceed anyway: drop the stale association and fall
+      // through to the ordinary destructive-pull confirmation/flow below,
+      // which has its own, more detailed warning about what pulling
+      // discards.
+      this.liveEncounterRooms.delete(room);
+      this.liveEncounterFingerprints.delete(room);
+      pushLocalState = false;
+    }
+    // D-B, durable-rooms review round 7: the abandonment warning below used to
+    // fire only on the pull path (`!pushLocalState`) - `confirmDestructiveJoin`
+    // was never even called when this tab already held the target room's live
+    // encounter, so rejoining a room the tab holds while a *different* room
+    // (`previousRoom`) is the one actually connected abandoned that room with
+    // zero confirmation: the server detaches the socket from it and broadcasts
+    // `session:gm-presence {connected: false}` the instant `joinAsGm` below
+    // succeeds. Nothing local is at risk on a push - the encounter itself is
+    // never confirmed - but abandoning a *different* room's players is a real
+    // consequence regardless of which path gets there, so every join path that
+    // can abandon a room now confirms it.
+    if (pushLocalState && previousRoom && previousRoom !== room
+      && !await this.confirmAbandonPreviousRoom(room, previousRoom)) {
+      return;
+    }
+    if (!pushLocalState && !await this.confirmDestructiveJoin(room, previousRoom)) {
       return;
     }
     try {
       this.sessionSync.connect();
       const { state, log } = await this.sessionSync.joinAsGm(room);
-      // Ownership is not really this tab's authoritative state at all - it is
-      // decided collaboratively by players claiming/releasing through the
-      // server, and the server can strip a claim (a disconnect, a Close/End
-      // evacuation) without this tab ever hearing about it if it was not
-      // connected at that moment. Reconcile the local cache from the server's
-      // returned copy on every (re)join, before deciding push or pull, so a
-      // stale local owner can never be re-asserted by a push (durable-rooms
-      // review round 5, Symptom A) - see `reconcileOwnershipFromServer()`.
-      this.reconcileOwnershipFromServer(state);
       if (pushLocalState) {
         if (this.liveEncounterDivergedFrom(room)) {
-          // Round-4 fix D6: see `liveEncounterDivergedFrom()`. Nothing this
-          // tab still recognises survives from what was fingerprinted when it
-          // last became this room's live truth, so the stale association is
-          // dropped and the join is abandoned outright - see the doc comment
-          // above for why this must not leave the tab half-connected.
-          this.sessionSync.disconnect();
-          // Explicit, not merely "never assigned": `gm:join-session` already
-          // switched this socket server-side before this check ran, so
-          // whatever room this tab's connection belonged to before this call
-          // is already gone either way - resetting `shareRoomCode` makes that
-          // fact visible instead of leaving stale bookkeeping that says
-          // otherwise.
-          this.shareRoomCode = "";
+          // Defensive backstop only (durable-rooms review round 6): the
+          // pre-check above already refuses a diverged join before this
+          // point is ever reached in practice. If it is somehow still
+          // reached, do not repeat the old bug of leaving the tab fully
+          // disconnected with `previousRoom` abandoned and no recovery -
+          // reclaim it the same way the OOC-only branch below does. Ownership
+          // is untouched here on purpose: `switchActiveOwnershipRoom` has not
+          // been called yet, so the active maps still describe whichever room
+          // this tab was actually running, exactly what `restorePreviousRoomConnection`
+          // (inside `abandonJoinAndRestore`) needs them to (D-A, durable-rooms
+          // review round 7).
+          await this.abandonJoinAndRestore(room, previousRoom,
+            `Room ${room}'s saved encounter no longer matches what this tab is showing`);
           this.liveEncounterRooms.delete(room);
           this.liveEncounterFingerprints.delete(room);
-          this.shareInfo = `Room ${room}'s saved encounter no longer matches what this tab is showing - `
-            + "this tab looks like it has become a different encounter since. Nothing was sent to the "
-            + `room and nothing here was changed, and this tab is not connected to room ${room}. Rejoin `
-            + `${room} again to pull its saved encounter instead, or use "End Room" if you meant to `
-            + "replace it.";
+          this.ownershipByRoom.delete(room);
+          this.hiddenLogEntriesByRoom.delete(room);
           return;
         }
+        // Ownership becomes this room's before anything is reconciled or
+        // pushed (D-A, durable-rooms review round 7): shelve whatever was
+        // active (`previousRoom`, if this tab was running a different one)
+        // and load `room`'s own shelf, so the reconcile below corrects the
+        // *right* room's cache and the push after it can never carry a
+        // different room's owners. See `switchActiveOwnershipRoom`'s doc
+        // comment for the full model this closes.
+        this.switchActiveOwnershipRoom(room);
+        // Ownership is not really this tab's authoritative state at all - it
+        // is decided collaboratively by players claiming/releasing through
+        // the server, and the server can strip a claim (a disconnect, a
+        // Close/End evacuation) without this tab ever hearing about it if it
+        // was not connected at that moment. Reconcile the local cache from
+        // the server's returned copy for `room` now that the active maps
+        // describe `room`, so a stale local owner can never be re-asserted by
+        // the push below (durable-rooms review round 5, Symptom A) - see
+        // `reconcileOwnershipFromServer()`.
+        this.reconcileOwnershipFromServer(state);
         // Still the live encounter for every code it was already live for,
         // plus this one (round-3 fix 6).
         this.shareRoomCode = room;
@@ -1250,8 +1636,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         this.attachShareListeners();
         this.markRoomLive(room);
         this.syncSharedState();
-        this.shareInfo = `Rejoined session ${room} with this tab's live encounter - `
-          + "nothing was replaced, and players are back in sync.";
+        this.shareInfo = previousRoom && previousRoom !== room
+          ? `Rejoined session ${room} with this tab's live encounter - nothing was replaced, and players `
+            + `are back in sync. This tab has stopped broadcasting to room ${previousRoom}; rejoin that `
+            + "code to resume it."
+          : `Rejoined session ${room} with this tab's live encounter - `
+            + "nothing was replaced, and players are back in sync.";
         return;
       }
       if (this.snapshotHasEncounter(state)) {
@@ -1264,19 +1654,33 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           // saved fight on the very next click (round-3 fix 5's original bug,
           // reopened by round-3/4's "warn once, then leave the tab connected
           // anyway" shape - durable-rooms review round 5, Symptom B, "the
-          // round-3 OOC-only branch has the same shape").
+          // round-3 OOC-only branch has the same shape" - and, per review
+          // round 6, reachable from a room this tab was actively running,
+          // which must not be silently abandoned by discovering that).
           const ooc = this.snapshotOocCount(state);
-          this.sessionSync.disconnect();
-          this.shareRoomCode = ""; // explicit, not merely unassigned - see the diverged branch above
-          this.shareInfo = `Room ${room}'s saved encounter is ${ooc} `
-            + `participant${ooc === 1 ? "" : "s"} out of action, which are not broadcast and cannot be `
-            + `restored - nothing here was replaced, nothing was sent to the room, and this tab is not `
-            + `connected to room ${room}. Rejoin ${room} to try again.`;
+          await this.abandonJoinAndRestore(room, previousRoom,
+            `Room ${room}'s saved encounter is ${ooc} participant${ooc === 1 ? "" : "s"} out of action, `
+            + "which are not broadcast and cannot be restored");
           return;
         }
         this.shareRoomCode = room;
         this.shareConnectionLost = false;
         this.restoreWarning = "";
+        // This branch rebuilds ownership straight from the server's copy
+        // (`restoreFromSharedState`, below) rather than through
+        // `switchActiveOwnershipRoom`, so it has to load `room`'s own shelved
+        // hidden entries the same way here explicitly - otherwise whatever
+        // room was active before this pull is still what `sharedLogEntries`
+        // describes, and `mergeHiddenLogEntries` would fold *that* room's
+        // hidden notes into `room`'s merged log (durable-rooms review round
+        // 8, item 3). Same "" guard as `switchActiveOwnershipRoom`: skip the
+        // swap while no room has ever been tracked yet, so a hidden entry
+        // written before this tab's very first join still merges into it
+        // rather than being silently discarded in favor of `room`'s
+        // (nonexistent) shelf.
+        if (this.activeOwnershipRoom) {
+          this.sharedLogEntries = this.reseedLogOrder(this.loadShelvedHiddenLog(room));
+        }
         this.sharedLogEntries = this.mergeHiddenLogEntries(log || []);
         this.clearSharedLogDecodeAnimations();
         this.pendingLogScroll = true;
@@ -1296,6 +1700,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // and push what this tab has: the join already made this tab the live
       // encounter for that code, and without a push the room would keep
       // showing players its empty snapshot until the GM's next click.
+      //
+      // This room is new to this tab's ownership too - exactly the "new room
+      // has no ownership yet" case `switchActiveOwnershipRoom` handles for
+      // Create Player Session, reused here for the same reason (D-A,
+      // durable-rooms review round 7): whatever was active for `previousRoom`
+      // is shelved, not destroyed, so rejoining `previousRoom` later still
+      // recovers it.
+      this.switchActiveOwnershipRoom(room);
       this.shareRoomCode = room;
       this.shareConnectionLost = false;
       this.restoreWarning = "";
@@ -1341,16 +1753,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * in which case the local cache - not the stale wire copy - is correct.
    * `participantClaimable` itself is never touched here for the same reason:
    * the server never mutates it independently.
+   *
+   * **Covers OOC participants too** (review defect D2, durable-rooms review
+   * round 6). `state.participants` used to never include anyone currently OOC
+   * at all, so this method used to `continue` past every out-of-action
+   * participant with "not on the wire - nothing to reconcile against" -
+   * which is exactly backwards for ownership: a claimed character going OOC
+   * is the common case a release needs to survive (a downed PC, closed and
+   * rejoined days later, then revived). A **claimable** OOC participant is
+   * now in `state.participants` directly (GM decision, durable-rooms
+   * follow-up), so `byId` already covers that case; `oocById` -
+   * `state.oocOwnership`, the minimal ownership-only shadow - remains the
+   * fallback for the narrower case that overlap does not close (an
+   * out-of-action participant owned but not currently claimable - see
+   * `isClaimableOrOwnedOoc`'s doc comment) and for older/malformed wire data.
+   * See its doc comment in `session-sync.service.ts`.
    */
   private reconcileOwnershipFromServer(state: SharedCombatState | null): void {
     if (!state || !Array.isArray(state.participants)) {
       return;
     }
     const byId = new Map<string, SharedParticipantState>(state.participants.map(sp => [ sp.id, sp ]));
+    const oocById = new Map<string, { ownerName?: string }>(
+      (Array.isArray(state.oocOwnership) ? state.oocOwnership : []).map(o => [ o.id, o ])
+    );
     for (const p of this.combatManager.participants.items) {
-      const sp = byId.get(this.getParticipantId(p));
+      const sp = byId.get(this.getParticipantId(p)) || oocById.get(this.getParticipantId(p));
       if (!sp) {
-        continue; // not on the wire (OOC, or genuinely new locally) - nothing to reconcile against
+        continue; // genuinely new locally, or OOC and never claimed/claimable - nothing to reconcile against
       }
       const localOwner = this.participantOwners.get(p);
       if (localOwner && !sp.ownerName) {
@@ -1360,7 +1790,50 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * Ask before a Join replaces what is on this screen (spec AC 15).
+   * Ask before a push-path Join abandons a *different* room this tab is
+   * currently connected to and broadcasting for (D-B, durable-rooms review
+   * round 7 - fixes the gap review defect D1 (round 6) closed only for the
+   * pull path).
+   *
+   * Nothing local is at risk on a push - the encounter itself is never
+   * confirmed, `confirmDestructiveJoin` below owns that warning - but
+   * abandonment is a real consequence regardless of which path gets there:
+   * the server detaches this socket from `previousRoom` the instant
+   * `sessionSync.joinAsGm(room)` succeeds and broadcasts `session:gm-presence
+   * {connected: false}` to it. D1's original repro was reproducible again
+   * here with a one-word change to the steps ("holds the live encounter for"
+   * instead of "does not hold it for"): `holdsLiveEncounterFor(room)` reading
+   * true made `btnJoinShareSession_Click` skip `confirmDestructiveJoin`
+   * entirely, so a GM running room B who rejoined room A by typing its old
+   * code back in (A still `holdsLiveEncounterFor`, per round-3 fix 6's
+   * additive membership) abandoned B with zero confirmation and zero warning.
+   *
+   * Returns true when the join may proceed. Only called when
+   * `previousRoom && previousRoom !== room` - a push into the room already
+   * running, or from a tab connected to nothing, abandons nothing and is
+   * never prompted.
+   */
+  private async confirmAbandonPreviousRoom(room: string, previousRoom: string): Promise<boolean> {
+    const confirmed = await this.confirmationDialog.confirm(
+      `This tab is currently running room ${previousRoom}: joining ${room} disconnects this tab from it `
+      + `immediately, and anyone still in ${previousRoom} sees no GM connected. Room ${previousRoom} itself `
+      + "is kept regardless of what happens here, and rejoining that code brings it back - nothing on this "
+      + `screen is at risk from this join, since this tab already holds room ${room}'s own live encounter.`,
+      `Leave room ${previousRoom} and join ${room}?`,
+      "Leave and Join",
+      "Cancel"
+    );
+    if (!confirmed) {
+      this.shareInfo = `Kept room ${previousRoom} running; did not join ${room}.`;
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Ask before a Join replaces what is on this screen (spec AC 15), and before
+   * it abandons a *different* room this tab is currently connected to and
+   * broadcasting for (review defect D1, durable-rooms review round 6).
    *
    * A pull runs `restoreFromSharedState()`, which clears both participant lists
    * and all eight side-maps, rebuilds from the lossy server snapshot and calls
@@ -1369,11 +1842,22 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * irreversibly, on one tap of a button sitting next to a text box. Naming the
    * count is the difference between "are you sure" and an informed answer.
    *
-   * Returns true when the join may proceed. An empty tab is never prompted:
-   * there is nothing to lose, and a prompt on every fresh join would train the
-   * GM to dismiss it.
+   * `previousRoom` is `shareRoomCode` as it stood before this join attempt -
+   * the room whose players stop receiving updates the instant
+   * `sessionSync.joinAsGm(room)` succeeds, because the server detaches this
+   * socket from it (`detachSocketFromPreviousRoom`, `server.js`). D1's repro
+   * had no warning at all naming that room: this dialog is the one place every
+   * `!pushLocalState` join path in `btnJoinShareSession_Click` runs through, so
+   * it is also the one place that abandonment can be named unconditionally,
+   * even when nothing local is at risk. **The push path has its own,
+   * lighter-weight version of the same warning** (D-B, round 7):
+   * `confirmAbandonPreviousRoom`, above.
+   *
+   * Returns true when the join may proceed. An empty tab with no other room to
+   * abandon is never prompted: there is nothing to lose, and a prompt on every
+   * fresh join would train the GM to dismiss it.
    */
-  private async confirmDestructiveJoin(room: string): Promise<boolean> {
+  private async confirmDestructiveJoin(room: string, previousRoom: string): Promise<boolean> {
     // Round-4 fix D5: a literal `.length === 0` check could only ever fire in
     // a test whose fixture had been emptied after the constructor ran - the
     // constructor's own `addParticipant()` (see below) means a real app
@@ -1382,31 +1866,210 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // touched. `isUnusedPlaceholder` treats that row the same as empty.
     const atRisk = this.combatManager.participants.items.filter(p => !this.isUnusedPlaceholder(p));
     const count = atRisk.length;
-    if (count === 0) {
+    const abandonsPrevious = !!previousRoom && previousRoom !== room;
+    if (count === 0 && !abandonsPrevious) {
       return true;
     }
-    // Whether the pull actually replaces anything depends on the target room's
-    // snapshot, which this tab cannot see until after `joinAsGm` - and joining
-    // first to find out would abandon the current room server-side before the
-    // GM had agreed to anything. So the dialog is honest about the condition
-    // instead of promising a discard that `restoreFromSharedState`'s
-    // empty-snapshot no-op may never perform (review defect D4).
+    const parts: string[] = [];
+    if (abandonsPrevious) {
+      parts.push(`This tab is currently running room ${previousRoom}: joining ${room} disconnects this tab `
+        + `from it immediately, and anyone still in ${previousRoom} sees no GM connected. Room ${previousRoom} `
+        + `itself is kept regardless of what happens here, and rejoining that code brings it back.`);
+    }
+    if (count > 0) {
+      // Whether the pull actually replaces anything depends on the target
+      // room's snapshot, which this tab cannot see until after `joinAsGm` -
+      // and joining first to find out would abandon the current room
+      // server-side before the GM had agreed to anything. So the dialog is
+      // honest about the condition instead of promising a discard that
+      // `restoreFromSharedState`'s empty-snapshot no-op may never perform
+      // (review defect D4).
+      parts.push(`Joining room ${room} replaces this tab's encounter with that room's last saved broadcast. `
+        + `If that room has a saved encounter, ${count} participant${count === 1 ? "" : "s"} on screen `
+        + `${count === 1 ? "is" : "are"} discarded, along with damage and condition monitors, anyone `
+        + "out of action, committed interrupt actions and the undo history. This cannot be undone. "
+        + `If room ${room} turns out to have no saved encounter, nothing is replaced and this tab keeps `
+        + "what it has.");
+    }
     const confirmed = await this.confirmationDialog.confirm(
-      `Joining room ${room} replaces this tab's encounter with that room's last saved broadcast. `
-      + `If that room has a saved encounter, ${count} participant${count === 1 ? "" : "s"} on screen `
-      + `${count === 1 ? "is" : "are"} discarded, along with damage and condition monitors, anyone `
-      + "out of action, committed interrupt actions and the undo history. This cannot be undone. "
-      + `If room ${room} turns out to have no saved encounter, nothing is replaced and this tab keeps `
-      + "what it has.",
-      `Replace this encounter with room ${room}?`,
+      parts.join(" "),
+      `Join room ${room}?`,
       "Discard and Join",
       "Cancel"
     );
     if (!confirmed) {
-      this.shareInfo = `Kept this tab's encounter; did not join ${room}.`;
+      this.shareInfo = `Kept this tab's encounter; did not join ${room}.`
+        + (abandonsPrevious ? ` Room ${previousRoom} is untouched and this tab is still connected to it.` : "");
       return false;
     }
     return true;
+  }
+
+  /**
+   * The join box names a room this tab still thinks it holds the live
+   * encounter for (`liveEncounterRooms` has it), but the on-screen cast has
+   * since diverged from what was fingerprinted when that association was made
+   * (`liveEncounterDivergedFrom`) - review defect D1 (durable-rooms review
+   * round 6).
+   *
+   * Left unchecked, `holdsLiveEncounterFor(room)` reading true meant this path
+   * used to skip confirmation altogether - a diverged join went straight to
+   * `sessionSync.joinAsGm(room)` with zero friction, which is exactly the
+   * "typed the old room code back in by mistake" blunder the review
+   * reproduced: the server had already detached this socket from whatever
+   * room it was running (and broadcast `session:gm-presence {connected:
+   * false}` to it) before the code even noticed the divergence.
+   *
+   * Called BEFORE any server-side room switch. Nothing about this tab's
+   * connection changes while the dialog is open or if it is cancelled -
+   * whatever room this tab was running keeps running, completely untouched,
+   * because `sessionSync.joinAsGm` is never called on that path.
+   *
+   * @returns true to mean "drop the stale association and continue as an
+   *   ordinary destructive pull" - the caller then runs
+   *   `confirmDestructiveJoin`, which has its own, more detailed warning
+   *   about what pulling discards. false to mean "leave everything exactly
+   *   as it is".
+   */
+  private async confirmDivergedJoin(room: string, previousRoom: string): Promise<boolean> {
+    const stillRunning = previousRoom && previousRoom !== room
+      ? ` This tab is still connected to and broadcasting room ${previousRoom} - that connection is `
+        + "untouched no matter what you choose here."
+      : "";
+    const confirmed = await this.confirmationDialog.confirm(
+      `Room ${room} used to be this tab's own live encounter, but what is on screen no longer matches it - `
+      + `this tab has moved on to a different cast since. Pushing now would silently overwrite room ${room}'s `
+      + `real saved state with an unrelated encounter, so nothing has been sent.${stillRunning} To bring in `
+      + `room ${room}'s actual saved encounter instead, continue - you will be asked to confirm discarding `
+      + "what is on this screen first, the same as joining any other room.",
+      `Room ${room} has diverged from this tab`,
+      `Continue to Join Room ${room}`,
+      "Stay As-Is"
+    );
+    if (!confirmed) {
+      this.shareError = `Did not join ${room}: its last-known saved state no longer matches what this tab is `
+        + `showing.${stillRunning}`;
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Reconnect this tab to `previousRoom` after a join to a different room had
+   * to be abandoned before it could complete (review defect D1, durable-rooms
+   * review round 6).
+   *
+   * `sessionSync.joinAsGm(room)` has, by the time any caller of this method
+   * runs, already succeeded server-side - which means the server has already
+   * detached this socket from `previousRoom` (`detachSocketFromPreviousRoom`)
+   * and broadcast `session:gm-presence {connected: false}` to it. Discovering
+   * *afterward* that there was nothing useful to pull (the OOC-only branch in
+   * `btnJoinShareSession_Click`) used to leave the tab fully disconnected with
+   * no attempt to reclaim what it had been running - exactly the "abandoned
+   * with zero recovery" defect this method exists to close. Reclaiming here is
+   * byte-for-byte the same push a manual rejoin of that code performs:
+   * re-authenticate, reconcile ownership from the server's copy, resume
+   * broadcasting.
+   *
+   * Only ever called with a `previousRoom` this tab still
+   * `holdsLiveEncounterFor` - the on-screen encounter is untouched by every
+   * caller of this method, so if that was true before the abandoned join it is
+   * still true now.
+   *
+   * @returns `{ ok: true }` if the reconnect succeeded; `{ ok: false, reason }`
+   *   otherwise, `reason` being why (minor fix, durable-rooms review round 7 -
+   *   the previous bare `catch { return false }` discarded it, so the caller's
+   *   banner could say only that the reconnect failed, never why).
+   */
+  private async restorePreviousRoomConnection(previousRoom: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    try {
+      const { state } = await this.sessionSync.joinAsGm(previousRoom);
+      // D-A, durable-rooms review round 7: ownership for `previousRoom` was
+      // never switched away (this method's own doc comment - the on-screen
+      // encounter, and therefore the active ownership maps, are untouched by
+      // every caller), so reconciling in place is correct with no
+      // `switchActiveOwnershipRoom` call needed here.
+      this.reconcileOwnershipFromServer(state);
+      this.shareRoomCode = previousRoom;
+      // Minor fix (durable-rooms review round 7): without this, the join box
+      // still shows the room code that was just declined/abandoned, so a
+      // reflexive second tap of Join Session re-runs the very path that
+      // failed instead of a harmless no-op rejoin of the room this tab is
+      // actually now back in.
+      this.shareJoinCode = previousRoom;
+      this.shareConnectionLost = false;
+      this.attachShareListeners();
+      this.markRoomLive(previousRoom);
+      this.syncSharedState();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : "Unable to reconnect." };
+    }
+  }
+
+  /**
+   * Common failure path for a join that reached the server - so this tab's
+   * connection has already switched away from `previousRoom` - but turned out
+   * to have nothing worth pulling: an OOC-only saved encounter, or (as a
+   * defensive backstop) a divergence that slipped past `confirmDivergedJoin`'s
+   * pre-check. Review defect D1, durable-rooms review round 6.
+   *
+   * Never leaves the tab silently disconnected. If this tab still holds the
+   * live encounter for `previousRoom`, it is reclaimed exactly as a manual
+   * rejoin of that code would (`restorePreviousRoomConnection`); the outcome
+   * decides whether the banner reports a clean, automatic recovery or an
+   * unmistakable, error-level warning naming both rooms with a safe, correct
+   * recovery action - never the destructive "rejoin to pull" advice the
+   * review found this path giving before.
+   *
+   * When there is no `previousRoom` to abandon (a fresh tab, or rejoining the
+   * very room just declined), nothing was lost by this attempt beyond a wasted
+   * click, so the notice stays informational rather than an error.
+   */
+  private async abandonJoinAndRestore(room: string, previousRoom: string, why: string): Promise<void> {
+    const abandoning = !!previousRoom && previousRoom !== room;
+    // Try to reclaim `previousRoom` on the *existing* transport before ever
+    // tearing anything down - `restorePreviousRoomConnection` just
+    // re-authenticates the same live socket to a different room, the same
+    // way a manual rejoin of that code would. Calling `sessionSync.disconnect()`
+    // unconditionally first (an earlier version of this fix did) worked, but
+    // only by closing a socket that was still perfectly good and opening a
+    // brand new one to replace it - observably different from "nothing about
+    // this tab's connection changes", and a strictly worse bet if the network
+    // is flaky right now.
+    if (abandoning && this.holdsLiveEncounterFor(previousRoom)) {
+      const restored = await this.restorePreviousRoomConnection(previousRoom);
+      if (restored.ok) {
+        this.shareError = `${why} - nothing here was replaced and nothing was sent to room ${room}. This tab `
+          + `has been reconnected to room ${previousRoom}, which is running again and back in sync with `
+          + "players.";
+        return;
+      }
+      // The reconnect attempt itself failed (a genuine network problem) -
+      // now this tab really is disconnected from everything, and must say so.
+      this.sessionSync.disconnect();
+      this.shareRoomCode = "";
+      this.shareConnectionLost = true;
+      this.shareError = `${why} - nothing here was replaced and nothing was sent to room ${room}. This tab `
+        + `could NOT automatically reconnect to room ${previousRoom} (${restored.reason}), which it was `
+        + `running before this join attempt - players there are NOT receiving updates. Re-enter `
+        + `${previousRoom} in the join box and press Join Session to resume it.`;
+      return;
+    }
+    // Nothing (usable) to reclaim: either this tab was not running a
+    // different room at all, or it was but no longer holds that room's live
+    // encounter (e.g. a pull replaced it in between). Either way there is
+    // nothing left to restore, so tear the transport down cleanly.
+    this.sessionSync.disconnect();
+    this.shareRoomCode = "";
+    if (!abandoning) {
+      this.shareInfo = `${why} - nothing here was replaced, nothing was sent to the room, and this tab is `
+        + `not connected to room ${room}. Rejoin ${room} to try again.`;
+      return;
+    }
+    this.shareError = `${why} - nothing here was replaced and nothing was sent to room ${room}. This tab is `
+      + `no longer connected to room ${previousRoom} either. Re-enter ${previousRoom} in the join box and `
+      + "press Join Session if it still holds an encounter worth resuming.";
   }
 
   /**
@@ -1450,32 +2113,42 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // Reaction/Intuition and a 12-box Condition Monitor were set before its
     // name was typed compared as "still a placeholder" and was silently
     // discarded on a destructive Join with no prompt (live-reproduced).
-    // Diffing against a reference instance means a new `Participant` field
-    // added later is covered automatically, with no second list to update.
-    // `sortOrder` is deliberately excluded: `CombatManager.addParticipant()`
-    // stamps it from an incrementing counter purely by row position, so even
-    // an untouched *second* blank row never matches a fresh reference's
-    // `sortOrder` of 0 - including it would make every blank row after the
-    // first warn, which is exactly the false alarm round-4 fix D5 exists to
-    // prevent.
+    //
+    // **Actually iterates `PARTICIPANT_BASE_BACKING_FIELDS`** (review defect
+    // D4, durable-rooms review round 6) rather than repeating P2-2's mistake
+    // one level up: the P2-2 fix already claimed "a new field added later is
+    // covered automatically", but the code beneath that comment was still a
+    // hand-picked list of fifteen named comparisons - true of every field that
+    // existed at the time it was written, false of the very next field added
+    // to `Participant` that this function's author does not also remember to
+    // add here. `PARTICIPANT_BASE_BACKING_FIELDS` (`Participant.ts`) is the
+    // single list `MatrixParticipant.clone()`/`AstralParticipant.clone()`/the
+    // promote-demote helpers already trust for exactly this "stay in sync
+    // with the class" property, so reusing it here makes the claim true
+    // rather than merely stating it.
     const ref = new Participant();
-    const fieldsMatch = p.name === ref.name
-      && p.physicalDamage === ref.physicalDamage
-      && p.stunDamage === ref.stunDamage
-      && p.dices === ref.dices
-      && p.diceIni === ref.diceIni
-      && p.ooc === ref.ooc
-      && p.edge === ref.edge
-      && p.hasPainEditor === ref.hasPainEditor
-      && p.actionHistory.length === ref.actionHistory.length
-      && p.baseIni === ref.baseIni
-      && p.physicalHealth === ref.physicalHealth
-      && p.stunHealth === ref.stunHealth
-      && p.overflowHealth === ref.overflowHealth
-      && p.painTolerance === ref.painTolerance
-      && p.status === ref.status
-      && p.waiting === ref.waiting;
-    if (!fieldsMatch) {
+    const pFields = p as unknown as Record<string, unknown>;
+    const refFields = ref as unknown as Record<string, unknown>;
+    for (const f of PARTICIPANT_BASE_BACKING_FIELDS) {
+      if (f === PLACEHOLDER_SORT_ORDER_FIELD) {
+        // Deliberately excluded: `CombatManager.addParticipant()` stamps
+        // `_sortOrder` from an incrementing counter purely by row position, so
+        // even an untouched *second* blank row never matches a fresh
+        // reference's `sortOrder` of 0 - including it would make every blank
+        // row after the first warn, which is exactly the false alarm round-4
+        // fix D5 exists to prevent.
+        continue;
+      }
+      if (pFields[f] !== refFields[f]) {
+        return false;
+      }
+    }
+    // `_actionHistory` is deliberately absent from `PARTICIPANT_BASE_BACKING_FIELDS`
+    // - `clone()` always resets it to `[]` rather than copying, since a clone
+    // is a fresh participant, not a continuation of committed interrupt costs
+    // - so the loop above cannot cover it. A placeholder cares about it
+    // directly: any committed interrupt action disqualifies the row.
+    if (p.actionHistory.length !== ref.actionHistory.length) {
       return false;
     }
     // Side-maps a GM can set before ever typing a name: a typed Edge/
@@ -1503,12 +2176,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    *
    * Deliberately **not** the same question as "will `restoreFromSharedState()`
    * rebuild anything" (review defect D4 read them as one; round-3 fix 5 splits
-   * them). A room whose every participant is out of action broadcasts
-   * `participants: []`, because `getSharedParticipants()` filters OOC out - so a
-   * real, saved, fully-incapacitated encounter looked content-free, and the
-   * Join's empty-snapshot branch pushed this tab's encounter straight over it.
-   * `oocParticipantCount` is on the wire precisely so that room still counts as
-   * occupied here.
+   * them). A room whose every participant is out of action **and non-claimable**
+   * broadcasts `participants: []`, because `getSharedParticipants()` withholds
+   * exactly that subset (a claimable OOC participant is on the wire regardless -
+   * GM decision, durable-rooms follow-up) - so a real, saved, fully-incapacitated
+   * NPC-only encounter looked content-free, and the Join's empty-snapshot branch
+   * pushed this tab's encounter straight over it. `oocParticipantCount` is on
+   * the wire precisely so that room still counts as occupied here.
    *
    * This is the persistence/overwrite guard only. The combat log and the rest of
    * the UI still exclude OOC participants from "active participants" on purpose,
@@ -1522,7 +2196,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return listed > 0 || this.snapshotOocCount(state) > 0;
   }
 
-  /** Participants held by a room but withheld from its broadcast as OOC. */
+  /**
+   * Participants held by a room but withheld from its broadcast as
+   * (non-claimable) OOC - see `SharedCombatState.oocParticipantCount`'s doc
+   * comment for why a claimable one is not counted here.
+   */
   private snapshotOocCount(state: SharedCombatState | null): number {
     const raw = Number(state?.oocParticipantCount ?? 0);
     return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
@@ -1696,6 +2374,21 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // fix 6) is untouched by ending this one.
       this.liveEncounterRooms.delete(room);
       this.liveEncounterFingerprints.delete(room);
+      // Its shelved ownership goes with it (D-A, durable-rooms review round
+      // 7): the room is permanently destroyed, so nothing will ever
+      // `switchActiveOwnershipRoom(room)` again to read this shelf entry back.
+      // Deliberately not touched on an ordinary Close (`discardHiddenEntries`
+      // false): the room is kept and still rejoinable, and if this room's
+      // ownership happens to be the *active* maps right now (nothing switched
+      // it away), it is still correct in memory and needs no shelving at all -
+      // see `activeOwnershipRoom`'s doc comment for why that can be true even
+      // though `shareRoomCode` is about to be blanked below.
+      this.ownershipByRoom.delete(room);
+      // Same reasoning, same event, for the hidden-log shelf (durable-rooms
+      // review round 8, item 3): the room is permanently destroyed, so
+      // nothing will ever `switchActiveOwnershipRoom(room)` again to read a
+      // shelved-hidden-entries entry back either.
+      this.hiddenLogEntriesByRoom.delete(room);
     }
     this.shareConnectionLost = false;
     this.sharedLogEntries = this.reseedLogOrder(
@@ -1744,12 +2437,44 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * socket that has not re-authenticated yet (`role-required: gm`), which the
    * reconnect handler repairs; anything else is shown as-is so it cannot be
    * silently swallowed (spec AC 10).
+   *
+   * **Also repairs `room-mismatch`** (D-C, durable-rooms review round 7).
+   * `authorizeRoomPacket` (`server/room-guards.js`) returns this reason when the
+   * caller's role is fine but `socket.data.room` disagrees with the room named
+   * in the packet - which happens when a `gm:join-session`/`gm:create-session`
+   * ack is lost or times out (`emitWithAck`'s `requestTimeoutMs`) after the
+   * server has already processed it: the server detached this socket from its
+   * old room and joined it to the new one, but the promise rejected before
+   * `SessionSyncService.currentRoom` (or this component's `shareRoomCode`) ever
+   * learned that, so the GM tab keeps broadcasting under a room the socket is
+   * no longer authorized for. Left unhandled this reads no differently from
+   * `role-required` on the wire except for the reason text - the GM keeps
+   * running combat while every broadcast is silently refused, exactly the
+   * frozen-players failure mode `session:error` exists to prevent (AC 10). The
+   * repair is the same either way: re-authenticate to what this tab believes
+   * `shareRoomCode` is - `handleSessionReconnected()` calls `joinAsGm(room)`
+   * again, which corrects both `socket.data.room` server-side and
+   * `SessionSyncService.currentRoom` client-side to agree once more, then
+   * pushes this tab's state so players catch back up.
    */
   private handleSessionError(payload: { event: string; reason: string }) {
     if (!payload) {
       return;
     }
-    const isAuth = typeof payload.reason === "string" && payload.reason.startsWith("role-required");
+    // Mirror `onDisconnect`'s guard: a refusal for a room this tab has
+    // already left (`shareRoomCode` blanked by a Close/End notice from
+    // another tab, or this tab mid-close itself) has nothing to reconnect
+    // to. Without this guard a stale in-flight push's `role-required`
+    // refusal - arriving just after `handleSessionClosedExternally` blanks
+    // `shareRoomCode` - would show a permanent "Re-authenticating..." banner
+    // and call `handleSessionReconnected()`, which itself no-ops on an empty
+    // `shareRoomCode`, so nothing would ever clear it (durable-rooms review
+    // round 8, item 1).
+    if (!this.shareRoomCode || this.isClosingSession) {
+      return;
+    }
+    const isAuth = typeof payload.reason === "string"
+      && (payload.reason.startsWith("role-required") || payload.reason === "room-mismatch");
     this.shareError = isAuth
       ? `Session server refused ${payload.event} (${payload.reason}) - players are not receiving updates. Re-authenticating...`
       : `Session server refused ${payload.event}: ${payload.reason}`;
@@ -1833,6 +2558,17 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (this.isClosingSession) {
       return;
     }
+    // Minor fix (durable-rooms review round 7): a notice naming a room this
+    // tab is not currently connected to must not blank `shareRoomCode` out
+    // from under whatever room this tab actually joined since - the server
+    // only ever broadcasts `session:closed` to sockets that were in that room,
+    // so a mismatch here can only mean this tab moved on before the event
+    // arrived. Older servers omit `room` entirely; treat an absent room the
+    // same as a match, matching prior behaviour, rather than refusing to
+    // act on a notice with no way to name what it is about.
+    if (payload?.room && this.shareRoomCode && payload.room !== this.shareRoomCode) {
+      return;
+    }
     // Older servers omit the flag; assume the room survives rather than throwing
     // away a code that may still be valid.
     const persisted = payload?.persisted !== false;
@@ -1842,9 +2578,24 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       : "Session was ended and the room was deleted.";
     this.shareRoomCode = "";
     this.shareJoinCode = persisted ? room : "";
+    // This tab is no longer connected to anything, so no connection can be
+    // "lost" - a stale true here (set by a transport blip or a since-guarded
+    // `handleSessionError` moments earlier) would otherwise persist as a
+    // permanent red banner alongside this green notice, with nothing left to
+    // reconnect to (durable-rooms review round 8, item 1).
+    this.shareConnectionLost = false;
+    this.shareError = "";
     if (!persisted) {
       this.liveEncounterRooms.delete(room);
       this.liveEncounterFingerprints.delete(room);
+      // Its shelved ownership goes with it, same reasoning as the destructive
+      // branch of `resetShareStateAfterLeaving` (D-A, durable-rooms review
+      // round 7): the room is gone, so nothing will ever read this shelf
+      // entry back.
+      this.ownershipByRoom.delete(room);
+      // Same reasoning for the hidden-log shelf (durable-rooms review round
+      // 8, item 3).
+      this.hiddenLogEntriesByRoom.delete(room);
     }
     this.sharedLogEntries = this.reseedLogOrder(this.getHiddenLogEntries());
     this.clearSharedLogDecodeAnimations();
@@ -2323,6 +3074,35 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
+  /**
+   * Is this participant claimable, or already owned, right now?
+   *
+   * The single predicate that decides whether an **out-of-action**
+   * participant is worth putting on the wire at all - reused by
+   * `getSharedParticipants()` (does the participant itself go in
+   * `participants`, so a downed player character stays visible and
+   * reclaimable to its owner) and `syncSharedState()`'s `oocOwnership`
+   * shadow (does it earn an ownership-only shadow entry). Both call sites
+   * asking the same question through the same function is the point - a GM
+   * decision (durable-rooms follow-up, "a player must be able to reclaim
+   * their character while it is out of action") that a downed NPC must never
+   * satisfy, so it stays off the wire exactly as before, while a downed PC
+   * must always satisfy it, so it doesn't vanish out from under its owner.
+   *
+   * Deliberately not narrowed to `claimable === true` alone: an out-of-action
+   * participant that is *owned* but for some reason no longer flagged
+   * `claimable` (see `participantClaimable`'s doc comment; `btnToggleClaimable_Click`
+   * clears the owner in the same tap so this should not arise through the
+   * ordinary UI, but the two maps are independent and nothing enforces the
+   * pairing) still needs its stale ownership reconciled on a later rejoin,
+   * which is what keeps `oocOwnership` from being fully subsumed by the new
+   * `participants` entry for the claimable case - see `SharedCombatState
+   * .oocOwnership`'s doc comment.
+   */
+  private isClaimableOrOwnedOoc(p: IParticipant): boolean {
+    return this.participantClaimable.get(p) === true || this.participantOwners.has(p);
+  }
+
   private syncSharedState() {
     if (!this.shareRoomCode) {
       return;
@@ -2338,8 +3118,28 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // Not a participant list, a *count* - see `SharedCombatState`. It exists
       // so a room whose whole encounter is out of action still reads as
       // "has content" to the join guard instead of looking like an empty room
-      // that is safe to overwrite (round-3 fix 5). Nothing renders it.
-      oocParticipantCount: this.combatManager.participants.items.filter(p => p.ooc).length
+      // that is safe to overwrite (round-3 fix 5). Nothing renders it. Only
+      // the still-withheld (non-claimable) OOC participants are counted here -
+      // a claimable OOC participant is already in `participants` above (GM
+      // decision, durable-rooms follow-up - see `SharedCombatState`'s doc
+      // comment on both fields).
+      oocParticipantCount: this.combatManager.participants.items
+        .filter(p => p.ooc && !this.isClaimableOrOwnedOoc(p)).length,
+      // Ownership-only shadow for OOC participants (review defect D2,
+      // durable-rooms review round 6) - see `SharedCombatState.oocOwnership`.
+      // Only claimed or claimable OOC participants are worth a wire entry;
+      // an OOC participant nobody has ever made claimable has no ownership
+      // for a later rejoin to reconcile. Same predicate `getSharedParticipants`
+      // uses to decide whether a claimable OOC participant also belongs in
+      // `participants` itself - reused rather than duplicated so the two
+      // lists can never silently diverge on who counts as "claimable enough".
+      oocOwnership: this.combatManager.participants.items
+        .filter(p => p.ooc && this.isClaimableOrOwnedOoc(p))
+        .map(p => ({
+          id: this.getParticipantId(p),
+          ownerName: this.participantOwners.get(p),
+          claimable: this.participantClaimable.get(p) === true
+        }))
     };
     this.sessionSync.broadcastState(sharedState);
     // Symptom C fix (durable-rooms review round 5, Part 1): refresh this
@@ -2361,9 +3161,24 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
+  /**
+   * One entry per participant to put on the wire.
+   *
+   * Out-of-action participants are withheld by default (spec Open Decision 4
+   * - restoring their health/damage is a known, accepted gap either way) -
+   * **except** a claimable one, which is deliberately still broadcast so its
+   * owner can see and reclaim it while it is down (GM decision, durable-rooms
+   * follow-up: "a player must be able to reclaim their character while it is
+   * out of action"). A downed NPC never satisfies `isClaimableOrOwnedOoc()`
+   * and so never appears here - the privacy property `getSharedParticipants`
+   * already had (a player learns nothing about a downed NPC) is unchanged for
+   * that case; only the claimable exception is new. See `ooc` on
+   * `SharedParticipantState` for why every consumer of `canAct`/`canDelay`/
+   * `canInterrupt` must still treat a claimable-but-`ooc` entry as inert.
+   */
   private getSharedParticipants(): SharedParticipantState[] {
     return this.combatManager.participants.items
-      .filter(p => !p.ooc)
+      .filter(p => !p.ooc || this.isClaimableOrOwnedOoc(p))
       .map((p, index) => {
         const base: SharedParticipantState = {
           id: this.getParticipantId(p),
@@ -2374,13 +3189,23 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           playerControlled: this.participantOwners.has(p),
           claimable: this.participantClaimable.get(p) === true,
           ownerName: this.participantOwners.get(p),
-          canAct: p.status === StatusEnum.Active || p.status === StatusEnum.Delaying,
-          canDelay: p.status === StatusEnum.Active,
+          // Downed (out of action) - see this field's doc comment on
+          // `SharedParticipantState`. Almost always false: the only entries
+          // that can be `ooc: true` here at all are the claimable exception
+          // this method's own filter admits.
+          ooc: p.ooc,
+          // A downed character must never be offered as playable just because
+          // it is claimable (a downed character being claimable must not
+          // become a downed character being playable) - every action
+          // affordance is forced off here, at the source, rather than trusted
+          // to every UI consumer to re-derive the same guard.
+          canAct: !p.ooc && (p.status === StatusEnum.Active || p.status === StatusEnum.Delaying),
+          canDelay: !p.ooc && p.status === StatusEnum.Active,
           // A member of a linked NPC row can never take an Interrupt Action
           // (brief "NPC Group Initiative" criterion 17 / Decision 3, a
           // deliberate departure from p. 167) - so the row itself never offers
           // one, however high its shared Score.
-          canInterrupt: !isNpcRow(p) && p.getCurrentInitiative() >= 1,
+          canInterrupt: !p.ooc && !isNpcRow(p) && p.getCurrentInitiative() >= 1,
           initiativeDice: p.dices,
           pendingRoll: p.diceIni <= 0,
           // Carried so a rejoining GM can reconstruct "already rolled" state
@@ -3183,6 +4008,20 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       } else {
         participant.status = StatusEnum.Waiting;
       }
+      // A claimable participant that was out of action when this snapshot was
+      // taken must come back out of action, never silently revived - the
+      // highest-risk part of this change (a GM rejoining and finding a downed
+      // PC standing up again would be worse than not being able to reclaim it
+      // at all). `Participant.ooc` is otherwise only ever the manual flag or
+      // derived from damage vs. health (`Participant.ts`), and damage is not
+      // on the wire at all (Open Decision 4) - restoring the manual flag is
+      // therefore the only way to bring a restored participant back down.
+      // Only ever set true here: `new Participant()` already defaults it
+      // false, and a non-claimable OOC participant is never on the wire to
+      // read `shared.ooc` from in the first place.
+      if (shared.ooc === true) {
+        participant.ooc = true;
+      }
     }
 
     this.combatManager.participants.sortBySortOrder();
@@ -3200,23 +4039,34 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * What a restore could not bring back, in the GM's words.
    *
    * Participant subclasses *are* restored now (spec Open Decision 4, option
-   * (b)). Health, damage and out-of-combat participants are not: none of them
-   * are on the wire at all (`SharedParticipantState` has no damage fields, and
-   * `getSharedParticipants` filters OOC participants out entirely), and
-   * widening the player-visible payload is explicitly a separate change - it is
-   * logged in `docs/FEATURE-BACKLOG.md`. Undo history never leaves the browser
-   * (ARCHITECTURE §7), so a resumed room starts with none.
+   * (b)). Health and damage are not: `SharedParticipantState` has no damage
+   * fields at all, and widening the player-visible payload to carry them is
+   * explicitly a separate change - it is logged in `docs/FEATURE-BACKLOG.md`.
+   * Undo history never leaves the browser (ARCHITECTURE §7), so a resumed
+   * room starts with none.
    *
-   * The one exception is a linked NPC row: its members' Condition Monitors *are*
-   * on the wire and are restored (they are row state, not the participant-level
-   * damage fields), so the warning says so rather than telling the GM to re-key
-   * damage they already have back.
+   * Out-of-action participants split in two, since the GM decision that
+   * broadcasts a claimable one changes what comes back for each:
+   * - **Non-claimable** (almost always an NPC) is still never on the wire at
+   *   all (`getSharedParticipants` withholds it on purpose - the same privacy
+   *   property as before this change), so it is not restored and is not
+   *   distinguishable from "never existed".
+   * - **Claimable** (a player character) *is* restored - still out of
+   *   action, per its `ooc` flag on the wire - but without its damage/health,
+   *   same gap as everyone else; only that it was down, not by how much.
+   *
+   * The one exception to the damage gap is a linked NPC row: its members'
+   * Condition Monitors *are* on the wire and are restored (they are row
+   * state, not the participant-level damage fields), so the warning says so
+   * rather than telling the GM to re-key damage they already have back.
    */
   private buildRestoreWarning(): string {
     return "Restored from the room's last broadcast. Not included: damage and "
       + "condition monitors (linked NPC rows excepted - their NPCs come back "
-      + "with theirs), any participant who was out of action, committed "
-      + "interrupt actions, and undo history - re-enter those by hand.";
+      + "with theirs), any non-claimable participant who was out of action, "
+      + "committed interrupt actions, and undo history - re-enter those by "
+      + "hand. A claimable character who was out of action comes back "
+      + "out of action.";
   }
 
   dismissRestoreWarning() {
@@ -3807,10 +4657,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * An OOC participant is filtered out of the broadcast list entirely
-   * (`getSharedParticipants`), so without a log line the row simply vanishes
-   * from every player's screen with no explanation. Both handlers log *after*
-   * the state change so the entry describes what actually happened.
+   * A non-claimable OOC participant is filtered out of the broadcast list
+   * entirely (`getSharedParticipants`), so without a log line the row simply
+   * vanishes from every player's screen with no explanation. A claimable one
+   * stays visible (`ooc: true`, exiting only the initiative order), but the
+   * log line still matters there too - it is the only announcement its owner
+   * gets that their character just went down or came back. Both handlers log
+   * *after* the state change so the entry describes what actually happened.
    */
   btnLeaveCombat_Click(sender: IParticipant) {
     LogHandler.log(this.currentBTTime, sender.name + " LeaveCombat_Click");
@@ -4264,9 +5117,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     const p = new Participant();
     this.combatManager.addParticipant(p);
     this.participantClaimable.set(p, false);
-    this.participantEdgeRatings.set(p, 0);
-    this.participantReactions.set(p, 3);
-    this.participantIntuitions.set(p, 3);
+    // These three MUST stay the same values `isUnusedPlaceholder()` compares
+    // against (review defect D4, durable-rooms review round 6): they were
+    // duplicate literals before this fix, so changing one here without also
+    // changing `PLACEHOLDER_*_DEFAULT` silently made every fresh row compare
+    // as "touched" and reopened round-4's D5 (the destructive-join warning
+    // firing on an untouched blank row). Sharing the same named constants
+    // makes that impossible instead of merely documented.
+    this.participantEdgeRatings.set(p, PLACEHOLDER_EDGE_RATING_DEFAULT);
+    this.participantReactions.set(p, PLACEHOLDER_REACTION_DEFAULT);
+    this.participantIntuitions.set(p, PLACEHOLDER_INTUITION_DEFAULT);
     p.baseIni = this.getParticipantBaseInitiative(p);
     this.participantTieBreakers.set(p, Math.random());
     const id = this.getParticipantId(p);

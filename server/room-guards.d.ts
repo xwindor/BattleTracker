@@ -124,6 +124,14 @@ export declare function reapContentlessRooms(
   options: ReapContentlessRoomsOptions
 ): string[];
 
+/**
+ * Clear every persisted character claim in restored rooms at boot. Returns the
+ * number of rooms whose ownership was corrected.
+ */
+export declare function releaseAllClaimsOnBoot(
+  sessions: Map<string, any>
+): number;
+
 export declare const ROOM_CREATE_LIMIT: number;
 export declare const ROOM_CREATE_WINDOW_MS: number;
 export declare const SOCKET_ROOM_CREATE_LIMIT: number;

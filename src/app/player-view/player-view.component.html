@@ -38,7 +38,12 @@
           <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
             <option value="">Select character</option>
             @for (participant of unclaimedParticipants; track participant.id) {
-            <option [value]="participant.id">#{{ participant.order }} {{ participant.name }}</option>
+            <!-- `<option>` cannot hold a child badge element, so a downed
+                 character's claim entry says so in the option text itself -
+                 the closest match to the badge convention this element
+                 allows (brief requirement 6: nobody should claim one
+                 thinking it is up). -->
+            <option [value]="participant.id">#{{ participant.order }} {{ participant.name }}{{ participant.ooc ? ' (Out of Action)' : '' }}</option>
             }
           </select>
           <button type="button" class="btn btn-outline-primary" (click)="claimSelectedCharacter()">
@@ -277,7 +282,13 @@
     </div>
     <div class="card-body">
       @if (primaryCharacter) {
-      <div class="fw-semibold">{{ primaryCharacter.name }}</div>
+      <div class="fw-semibold">
+        {{ primaryCharacter.name }}
+        @if (primaryCharacter.ooc) {
+        <span class="badge text-bg-danger ms-1" data-testid="player-badge-ooc"
+          title="Out of action - not in the initiative order, and cannot act, until the GM revives it">OUT OF ACTION</span>
+        }
+      </div>
       <div class="small text-muted mt-1">
         REA {{ primaryCharacter.reaction ?? "—" }} &nbsp;|&nbsp;
         INT {{ primaryCharacter.intuition ?? "—" }} &nbsp;|&nbsp;

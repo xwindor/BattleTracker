@@ -685,17 +685,53 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     });
   }
 
-  get visibleParticipants(): SharedParticipantState[] {
+  /**
+   * Every participant currently on the wire, in broadcast order.
+   *
+   * The one source both the initiative list and the claim/ownership lists
+   * used to share (`visibleParticipants`) until a claimable out-of-action
+   * participant could be on the wire at all (GM decision, durable-rooms
+   * follow-up: a player must be able to reclaim their character while it is
+   * out of action). Those are two different questions now - "is this in the
+   * initiative order" and "can this be claimed/does this player own it" - so
+   * they read from different getters below rather than one list serving both.
+   */
+  private get allParticipants(): SharedParticipantState[] {
     return [ ...(this.state?.participants || []) ].sort((a, b) => a.order - b.order);
   }
 
-  get ownParticipants(): SharedParticipantState[] {
-    const player = this.playerToken.toLowerCase();
-    return this.visibleParticipants.filter(p => (p.ownerName || "").toLowerCase() === player);
+  /**
+   * The initiative order as shown at the table. Out-of-action participants
+   * are never in the initiative order (they cannot act, brief requirement:
+   * "a downed character must NOT appear in the initiative order on the
+   * player view") - the one claimable-OOC exception to `SharedParticipantState`
+   * being on the wire at all does not change that; it is still excluded here
+   * and only reachable through `ownParticipants`/`unclaimedParticipants` below.
+   */
+  get visibleParticipants(): SharedParticipantState[] {
+    return this.allParticipants.filter(p => !p.ooc);
   }
 
+  /**
+   * Characters this player owns, out of action or not - so a returning
+   * player sees they still hold a downed character rather than believing
+   * they lost it. Reads from `allParticipants`, not `visibleParticipants`:
+   * an owned character does not stop being "this player's" just because it
+   * left the initiative order.
+   */
+  get ownParticipants(): SharedParticipantState[] {
+    const player = this.playerToken.toLowerCase();
+    return this.allParticipants.filter(p => (p.ownerName || "").toLowerCase() === player);
+  }
+
+  /**
+   * Claimable, unowned characters - including a claimable character that is
+   * currently out of action, so a returning player can reclaim one that went
+   * down while they were away. Reads from `allParticipants` for the same
+   * reason as `ownParticipants`.
+   */
   get unclaimedParticipants(): SharedParticipantState[] {
-    return this.visibleParticipants.filter(p => p.claimable === true && !p.ownerName);
+    return this.allParticipants.filter(p => p.claimable === true && !p.ownerName);
   }
 
   get primaryCharacter(): SharedParticipantState | null {

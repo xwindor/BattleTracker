@@ -735,10 +735,20 @@ is still stamped on every write. A housekeeping sweep still runs at startup and
 every 24h, but all it does now is clear legacy `<ROOM>.expired.json` markers -
 both the ones the previous 30-day build wrote and any corrupt one - after
 `DEFAULT_TOMBSTONE_RETENTION_MS`; it removes no live rooms.
-Three server-side sites mutate a session — the two emit
-handlers plus the in-place `ownerName` strip in the disconnect handler — and all
-three go through the single `touchSession(room)` helper. See
-`briefs/persistent-rooms.md`.
+`touchSession(room)` has **five** callers, not three (review defect D3,
+durable-rooms review round 6; this count drifted twice already, so treat it as
+suspect rather than authoritative and re-verify against `server.js` before
+trusting it): `session:update-state`, `session:append-log`, `gm:join-session`
+(so a bare rejoin still advances `lastActivity` and the persisted copy),
+`gm:close-session` (an immediate flush point), and `releasePlayerClaims` —
+itself one call site reached from three triggers (a genuine socket
+`disconnect`, `evacuateRoom`, and `detachSocketFromPreviousRoom`), and the one
+the spec calls out as easiest to miss because it mutates
+`session.state.participants`/`session.state.oocOwnership` in place rather than
+through either emit handler. All five go through the single `touchSession(room)`
+helper so a further site added later cannot silently skip persistence. See
+`briefs/persistent-rooms.md` and `touchSession`'s own doc comment in
+`server.js`, which is the source of truth for this count.
 
 ### The room-ownership choke point
 
@@ -765,26 +775,115 @@ Default-deny is by payload **shape**, not by registration: any event whose first
 argument carries a `room` string is treated as room-scoped even if it is absent
 from `ROOM_SCOPED_EVENTS`. Only `ROOM_ENTRY_EVENTS` — `gm:create-session`,
 `gm:join-session`, `player:join`, the three events that *assign* membership — are
-exempt. A future handler therefore cannot reintroduce the hole by forgetting to
-opt in; it would have to opt out on purpose. Individual handlers no longer repeat
+exempt. A future handler therefore cannot reintroduce the *authorization* hole
+by forgetting to opt in; it would have to opt out on purpose. This does not
+mean a new handler can never crash the process on a malformed payload it
+destructures itself — see the process-level `uncaughtException` guard in
+`server.js` and the note on that below. Individual handlers no longer repeat
 the role/room checks, on purpose: duplicated copies of the rule are what drifted.
 
-Order of refusal is `invalid-room-code` → (lifecycle only) `room-not-found` →
-`role-required: …` → `room-mismatch`. Lifecycle events answer "room not found"
+Per-event roles, from `ROOM_SCOPED_EVENTS`: `session:update-state` is GM-only.
+`session:append-log` is also GM-only (round 5, P2-3) — no player client ever
+legitimately emits it (every player-originated log line reaches the wire
+through `session:command`, which the GM tab validates and turns into a
+shared-log entry itself), and unlike `session:command` the log-entry payload
+has no player-identity field to check `actor` against, so a `role:"player"`
+socket calling it directly used to reach the (identity-blind) schema check and
+could broadcast a forged `actor` ("GM", another player's name) that persisted
+verbatim under indefinite retention. `session:command` allows both `gm` and
+`player`, gated instead by `command.player` matching the authenticated
+identity (below). Every other room-scoped event not listed in
+`ROOM_SCOPED_EVENTS` falls back to "GM or authenticated player".
+
+Order of refusal is `invalid-payload` (room-entry events only:
+`gm:join-session` / `player:join`, whose payload is destructured directly —
+round-4 defect D1) → `invalid-room-code` → (lifecycle only) `room-not-found` →
+`role-required: …` → `room-mismatch`. `invalid-payload` is checked first and
+only for the two events that destructure a payload before any other logic
+runs; every other event skips straight to `invalid-room-code`. Lifecycle events answer "room not found"
 *ahead* of the membership check so an End Room retry after a lost ack still reads
 as the terminal success it is (defect D5), even though the end has by then
 cleared the issuing socket's own membership. The write paths deliberately do
 **not** require an existing room, or the contentless reaper's self-healing
 recreate would break.
 
-`gm:close-session` and `gm:end-session` both run `evacuateRoom()`, which clears
-`socket.data.room` / `socket.data.role` / `socket.data.playerName` on every
-socket attached to that room, then `socketsLeave()`. `socketsLeave()` alone was
-not enough: it clears Socket.IO membership but not `socket.data.room`, which is
-what the ownership rule authorises against — so a second GM tab still logically
-in an *ended* room passed every check afterwards and recreated the room through
+`gm:close-session` and `gm:end-session` both run `evacuateRoom()`, which
+releases every departing player's claim, clears `socket.data.room` /
+`socket.data.role` / `socket.data.playerName` on every socket attached to that
+room, then `socketsLeave()`. `socketsLeave()` alone was not enough: it clears
+Socket.IO membership but not `socket.data.room`, which is what the ownership
+rule authorises against — so a second GM tab still logically in an *ended*
+room passed every check afterwards and recreated the room through
 `getOrCreateSession` on its next broadcast. With indefinite retention that
 resurrection is permanent, i.e. "End Room" did not end the room.
+
+**Claim release happens before `socketsLeave()`, not after** (round 5,
+Symptom A — see "Authority: who is the truth for a room" below).
+`releasePlayerClaims()` broadcasts to `io.to(room)`, Socket.IO's own room
+roster; emitting that after every socket, including the GM's own, has already
+left the room sends both the `session:state` and the `session:command
+release_claims` it produces to nobody. The GM tab's `participantOwners` cache
+never learns the claim was released, and a later rejoin's push re-asserts the
+stale owner right back onto the server — live-reproduced: server state after
+Close was `[["p1","ABSENT"]]`, then `[["p1","tok-old"]]` again after the GM
+tab's own rejoin push. `detachFromPreviousRoom()` (the round-4 D4 room-switch
+path) already released before leaving for the same reason; `evacuateRoom()`
+now matches it, so the same operation is never ordered two different ways.
+
+**Correction (review defect D5, durable-rooms review round 6): this ordering
+is not what actually protects the closing GM's own tab, live.** The reordering
+above is kept — it is correct, it matches `detachFromPreviousRoom()`, and the
+release still persists to disk either way — but on a real close the closing
+GM's own tab never processes the reordered broadcasts at all: `server.js`
+emits `session:closed` / `session:state` / `session:command release_claims`
+in the same tick as the ack, and the tab's ack handler
+(`btnCloseShareSession_Click`) calls `sessionSync.disconnect()` as soon as the
+ack resolves — observed live sending exactly `["ACK"]` to that tab, nothing
+else. Any *other* GM tab still in the room disconnects on `session:closed`
+first and misses the same broadcasts for the same reason. So the load-bearing
+fix for Symptom A, in practice, is **`reconcileOwnershipFromServer()`**
+(below), called on every (re)join — not this ordering. Do not delete
+`reconcileOwnershipFromServer()` as "redundant" with the ordering fix above;
+it is the thing actually doing the work.
+
+### Crash containment (P2-1, round 5)
+
+Two separate defences, neither of which is the same as the choke point above
+and neither of which alone is a full guarantee:
+
+1. **Defensive destructuring.** Every handler that destructures a room-scoped
+   payload defaults it to `{}` — `session:update-state`, `session:append-log`,
+   `session:command`, `gm:close-session`, `gm:end-session`, alongside
+   `gm:join-session`/`player:join` (round-4 D1). An emit with no payload or an
+   explicit `null` no longer throws `const { room } = undefined`. This is
+   per-handler and must be repeated by any new handler that destructures its
+   payload — the choke point does not do this for you (see below).
+2. **`process.on("uncaughtException", ...)`** in `server.js`, registered before
+   any other module code runs. Node does not catch a synchronous throw from an
+   `EventEmitter` listener; by default it kills the whole process, taking every
+   room and every connected GM/player down over one bad code path anywhere —
+   not only in a room-scoped handler. The handler logs loudly, flushes every
+   pending debounced room write synchronously (`store.beginShutdown()`, the
+   same call `SIGTERM` uses), and exits with code 1 (not 0) so a process
+   manager restarts it and can tell a crash-restart from a deliberate one.
+   Deliberately does **not** try to keep serving: a throw mid-handler can leave
+   `sessions`, `socket.data` or the write queue half-mutated in a way this
+   level cannot know about, and continuing risks quietly persisting corrupted
+   state to every room touched afterward. Durable rooms plus the GM tab's
+   reconnect-push already make a clean restart a non-event for a live table
+   (spec Open Decision 6), so failing fast and letting pm2 restart is the
+   cheaper failure mode.
+
+**What the room-ownership choke point's "default-deny by payload shape"
+guarantee does and does not cover** (this was previously overstated in code
+comments and here, and a live probe found the gap): it closes the
+*cross-room-authorization* hole — an event whose payload has a `room` string
+cannot bypass the room/role check by not being registered. It does **not**
+protect a handler that has no `room` in its payload at all — including one
+that names no room but still crashes on some other malformed field, or a
+completely unregistered event (`socket.emit("future:x")` with no payload)
+that a not-yet-written handler destructures unsafely. Those two defences above
+are what actually cover that gap; the choke point covers a different one.
 
 ### Room-creation bounds
 
@@ -843,14 +942,22 @@ GM tab that switched rooms stayed a member of both: a player still in the
 abandoned room could send commands that were relayed to — and applied by — the
 GM tab now running a *different* room, and the abandoned room reported
 `gmConnected: true` forever. The abandoned room itself is untouched: still in
-the Map, still persisted, still joinable by code. `player:join` does **not**
-detach (it reassigns `socket.data.room` the same way); that is a known gap, not
-a decision.
+the Map, still persisted, still joinable by code. `player:join` **also**
+detaches (round-4 defect D4 — it did not used to, which is what that defect
+was): a player who joined room A, claimed a character, then joined room B
+without ever leaving A stayed a Socket.IO member of A (a cross-room broadcast
+leak) and left A's claim permanently orphaned, since by the time that socket
+disconnects `socket.data.room` is B, not A. `player:join` now calls the same
+`detachSocketFromPreviousRoom()` as `gm:create-session`/`gm:join-session`,
+which also releases the departing player's claim in the room they left.
 
 What is still *not* on the server: the GM's undo/redo history, GM-local hidden
 log entries, and everything `getSharedParticipants()` does not broadcast
-(damage/health, OOC participants, `actionHistory`). Durability does not widen
-the snapshot — it only makes the same snapshot outlive the process.
+(damage/health, non-claimable OOC participants, `actionHistory`) — a claimable
+OOC participant (a player character) *is* broadcast, deliberately, so its
+owner can reclaim it (see §7's "Session sync and its effect on combat state"
+below). Durability does not widen the snapshot beyond that one exception — it
+only makes the same snapshot outlive the process.
 
 `gm:close-session` and `gm:end-session` are different actions: close *leaves*
 the room (still persisted, still joinable by code), end *destroys* it (in-memory
@@ -870,22 +977,487 @@ so the one case that had entries to lose was the one case that never prompted.
 Creating a session while a room is already live also abandons that room (see the
 socket detach above), so the same dialog names the code to rejoin to get it back.
 
-That promise is enforced by `liveEncounterRooms`, a **set** of room codes this
-tab's `CombatManager` is the live source of truth for — not a single code. It is
-what decides push-vs-pull on the Join button (`holdsLiveEncounterFor()`), and it
-is additive: creating or joining another room does not stop this tab being the
-truth for the one it just left. It was a single code, reassigned by Create, which
-made the dialog's "rejoin code X to bring it back" false the moment it was
-printed — the rejoin took the destructive pull path and discarded the very
-encounter the dialog had promised was safe. Entries leave on exactly two events:
-the room is destroyed (End Room, or an external end), or this tab's encounter is
-genuinely *replaced* by a pull, at which point every earlier association is
-stale and the set resets to the joined room alone. The private
-`liveEncounterRoomCode` accessor is a most-recent-entry view over the set.
-Consequence to know: after a mis-tapped Create, rejoining the old code pushes
-this tab's *current* encounter into that room, overwriting the room's stored
-snapshot. That is the promised behaviour (the local encounter is the one that
-was there), but it is a push, not a merge.
+### Authority: who is the truth for a room, and how that can be lost (round 5)
+
+*This is the one, authoritative description of this mechanism — an earlier
+draft of this document described it a second, inconsistent way further down
+("`liveEncounterRoomCode`, set on create and on join, kept across a Close,
+cleared only by an End", "a tab with no participants is never prompted");
+that text is gone, and everything about push/pull below points back here.*
+
+**The problem this section exists to solve.** Durable-rooms review round 5
+found three symptoms that were really one design gap: the GM tab treated its
+own local state as automatically authoritative for pushing, and had no way to
+either learn that the server had moved on without it, or to stop pushing once
+it knew it shouldn't. Fixing each symptom individually (as rounds 3 and 4 did)
+kept reopening the same defect class through a different door. The fix is a
+small, explicit model of "who is the truth for room X right now", covering
+both directions: the tab correcting itself from the server, and the tab
+refusing to act once it knows it is no longer the truth.
+
+**`liveEncounterRooms`**, a **set** of room codes this tab's `CombatManager` is
+the live source of truth for — not a single code. It is what decides
+push-vs-pull on the Join button (`holdsLiveEncounterFor()`), and it is
+additive: creating or joining another room does not stop this tab being the
+truth for the one it just left. It was a single code, reassigned by Create,
+which made the dialog's "rejoin code X to bring it back" false the moment it
+was printed — the rejoin took the destructive pull path and discarded the very
+encounter the dialog had promised was safe. The private `liveEncounterRoomCode`
+accessor is a most-recent-entry view over the set. Consequence to know: after
+a mis-tapped Create, rejoining the old code pushes this tab's *current*
+encounter into that room, overwriting the room's stored snapshot. That is the
+promised behaviour (the local encounter is the one that was there), but it is
+a push, not a merge.
+
+Membership can be **lost**, not just gained, in three ways: the room is
+destroyed (End Room, or an external end); this tab's encounter is genuinely
+*replaced* by a pull, at which point every earlier association is stale and
+the set resets to the joined room alone; or a rejoin finds this tab has
+*diverged* from that room (next paragraph), which drops that one code without
+touching any other the tab still holds.
+
+**`liveEncounterFingerprints`** — per-room `Set<participantId>`, written by
+`markRoomLive()` (create, join) and **refreshed on every successful push**
+inside `syncSharedState()` (round 5, fixing Symptom C). That refresh is the
+part that makes the fingerprint mean the right thing during ordinary play: a
+GM who taps Create Player Session early, plays a whole fight to its
+conclusion with a fully different cast than whoever was on screen at that
+moment, and pushes every state change along the way (which is what every
+mutation in this file already does) never diverges — every push keeps the
+fingerprint current with the roster that tab is actually, continuously the
+truth for. Without that refresh, `liveEncounterFingerprints` only ever
+reflected the moment the room was joined/created, so an ordinary evening of
+play (add one, remove one, many pushes) could legitimately drift the on-screen
+roster to zero overlap with a stale fingerprint — and the *next* rejoin then
+read that as "this tab has become a different encounter" even though nothing
+was ever wrong. `liveEncounterDivergedFrom(room)` compares the *current*
+on-screen roster against that fingerprint: no recorded fingerprint fails open
+(not diverged — this only happens defensively); otherwise diverged means
+**zero** participant IDs survive in common. Only a wholesale cast swap with no
+push in between zeroes it out on purpose; the threshold is a judgment call,
+documented here.
+
+**What happens on a diverged rejoin, and on a rejoin whose saved encounter is
+entirely OOC and so cannot be restored: the join is never completed** (round 5,
+fixing Symptom B). Earlier rounds warned the GM once ("nothing was sent to the
+room") and then left `shareRoomCode` assigned to that room anyway, so the very
+next mutation anywhere in this file — a sort, a damage edit, Next Pass, an
+undo — pushed straight over the room's real saved state, because
+`syncSharedState()`'s only gate is `if (!this.shareRoomCode) return;`. Neither
+branch in `btnJoinShareSession_Click()` ever leaves `shareRoomCode` assigned to
+a room the join declined to complete, so "authorized to push room X" cannot
+silently outlive the warning that said it wasn't happening — there is no
+separate flag to fall out of sync and no later call site that can forget to
+check one.
+
+**Round 6 correction (review defect D1): "the join is never completed" used to
+mean "connect first, then decide, then disconnect if wrong" — which is what let
+a diverged join silently abandon a *different* room the tab was still running.**
+`sessionSync.joinAsGm(room)` is a single socket that can be authenticated to
+exactly one room at a time; calling it *at all* already switches this tab's
+server-side room membership away from whatever it was running before
+(`detachSocketFromPreviousRoom`, `server.js`), broadcasting
+`session:gm-presence {connected: false}` to that room the instant it succeeds
+— before the client has decided whether the join should go ahead. Rounds 3-5
+treated "decide push-vs-pull, then possibly refuse" as a single atomic client
+step; it never was one on the wire. Live repro: GM runs room B, plays a
+different cast into it for an hour (additive membership, above), then types
+room A's old code back in. `holdsLiveEncounterFor('A')` read true, so no
+confirmation ran at all; `joinAsGm('A')` succeeded and silently detached B;
+*then* the divergence check fired and the old code called `sessionSync.disconnect()`
+and blanked `shareRoomCode` — leaving the tab connected to neither room, with
+room B's players frozen and no error-level signal that anything had gone
+wrong. This is the same defect class rounds 3-5 kept re-fixing through new
+doors: **`shareRoomCode` is a single global flag standing in for what is
+conceptually a per-room fact ("is this tab authorized to broadcast to room
+X").** A refusal computed *after* the global flag had already been reassigned
+had no way to express "refused for A, but still fine for B" — there was only
+one flag, and it could only ever describe one room at a time, whichever room a
+mid-flight join happened to have reached.
+
+**The fix does not introduce a second flag or a per-room map for this** (that
+would just be the same representation problem at a different granularity, with
+its own new drift hazard). Instead it makes the single-room reality **true
+before the switch is attempted, not merely corrected after**, plus one
+narrow, explicit reversal path for the one case that cannot be known in
+advance:
+
+- **Divergence is now decided client-side, entirely from data this tab already
+  holds** (`liveEncounterDivergedFrom`), **before** `sessionSync.joinAsGm` is
+  ever called (`btnJoinShareSession_Click`, `confirmDivergedJoin`). Since
+  nothing about this tab's connection or `socket.data.room` changes until that
+  decision is made, a refused diverged join touches literally nothing — the
+  room this tab was already authorized for is never put in question in the
+  first place. This is the general answer the brief asked for: detect the
+  conflict *before* the switch, so there is no window in which the single
+  "which room am I authorized for" fact is unrepresentable.
+- **The one case that genuinely cannot be decided in advance** — whether the
+  *target* room's saved encounter has anything worth pulling — can only be
+  known from the server's answer to `joinAsGm`, by which point the switch has
+  already happened. For that case alone, the switch is made **reversible**:
+  `abandonJoinAndRestore()` re-authenticates the same live socket back to
+  `previousRoom` (`restorePreviousRoomConnection()`), on the *existing*
+  transport rather than tearing it down and reconnecting from scratch, so
+  socket membership, `shareRoomCode`, listeners and the `session:gm-presence`
+  broadcast to the old room are all restored together, atomically from the
+  caller's point of view — never independently. If the reconnect attempt
+  itself fails (a genuine network problem, not a refusal), only then is the
+  transport actually torn down, and the GM is told with an **error-level**
+  banner (`shareError`, not `shareInfo`) naming both rooms and the one safe
+  recovery action — never the "rejoin to pull" advice a prior round gave,
+  which would have silently discarded whichever room was rejoined.
+- **Confirmation is no longer skipped just because `holdsLiveEncounterFor(target)`
+  is true.** That check answered "is this tab's on-screen encounter still
+  associated with this code at all", not "is it safe to act on that
+  association with zero friction" — the two came apart the moment the
+  association had diverged, and that gap is exactly what let the live repro
+  above happen with no prompt. A diverged join now always confirms first
+  (`confirmDivergedJoin`), even though the underlying connection is never at
+  risk while the dialog is open.
+
+**Why this makes the defect class impossible rather than merely handled again:**
+every path that used to leave the tab in a state no flag could describe
+(authorized for neither room, or silently unauthorized for one) either (a)
+never performs the switch that would create that state, or (b) actively
+reverses it back to a state one flag *can* describe (`shareRoomCode` = the
+room this tab is actually authorized for, restored on the live socket) before
+returning control to the GM. `shareRoomCode` stays a single global flag
+deliberately — the underlying fact really is single-room, because one socket
+can only be authenticated to one room's `socket.data.room` at a time on the
+server.
+
+**Correction (D-C, durable-rooms review round 7): the claim above — "every code
+path reaching a decision point now either avoids invalidating that single fact
+or repairs it before the function returns" — was false for one path this
+section did not account for: a lost or timed-out ack.** `emitWithAck`
+(`session-sync.service.ts`) rejects its promise after `requestTimeoutMs`
+(6s) with no way to know whether the server actually processed the request in
+the meantime. `gm:join-session`/`gm:create-session` are not idempotent no-ops
+on the server: by the time the promise rejects, the server may already have
+detached the socket from its old room and joined it to the new one
+(`socket.data.room` = the new room), while the client-side reject means
+neither `SessionSyncService.currentRoom` nor `BattleTrackerComponent.shareRoomCode`
+ever learned that — both still name the old room. Every subsequent broadcast
+from this tab then names a room its own socket is no longer authorized for,
+which `authorizeRoomPacket` refuses as `room-mismatch` (`server/room-guards.js`)
+— a reason distinct from `role-required` precisely because the role is fine;
+only the room disagrees. Before this fix `handleSessionError` only repaired
+`role-required`, so a `room-mismatch` read as an unrecognised refusal and
+`session:error` surfaced a banner with no automatic recovery, wedging the GM
+mid-combat with every broadcast silently discarded until they noticed and
+manually rejoined. The fix treats `room-mismatch` exactly like `role-required`:
+`handleSessionError` calls `handleSessionReconnected()`, which re-authenticates
+to `shareRoomCode` (the client's own belief about which room it should be
+running) and pushes local state — correcting `socket.data.room` server-side and
+`SessionSyncService.currentRoom` client-side back into agreement, and catching
+players back up in the same call. What changed is narrower than the original
+claim: every code path reaching a decision point *synchronously* either avoids
+invalidating the single fact or repairs it before returning; an *asynchronous*
+ack that is lost in flight is repaired reactively, on the next refusal, rather
+than being preventable at the call site that sent it — there is no way to
+know a timed-out request succeeded server-side without asking again.
+
+**`reconcileOwnershipFromServer(state)`**, called on every (re)join
+(`btnJoinShareSession_Click`) and on transport reconnect
+(`handleSessionReconnected`), before any push happens — the other half of
+Symptom A. Ownership is not really GM-tab-authoritative state: it is decided
+collaboratively by players claiming/releasing through the server, and the
+server can strip a claim on its own (a disconnect, a Close/End evacuation)
+without this tab's knowledge whenever it was not connected to hear the
+`release_claims` broadcast that announced it. This function corrects
+`participantOwners` from the server's returned copy — one-directionally, only
+ever *clearing* a local owner the server no longer has, never fabricating one
+the server has that the cache lacks (a live `claim_character` command already
+keeps the cache current for that direction; the only way the server can be
+*ahead* here is a release this tab missed). This is what makes the stale-owner
+symptom structurally impossible rather than fixed only for the one ordering
+bug that produced it (`evacuateRoom()`, above): even a *different* future bug
+that drops a correction on the floor heals itself on the next successful join,
+because ownership is always re-derived from the server at that point rather
+than trusted to still be right.
+
+**Round 6 correction (review defect D2): this used to skip every OOC
+participant entirely.** `state.participants` at the time never included anyone
+currently out of action (`getSharedParticipants()` filtered all of them
+client-side; a later change added the claimable exception documented above),
+so `reconcileOwnershipFromServer` used to `continue` past every one of them with
+"not on the wire — nothing to reconcile against" — backwards for ownership,
+since a claimed character going OOC is the ordinary case a release needs to
+survive (a downed PC, closed and rejoined days later, then revived, hits the
+returning player's `claim_character` with the server's stale `existingOwner`
+check). `SharedCombatState.oocOwnership` is a minimal, ownership-only shadow —
+`{id, ownerName, claimable}`, nothing else — that the GM tab computes and
+sends up on every `session:update-state` specifically so a later
+`reconcileOwnershipFromServer` has something to reconcile against even while
+the participant it describes is out of action. `server.js`'s
+`releasePlayerClaims` strips a departing player's `ownerName` from this shadow
+the same way it does from `state.participants`, so a disconnect-driven release
+is complete on both.
+
+**Follow-up (GM decision, durable-rooms manual QA after round 8): does a
+claimable OOC participant now on `state.participants` directly (see
+`getSharedParticipants()`'s exception above) make `oocOwnership` redundant?**
+Mostly, but not entirely — kept, not deleted, for one remaining reason.
+`reconcileOwnershipFromServer` looks a participant up in `state.participants`
+first and only falls back to `oocOwnership` if that lookup misses
+(`byId.get(id) || oocById.get(id)`), so for the ordinary claimable case the
+two now describe the same thing and the fallback is simply never reached —
+`oocOwnership` still gets an entry for that participant (its own filter,
+`isClaimableOrOwnedOoc`, is unchanged and still matches it), it is just
+redundant with the fuller entry. The case that is **not** redundant is an
+out-of-action participant that is *owned* (`participantOwners.has(p)`) but
+not *claimable* (`participantClaimable.get(p) !== true`) — `getSharedParticipants()`'s
+filter keys strictly on claimable, so that participant is still withheld from
+`state.participants` entirely, and `oocOwnership` is the only thing on the
+wire a rejoining GM's reconciliation has to correct a stale local owner
+against. The ordinary claim UI (`btnToggleClaimable_Click`) cannot produce
+this state — turning `claimable` off in that one control also clears the
+owner in the same tap — so it is a defensive case rather than a common one,
+but nothing enforces the pairing at the data-model level, and `oocOwnership`'s
+own filter was already written broader than "claimable alone" for exactly
+this reason before this change. Verdict: keep `oocOwnership` exactly as it
+was, computed by the same helper as the new `participants` exception so the
+two can never drift on the definition of "claimable enough."
+
+**Round 7 resolution (D-G) of the Open Decision 4 leak tension.** Round 6's
+placement of `oocOwnership` directly on `SharedCombatState` meant it travelled
+on the room broadcast (`session:state`) and the `player:join` ack — reachable
+by every player in the room, not just the GM — which reopened, field by field
+and via a code comment rather than a spec decision, the exact leak ground
+Open Decision 4 explicitly weighed and rejected when it chose *not* to widen
+the fuller per-participant OOC shape. The user's decision (round 7): keep the
+data — D2's revived-OOC re-claim fix depends on it — but confine it to a
+channel only the GM's own socket receives. `playerFacingState()` in
+`server.js` strips `oocOwnership` from exactly the two player-reachable
+channels — the `session:state` room broadcast and the `player:join` ack —
+while `gm:join-session` and `gm:create-session` acks (per-socket, never
+room-broadcast) still return `session.state` unstripped. The stored session
+document itself (`session.state.oocOwnership`, in memory and on disk) is
+untouched either way — `releasePlayerClaims` still needs to strip ownership
+from it, and a rejoining GM's `reconcileOwnershipFromServer` still needs to
+read it — only the copy handed to a player-reachable channel is trimmed, and
+only a shallow copy, so the stored object is never mutated by a broadcast.
+This closes the tension rather than merely relocating it again: there is now
+exactly one place (`playerFacingState`) that decides what a player-reachable
+channel may carry, and every such channel is required to go through it.
+
+**Round 6 correction (review defect D8), later superseded by round 7 (D-A —
+see "Ownership is a per-room fact" below): `btnCreateShareSession_Click` used
+to carry the previous room's ownership straight into a brand-new room.** A
+fresh `gm:create-session` has no server-side state to reconcile against —
+reconcile only ever runs on `gm:join-session` — so the very first push to the
+new room broadcast whatever `ownerName`s were still cached from the *previous*
+room's players. Round 6's fix cleared `participantOwners` entirely at create
+time, a disclosed trade-off rather than a silent one: it was not scoped only to
+the new room, because the two lived for the same single `participantOwners`
+map and there was no cheap way from this tab alone to tell "this owner is a
+dead token from last week" apart from "this is the same player, still
+connected, about to follow me into the new room" — so a GM who created a room
+*by mistake* and immediately rejoined the old code to recover (the round-3
+fix 6 flow) found that room's real owners cleared too, at the cost of one
+avoidable re-claim per player. Round 7 replaces this trade-off entirely — see
+below.
+
+### Ownership is a per-room fact, not a global one (D-A, durable-rooms review
+round 7)
+
+**The defect class.** Rounds 3–6 each closed one *instance* of representing a
+per-room fact ("who owns this character") in a single global variable shared
+by every room this tab is simultaneously live for
+(`liveEncounterRooms` — several room codes, one `CombatManager`, because
+Create Player Session and a "no saved encounter" Join both leave the on-screen
+encounter unchanged while adding a new code to broadcast it to). Round 6's D8
+fix above is a representative example: it did not make "this room's ownership"
+representable — it *destroyed* the global so the next room started clean, which
+is the same substitution (global variable standing in for a per-room fact)
+resolved by deletion instead of by giving the fact somewhere per-room to live.
+The round-6 review verdict on that fix was accordingly "relocated, not closed":
+the next room-switch path found the same gap through a different door.
+
+**Why a `Map<room, …>` alone does not fix it.** `participantOwners` is keyed
+by `IParticipant` object identity (§6/§8), which ~60 call sites across this
+file read and write as a flat map — claim, release, promote/demote/clone
+side-map copies, the placeholder check, the outgoing-state builder. All of
+them assume "the current owner of this participant", with no room parameter,
+because historically there was only ever one room. Rekeying every one of
+those call sites to `Map<room, Map<IParticipant, string>>` and threading a
+room argument through all of them would touch most of the file's mutation
+surface for a fact that, at any single moment, only one room actually needs:
+the room this tab's socket is currently authenticated to and pushing to.
+
+**`participantClaimable` is out of scope for this fix, deliberately.** It is
+not a per-room fact the way `ownerName` is: `claimable` marks a GM authoring
+decision ("this character is available for a player to claim at all"), not
+which specific player-token in which specific room holds the claim. Round 6's
+D8 tests (kept passing unmodified by this round) already establish the
+contract: Create Player Session clears ownership but leaves `claimable`
+untouched, so a brand-new room's characters are still claimable by its own
+(new) players by default. Nothing about this fix changes that — only
+`participantOwners` gets a per-room shelf.
+
+**The fix: keep `participantOwners` as the *active* room's view, and add a
+per-room shelf underneath it that only room-switch points touch.**
+
+- `participantOwners` keeps exactly its existing shape and every existing call
+  site — unchanged, because it now carries a documented invariant: **it
+  always describes `activeOwnershipRoom`.**
+- `activeOwnershipRoom: string` (GM-component-local) names which room that is.
+  **It is deliberately not the same field as `shareRoomCode`** ("is this tab
+  authorized to broadcast to room X", the single-room fact §7's "Authority"
+  section above documents): a Close, or an external close notice, blanks
+  `shareRoomCode` while this tab's in-memory ownership for that room is still
+  perfectly correct and needs no shelving — conflating the two was exactly
+  what let D-A's repro happen (see below).
+- `ownershipByRoom: Map<room, Map<participantId, ownerName>>` is the shelf.
+  Keyed by the stable `participantId` string (`getParticipantId`), not object
+  identity — object identity is exactly what a shelf *cannot* key on, since
+  the same `Participant` objects get shelved under one room code and reloaded
+  under another.
+- `switchActiveOwnershipRoom(toRoom)` is the one function that moves the
+  "active" designation: it shelves whatever `activeOwnershipRoom` currently
+  holds (skipped if empty; an empty snapshot removes any stale shelf entry
+  rather than storing one), loads `toRoom`'s own shelf into the now-empty
+  active map (nothing, if `toRoom` has never been active before — exactly
+  "the new room simply has no ownership yet"), and only then reassigns
+  `activeOwnershipRoom`. A no-op when `toRoom` already **is**
+  `activeOwnershipRoom`, which is not an optimisation but a correctness
+  requirement: without that guard, a room whose ownership was never shelved
+  out (the Close case above) would have its own still-correct content shelved
+  into itself and immediately reloaded from an empty shelf, wiping every
+  current owner.
+
+**Call sites, and why each is scoped the way it is:**
+
+- **Create Player Session** (`btnCreateShareSession_Click`) calls
+  `switchActiveOwnershipRoom(room)` in place of round 6's
+  `participantOwners.clear()`. This shelves the previous room's real owners
+  (recoverable by a later rejoin of that code — the "brings it back" promise
+  the confirmation dialog makes) and resets the active maps to empty for the
+  brand-new room, with nothing disclosed as a trade-off: both halves of D8's
+  original tension are satisfied at once, because they are no longer the same
+  variable.
+- **Join, push path** (`btnJoinShareSession_Click`, `holdsLiveEncounterFor(room)`
+  true and not diverged) calls `switchActiveOwnershipRoom(room)` *before*
+  `reconcileOwnershipFromServer(state)`, so reconciliation corrects the
+  *newly-active* room's cache against that room's own fetched state, never a
+  different room's. This is the exact fix for D-A's repro: mis-tap Create
+  (shelves the real room's owners, pushes an empty new room nobody is in),
+  notice the mistake, retype the real room's code and Join — the push branch
+  restores that room's shelf before pushing, so all four owners come back
+  intact and no player sees a spurious "GM released X" message.
+- **Join, "no saved encounter" path** (server has nothing for `room`, so this
+  tab's own encounter is pushed instead) calls `switchActiveOwnershipRoom(room)`
+  for the same reason as Create: `room` is new to this tab's ownership, and
+  whatever was active for the room being left must be preserved for its own
+  later rejoin, not discarded.
+- **Join, pull path** (`restoreFromSharedState`, a full replace) does **not**
+  call `switchActiveOwnershipRoom` — it rebuilds `participantOwners` (and
+  `participantClaimable`) directly from the freshly-fetched
+  `state.participants` (already fully authoritative for the room being
+  pulled), and the
+  `liveEncounterRoomCode` setter that follows it sets `activeOwnershipRoom =
+  room` as a bookkeeping fact and clears `ownershipByRoom` entirely. This
+  mirrors `liveEncounterRooms`' own "a pull replaces everything, every earlier
+  association is now stale" rule (above): every other room's shelved
+  ownership becomes unreachable the moment this tab's `CombatManager` no
+  longer holds a live encounter for it, so there is nothing left to shelve it
+  *for*.
+- **`restorePreviousRoomConnection`** (reclaiming an abandoned room after a
+  declined OOC-only or diverged join, previous section) does **not** call
+  `switchActiveOwnershipRoom` either — by its own precondition
+  (`holdsLiveEncounterFor(previousRoom)`), ownership was never switched away
+  from that room in the first place, so the active maps already describe it
+  correctly; only `reconcileOwnershipFromServer` against its freshly-fetched
+  state is needed.
+- **End Room** (`resetShareStateAfterLeaving(room, discardHiddenEntries: true)`)
+  and an **external, non-persisted close** (`handleSessionClosedExternally`)
+  both delete `ownershipByRoom.get(room)` alongside the existing
+  `liveEncounterRooms.delete(room)` — the room is permanently gone, so nothing
+  will ever `switchActiveOwnershipRoom(room)` again to read that shelf entry
+  back. An ordinary **Close** does neither: the room is kept, and if it
+  happens to be `activeOwnershipRoom` right now its in-memory content is still
+  correct and needs no shelving at all (see the `activeOwnershipRoom` /
+  `shareRoomCode` split above).
+
+**Why the global substitution is harder to reintroduce, not impossible.**
+(Narrowed, durable-rooms review round 8, item 4a — the previous wording here
+claimed there was no second path to the flat maps at all, which was false and
+was caught by that round's review.) `switchActiveOwnershipRoom`'s own contract
+— shelve the outgoing room, load the incoming room's own shelf or nothing —
+cannot express "destroy every room's ownership to clean one room's slate" the
+way a bare `.clear()` could, and it is genuinely the only function that
+*switches which room the active maps describe while keeping every other
+room's ownership shelved and recoverable*. But it is not the only code that
+writes `participantOwners` or `activeOwnershipRoom` directly, and both other
+writers are correct by design, not gaps:
+
+- `restoreFromSharedState` (`battle-tracker.component.ts:3838` `.clear()`,
+  `:3893` `.set()`) rebuilds `participantOwners` straight from the server's
+  freshly-fetched `state.participants` for the room being pulled — see the
+  "Join, pull path" bullet above for why that is correct and does not go
+  through `switchActiveOwnershipRoom`.
+- The `liveEncounterRoomCode` setter (`:747-771`) writes `activeOwnershipRoom`
+  and clears `ownershipByRoom` directly, immediately after
+  `restoreFromSharedState` has already rebuilt the active maps — reassigning
+  which room they now describe as a bookkeeping fact, not re-deriving their
+  content.
+
+Both are deliberate, both are documented at their own call sites, and neither
+reintroduces "one flat map, several rooms" — they are two more places, beyond
+`switchActiveOwnershipRoom`, that keep it per-room-correct, not places that
+could get it wrong unnoticed. The item-3 hidden-log leak (round 8) is the
+empirical counter-example to the old, stronger claim: it was reached through
+one of these exact seams — the same three join branches and the same
+`liveEncounterRoomCode` setter — because `sharedLogEntries`' hidden subset had
+no shelf of its own yet. It is now shelved the same way (`hiddenLogEntriesByRoom`,
+switched at the same points), which is the argument for auditing every writer
+of a flat map that is supposed to be per-room, not only the one named function
+whose job is switching between rooms.
+
+**Undo.** Ownership changes are categorised by what kind of operation they
+are, applied uniformly within each category, rather than round-6's
+inconsistency where `btnReleaseClaim_Click` wrapped its `forgetMapEntry` in a
+chapter while Create's clear bypassed undo entirely (D-A, durable-rooms
+review round 7). There were already three existing categories before this
+round, not two, and the fix does not disturb the other two:
+
+1. **A single GM edit to one participant's ownership** — `btnReleaseClaim_Click`
+   is the only member. Left exactly as it was: undoable, wrapped in its own
+   chapter, a genuine "I made a mistake, or the claim is stale, undo it" GM
+   decision.
+2. **A live claim/release driven by a player command** — `claim_character` and
+   `release_claims` in `handleSessionCommand`. Never wrapped in undo, before or
+   after this round: this is collaborative state a *player* changed, not a
+   local GM edit, so a GM's Ctrl+Z reaching back to reverse another table
+   member's own claim would be surprising, not helpful.
+3. **A room-level operation that replaces which room's ownership is active** —
+   `restoreFromSharedState` (already bounds and discards its own chapter,
+   §4, S3 in the spec) and `switchActiveOwnershipRoom` (Create, Join push, the
+   "no saved encounter" Join branch). These two members do not behave alike:
+   `restoreFromSharedState` opens an explicit `UndoHandler.StartActions()`
+   chapter and discards it (`Initialize()`) before returning, so a rebuild
+   that touches many participants cannot be walked into by a later Ctrl+Z one
+   step at a time. `switchActiveOwnershipRoom` — and the
+   `shelveActiveOwnership`/`loadShelvedOwnership` it calls — do not bound a
+   chapter at all; they are plain `Map.clear()`/`.set()` writes with no
+   `UndoHandler` call anywhere in them, the same shape round 6's Create-time
+   clear had. (Corrected, durable-rooms review round 8, item 4b — the previous
+   wording here faulted round 6's clear for "bypassing undo outright rather
+   than bounding a chapter the way `restoreFromSharedState` does" and credited
+   `switchActiveOwnershipRoom` with fixing that; in fact `switchActiveOwnershipRoom`
+   bypasses undo the identical way, and correctly so.) A room switch is
+   deliberately not GM-undoable at all — same reasoning as category 2's
+   player-driven claims: switching which room's ownership is active is a
+   bookkeeping fact about which room this tab is looking at, not a state edit
+   a GM would want to Ctrl+Z one step at a time, so no `Undoable` write means
+   no auto-opened chapter for it to land in (ARCHITECTURE §4). What round 7
+   actually fixed in this category was not an undo-chaptering defect — it was
+   that round 6's flat `participantOwners.clear()` at Create time destroyed
+   every other room's ownership outright, a data-loss bug in the
+   *representation*, fixed by shelving instead of clearing
+   (`switchActiveOwnershipRoom`'s doc comment above). `restoreFromSharedState`
+   bounding its own chapter is unrelated to that fix and was already correct
+   before round 7.
 
 **The GM's local `CombatManager` is the single source of truth.** Nothing
 about turn/pass advancement, undo, or initiative computation is
@@ -900,12 +1472,12 @@ active. Session sync is a one-way derived broadcast layered on top:
   `sessionSync.broadcastState()` → `session:update-state` → server
   rebroadcasts as `session:state` to everyone in the room, including the GM
   tab that sent it.
-- `getSharedParticipants()` filters out OOC participants entirely (they
-  never appear in the shared list at all, not just hidden) and recomputes
-  `order` as the post-filter array index every time — this is the only
-  place an explicit "order" number exists in the state model, and it's
-  derived, not authoritative. Because of that filter, an encounter where
-  *everyone* is out of action serialises as `participants: []` and used to be
+- `getSharedParticipants()` filters out OOC (out-of-action) participants —
+  with one deliberate exception, below — and recomputes `order` as the
+  post-filter array index every time — this is the only place an explicit
+  "order" number exists in the state model, and it's derived, not
+  authoritative. Because of that filter, an encounter where *everyone*
+  withheld is out of action serialises as `participants: []` and used to be
   indistinguishable on the wire from a room that never had an encounter — so a
   GM joining that code hit the empty-snapshot branch and pushed their own
   encounter straight over a real saved fight. `SharedCombatState` therefore also
@@ -913,6 +1485,39 @@ active. Session sync is a one-way derived broadcast layered on top:
   exists **only** for the persistence/overwrite guard
   (`snapshotHasEncounter()`); nothing renders it, and every UI notion of "active
   participants" still excludes OOC on purpose.
+
+  **The exception (GM decision, durable-rooms follow-up, manual QA after the
+  round-8 review): a *claimable* OOC participant is broadcast anyway**, with a
+  new `ooc: true` field on its `SharedParticipantState` entry, so its owner can
+  see and reclaim it while it is down. `getSharedParticipants()`'s filter is
+  `!p.ooc || isClaimableOrOwnedOoc(p)` — the same claimable/ownership
+  predicate `syncSharedState()`'s `oocOwnership` shadow already used, factored
+  into one shared helper (`isClaimableOrOwnedOoc`) so the two lists cannot
+  silently diverge on who counts as claimable enough. A downed **non-player**
+  participant (not claimable, never owned) still never appears on the wire at
+  all — the privacy property this filter always had is unchanged for that
+  case; only the claimable exception is new, and `oocParticipantCount` was
+  narrowed to count only the participants still actually withheld, so it does
+  not double-count a claimable OOC participant against `participants.length`.
+  Every action affordance (`canAct`/`canDelay`/`canInterrupt`) is forced `false`
+  for an `ooc` entry regardless of its underlying `status`/Score, at the
+  point of broadcast — a claimable downed character must not become a
+  playable one. On the player side, `PlayerViewComponent` reads two different
+  lists off the same wire array for two different questions: `visibleParticipants`
+  (the initiative order — still excludes every `ooc` entry, claimable or not,
+  since a downed character is never in the order) and `ownParticipants` /
+  `unclaimedParticipants` (claim/ownership — read the *unfiltered* array, so a
+  claimable downed character is still offered for claim and a player's own
+  downed character still reads as theirs). `restoreFromSharedState()` reads
+  `shared.ooc` back onto the rebuilt participant's manual `ooc` flag — the only
+  field on the wire that can put one back down at all, since damage/health
+  still are not — so a GM rejoining a room never gets a downed PC back
+  standing up.
+
+  `SharedCombatState.oocOwnership` (below) is not made redundant by this — it
+  is still the only path for the narrower case of an out-of-action participant
+  that is owned but not (or no longer) claimable, which the `ooc`-on-`participants`
+  exception does not cover because it keys on claimable, not owned.
 - Players never mutate combat state directly. Player-initiated actions
   (`register_character`, `configure_deck`, `claim_character`,
   `release_claims`, `roll_submission`, `act`, `delay`, `interrupt`) are sent
@@ -931,12 +1536,21 @@ active. Session sync is a one-way derived broadcast layered on top:
   branch that logs a player-originated event attributes it to the
   *character* name instead (`target.name`, falling back to a non-token
   label when the name is empty or literally equals the sender's token), via
-  `appendPlayerCommandLog`. The equivalent GM-button-triggered events (e.g.
-  jacking a deck in/out, toggling Awakened status) go through
-  `appendParticipantEventLog`, which writes to the shared log when a session
-  is open and to the local Action Log only when it isn't, so shared-log
-  coverage of an event doesn't depend on whether the player or the GM
-  triggered it. Neither helper is the *only* place an actor name is built —
+  `appendPlayerCommandLog`. The equivalent GM-button-triggered events go
+  through `appendParticipantEventLog` — declared actions and interrupts
+  (`performAct`, `btnAction_Click`) are now likely its most common callers,
+  alongside jacking a deck in/out and toggling Awakened status — which
+  writes to the shared log when a session is open and to the local Action
+  Log when it isn't, so shared-log coverage of an event doesn't depend on
+  whether the player or the GM triggered it. It also falls back to a local
+  line when a session is open but the connection is lost
+  (`shareConnectionLost`) — the shared emit is fire-and-forget with no local
+  echo of its own, so without this fallback an Act or Interrupt taken while
+  disconnected left no record anywhere until reconnect
+  (`action-log-readability-spec.md` fix-round defect D1; the record lands in
+  the local pane only, which the GM cannot see until the session is closed —
+  a known, accepted gap, `docs/FEATURE-BACKLOG.md` N2). Neither helper is the
+  *only* place an actor name is built —
   `roll_submission`, `act`, `delay`, `interrupt`, and `dice_roll` still
   construct `target.name || "Player"` inline — so a new handler that logs a
   player-originated event should follow the same convention rather than
@@ -986,7 +1600,18 @@ active. Session sync is a one-way derived broadcast layered on top:
   at close time would destroy data the GM could still have merged back; the
   discard belongs to the destructive `btnEndShareSession_Click`, behind a
   confirmation, and `btnCreateShareSession_Click` likewise discards them only
-  behind an explicit GM confirmation. Entry `timestamp` is therefore load-bearing for ordering, not
+  behind an explicit GM confirmation. **`sharedLogEntries`, like
+  `participantOwners` before round 7, is one flat array describing whichever
+  room is currently active — and its hidden subset is per-room shelved the
+  same way, since round 8 (item 3): a hidden note authored while running room
+  B must not survive a switch to room A and get folded into room A's merged
+  log on the next join. `hiddenLogEntriesByRoom: Map<room, SharedLogEntry[]>`
+  is that shelf, written/read by `shelveActiveHiddenLog`/`loadShelvedHiddenLog`,
+  switched at the exact same seams as `ownershipByRoom` — inside
+  `switchActiveOwnershipRoom` itself (every create/join branch that keeps
+  this tab's own local state live) and the `liveEncounterRoomCode` setter (the
+  destructive-pull branch, which clears every other room's shelf the same way
+  it already does for ownership).** Entry `timestamp` is therefore load-bearing for ordering, not
   just display. `restoreFromSharedState()` sets the turn/pass
   counters *before* rebuilding participants and then assigns each restored
   participant's `currentInitiativeScore` directly from the broadcast
@@ -1012,9 +1637,15 @@ active. Session sync is a one-way derived broadcast layered on top:
   It reconstructs the *correct participant class* from the broadcast
   `isMatrix`/`isAstral` flags (`MatrixParticipant` with its deck stats and VR
   mode, `AstralParticipant` with its projection flag) rather than rebuilding
-  everyone as a plain `Participant`; health, damage and OOC participants are
-  still not on the wire and still do not come back, and the GM is told so at
-  restore time (`restoreWarning`). `ICParticipant` has no wire flag of its own
+  everyone as a plain `Participant`; health and damage are still not on the
+  wire and still do not come back, and the GM is told so at restore time
+  (`restoreWarning`). A **non-claimable** OOC participant is still not on the
+  wire either and still does not come back. A **claimable** OOC participant
+  (a player character) does come back now — with its `ooc` flag applied to
+  the rebuilt participant's manual `ooc` setter, since that is the only field
+  on the wire that can put a participant back down at all (damage/health
+  still are not restored) — so a GM rejoining a room gets a downed PC back
+  downed, never silently revived. `ICParticipant` has no wire flag of its own
   and comes back as a `MatrixParticipant`.
 - **Transport reconnect is push, not pull, on the GM side.** A reconnected
   socket is a new socket with no role, so every guarded emit is refused until it
@@ -1025,25 +1656,22 @@ active. Session sync is a one-way derived broadcast layered on top:
   `restoreFromSharedState()` there, which would replace a live encounter with
   the lossier server copy. Players always pull (they hold no authoritative
   state).
-- **The explicit Join button follows the same push-not-pull rule.** Whether
-  `btnJoinShareSession_Click` pulls is decided by one question: *does this tab
-  still hold the live encounter for that room code?* The GM component records
-  the room its `CombatManager` belongs to in `liveEncounterRoomCode` (set on
-  create and on join, kept across a Close, cleared only by an End), and pushes
-  with `syncSharedState()` when that code matches the one being joined and the
-  participant list is non-empty. This is what makes Close Room's own advice
-  ("rejoin with code ABC123") safe: a mis-tapped Close followed by a rejoin from
-  the same tab restores nothing and loses nothing. A fresh tab, a reloaded tab,
-  or a join of a *different* code all still pull — the field is in-memory only,
-  so a page load starts blank. The log is merged either way
-  (`mergeHiddenLogEntries` is additive). **A pull that would overwrite something
-  is confirmed first** (spec AC 15): if the tab does not hold the live encounter
-  for that code but its `CombatManager` still has participants,
-  `confirmDestructiveJoin()` names the count and what goes with it (damage,
-  condition monitors, out-of-action participants, committed interrupts, undo
-  history) before `restoreFromSharedState()` runs. Cancelling aborts before the
-  `joinAsGm` call, so nothing local is touched. A tab with no participants is
-  never prompted.
+- **The explicit Join button follows the same push-not-pull rule**, decided by
+  `holdsLiveEncounterFor()` — see "Authority: who is the truth for a room, and
+  how that can be lost" earlier in this section for `liveEncounterRooms`,
+  `liveEncounterFingerprints`, divergence, and what a diverged or
+  can't-be-restored join now does (it does not complete). This is what makes
+  Close Room's own advice ("rejoin with code ABC123") safe: a mis-tapped Close
+  followed by a rejoin from the same tab restores nothing and loses nothing.
+  The log is merged either way (`mergeHiddenLogEntries` is additive). **A pull
+  that would overwrite something is confirmed first** (spec AC 15): if the tab
+  does not hold the live encounter for that code but its `CombatManager` still
+  has participants, `confirmDestructiveJoin()` names the count and what goes
+  with it (damage, condition monitors, out-of-action participants, committed
+  interrupts, undo history) before `restoreFromSharedState()` runs. Cancelling
+  aborts before the `joinAsGm` call, so nothing local is touched. A tab with no
+  real participants (`isUnusedPlaceholder()`, widened round 5 — see P2-2 below)
+  is never prompted.
 - **Undo/redo re-broadcast.** `btnUndo_Click`/`btnRedo_Click` call
   `syncSharedState()` after `UndoHandler.Undo()`/`Redo()`. Undo reverses
   player-visible state (a released claim being the case that made this a
@@ -1081,6 +1709,18 @@ active. Session sync is a one-way derived broadcast layered on top:
   (see `btnDelete_Click`, `upsertPlayerParticipant`'s type-mismatch branch).
   A new feature that adds another such map inherits this obligation with no
   compiler enforcement.
+- **`isUnusedPlaceholder()` diffs a fresh reference instance, not a hand-list**
+  (P2-2, round 5). It used to check eight fields by name and missed `baseIni`,
+  the condition-monitor sizing fields, `painTolerance` and `status`/`waiting`,
+  so a GM who set Reaction/Intuition/a 12-box monitor before typing a name had
+  that work silently counted as "nothing at risk" and discarded on a
+  destructive Join with no prompt. It now constructs `new Participant()` and
+  compares every relevant field against it, plus `participantEdgeRatings`/
+  `participantReactions`/`participantIntuitions`/`pendingVrModes` against
+  `addParticipant()`'s own seed values — so a new `Participant` field added
+  later is covered automatically. `sortOrder` is deliberately excluded: it is
+  stamped from a position counter, not GM intent, and comparing it against a
+  reference's `0` would flag every untouched row after the first.
 - **`hardReset()` is unreachable from the normal game loop.** It exists on
   `Participant` (zeroes damage and `baseIni`, and resets `dices` to 1 via
   `setDicesWithoutRoll`, in addition to `softReset()`'s work) but nothing in `CombatManager` or the GM component

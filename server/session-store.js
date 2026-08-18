@@ -55,11 +55,16 @@ const ROOM_RETENTION_INDEFINITE = true;
 /**
  * How long a legacy expiry marker is kept before the sweep clears it, ms.
  *
- * Nothing writes these any more; they only exist on servers that ran the
- * previous 30-day-retention build. Keeping them for a while means a GM whose
- * room was expired by that build still gets "removed on <date>" rather than a
- * bare "Room not found" (spec S5, which retains the messaging for removed rooms
- * but not for age).
+ * Applies to **both** kinds of tombstone this file can produce: a legacy
+ * `.expired.json` written by the previous 30-day-retention build (nothing
+ * writes those any more - retention is indefinite), and an eviction tombstone
+ * `evict()` below writes when the hard room cap forces a room out
+ * (round-4 defect D7). Keeping either for a while means a GM whose room was
+ * expired or evicted still gets "removed on <date>" rather than a bare "Room
+ * not found" (spec S5, which retains the messaging for removed rooms but not
+ * for age) - and after this window even that marker itself is swept, so a
+ * sufficiently old removal eventually reads as a bare "Room not found" again.
+ * `docs/APP_DOCUMENTATION.md` documents this lifecycle.
  */
 const DEFAULT_TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -70,11 +75,31 @@ const ROOM_FILE_SUFFIX = ".room.json";
 /**
  * Marker for a room that was removed, so a later `gm:join-session` can say so
  * instead of a bare "Room not found" — which is indistinguishable from a typo
- * (spec scenario S5). Only ever *read* now that retention is indefinite; the
- * age-expiry path that used to write them is gone.
+ * (spec scenario S5). The age-expiry path that used to write these under the
+ * previous 30-day-retention build is gone (retention is now indefinite) - but
+ * `evict()` below still writes one, for the one case retention is not truly
+ * indefinite: a room forced out at the hard room cap (round-4 defect D7). So
+ * this file is written in exactly one situation now (capacity eviction), read
+ * by `expiryOf()` for both that and any pre-existing legacy marker, and
+ * eventually removed by `sweepTombstones()` after `DEFAULT_TOMBSTONE_RETENTION_MS`.
  */
 const TOMBSTONE_FILE_SUFFIX = ".expired.json";
 const TEMP_FILE_SUFFIX = ".tmp";
+/**
+ * Suffix a room file is renamed to when `loadAll()` cannot parse it (review
+ * defect D10, durable-rooms review round 6). Never written to directly by
+ * anything else - `loadAll()` is the only writer. Kept on disk rather than
+ * deleted, since a parse failure might still be worth a human's inspection or
+ * hand-repair; an operator who wants the bytes gone can remove them, and
+ * `docs/APP_DOCUMENTATION.md` documents where these live. Not swept
+ * automatically for the same reason a legacy expiry marker used to be kept
+ * for a while rather than deleted on sight - this file exists purely so a
+ * corrupt room stops being re-scanned, re-failed and re-logged on every
+ * future boot forever, which is the actual defect; the room code it freed is
+ * immediately reusable regardless of whether the quarantined file is ever
+ * cleaned up by hand.
+ */
+const CORRUPT_FILE_SUFFIX = ".corrupt.json";
 
 /** Room-code validator, byte-identical in intent to `server.js`'s. */
 function isRoomCode(value) {
@@ -166,10 +191,8 @@ function createSessionStore(options) {
     ? DEFAULT_TOMBSTONE_RETENTION_MS
     : options.tombstoneRetentionMs;
   const sweepIntervalMs = options.sweepIntervalMs === undefined ? DEFAULT_SWEEP_INTERVAL_MS : options.sweepIntervalMs;
-  /* eslint-disable no-console */
   const logInfo = options.logInfo || ((msg) => console.log(msg));
   const logError = options.logError || ((msg, err) => console.error(msg, err || ""));
-  /* eslint-enable no-console */
 
   /** room -> { timer, session } for writes waiting out the debounce window. */
   const pending = new Map();
@@ -189,6 +212,37 @@ function createSessionStore(options) {
 
   function tombstoneFile(room) {
     return path.join(dir, room + TOMBSTONE_FILE_SUFFIX);
+  }
+
+  /**
+   * Every quarantined-corrupt file that belongs to `room` (D-I, durable-rooms
+   * review round 7). Normally just `<room>.corrupt.json`, but `quarantineTarget()`
+   * below can suffix a second one with a timestamp if the room code was reused
+   * and corrupted again, so this has to glob rather than assume exactly one.
+   */
+  function corruptFilesFor(room) {
+    return listFiles(CORRUPT_FILE_SUFFIX)
+      .filter(name => name === room + CORRUPT_FILE_SUFFIX || name.startsWith(room + "-"))
+      .map(name => path.join(dir, name));
+  }
+
+  /**
+   * Where `loadAll()` should quarantine a corrupt `<room>.room.json`.
+   *
+   * D-I (c), durable-rooms review round 7: the previous implementation always
+   * renamed to the same `<room>.corrupt.json` target, so a *second* corruption
+   * of a reused room code silently `renameSync`-overwrote the first quarantine
+   * - destroying the bytes quarantine exists to preserve. If that target is
+   * already taken, suffix with the current time so both survive; collisions
+   * within the same millisecond are not worth guarding further given this is
+   * an already-rare failure path being handled best-effort.
+   */
+  function quarantineTarget(room) {
+    const base = path.join(dir, room + CORRUPT_FILE_SUFFIX);
+    if (!fs.existsSync(base)) {
+      return base;
+    }
+    return path.join(dir, room + "-" + now() + CORRUPT_FILE_SUFFIX);
   }
 
   function ensureDir() {
@@ -234,11 +288,13 @@ function createSessionStore(options) {
   }
 
   /**
-   * The single funnel every server-side mutation goes through. `server.js` has
-   * **three** write sites, not one (`session:update-state`,
-   * `session:append-log`, and the in-place `ownerName` strip in the disconnect
-   * handler) — routing them all through one helper is what stops a fourth site
-   * added later from silently failing to persist (spec, Proposed approach 1).
+   * The single funnel every server-side mutation goes through. `server.js`'s
+   * `touchSession` has **five** callers, not three (review defect D3,
+   * durable-rooms review round 6 - this count already drifted twice; see
+   * `touchSession`'s own doc comment in `server.js` for the current list and
+   * for what to update if a sixth is ever added) — routing every one of them
+   * through this single helper is what stops a further site added later from
+   * silently failing to persist (spec, Proposed approach 1).
    */
   function touch(room, session) {
     if (!isRoomCode(room) || !session) {
@@ -313,7 +369,15 @@ function createSessionStore(options) {
     return draining;
   }
 
-  /** Drop a room's persisted record entirely ("End Room", spec AC 8). */
+  /**
+   * Drop a room's persisted record entirely ("End Room", spec AC 8).
+   *
+   * Also unlinks any `.corrupt.json` quarantine file for this room code
+   * (D-I (a), durable-rooms review round 7): without this, "delete
+   * permanently" could still leave the room's bytes on disk under the
+   * quarantine name, which is not what an End Room's confirmation dialog
+   * promises.
+   */
   function remove(room) {
     const entry = pending.get(room);
     if (entry) {
@@ -321,7 +385,7 @@ function createSessionStore(options) {
       pending.delete(room);
     }
     let removed = false;
-    for (const file of [ roomFile(room), tombstoneFile(room) ]) {
+    for (const file of [ roomFile(room), tombstoneFile(room), ...corruptFilesFor(room) ]) {
       try {
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
@@ -348,6 +412,12 @@ function createSessionStore(options) {
    * amended). `expiryOf()` already reads this same tombstone shape for the
    * legacy 30-day-retention build's markers; this is the only place that
    * writes one now.
+   *
+   * Also unlinks any `.corrupt.json` quarantine for this room code (D-I (b),
+   * durable-rooms review round 7), for the same reason `remove()` does: an
+   * evicted code is freed for reuse (`gm:create-session`'s tombstone check),
+   * and a stale quarantine file left behind under that code is a second,
+   * inconsistent record of the room `evict()` is meant to have fully cleared.
    */
   function evict(room, reason) {
     const entry = pending.get(room);
@@ -355,13 +425,14 @@ function createSessionStore(options) {
       clearTimeout(entry.timer);
       pending.delete(room);
     }
-    const file = roomFile(room);
-    try {
-      if (fs.existsSync(file)) {
-        fs.unlinkSync(file);
+    for (const file of [ roomFile(room), ...corruptFilesFor(room) ]) {
+      try {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      } catch (err) {
+        logError(`[rooms] failed to delete ${file}`, err);
       }
-    } catch (err) {
-      logError(`[rooms] failed to delete ${file}`, err);
     }
     try {
       writeAtomic(tombstoneFile(room), JSON.stringify({
@@ -417,6 +488,32 @@ function createSessionStore(options) {
       } catch (err) {
         skipped.push(name);
         logError(`[rooms] skipping unreadable room file ${name}`, err);
+        // Review defect D10 (durable-rooms review round 6): a corrupt
+        // `*.room.json` used to stay named exactly like every readable one
+        // forever - so every boot re-read it, re-failed the same parse, and
+        // logged the same error, indefinitely, with nothing ever removing it.
+        // Quarantine it under a distinct suffix instead of leaving it in the
+        // set `listFiles(ROOM_FILE_SUFFIX)` scans: it stops being retried on
+        // every future boot, the room code is freed for reuse immediately
+        // (unlike an `evict()` tombstone, a parse failure carries no reason
+        // an operator would want preserved), and the bytes are kept on disk
+        // - not deleted - in case they are worth inspecting or hand-repairing
+        // rather than lost outright. Best-effort: if even the rename fails,
+        // fall through to logging as before rather than throwing and taking
+        // the rest of startup down with it (this file was already unreadable;
+        // failing to relabel it must not be allowed to matter more than that).
+        //
+        // `quarantineTarget()`, not a fixed `<room>.corrupt.json` (D-I (c),
+        // durable-rooms review round 7): the fixed name let a *second*
+        // corruption of a reused room code silently overwrite the first
+        // quarantine via this same `renameSync`, destroying exactly the bytes
+        // this quarantine exists to preserve.
+        try {
+          const codeFromName = name.slice(0, -ROOM_FILE_SUFFIX.length);
+          fs.renameSync(file, quarantineTarget(codeFromName));
+        } catch (renameErr) {
+          logError(`[rooms] could not quarantine corrupt room file ${name}`, renameErr);
+        }
       }
     }
     logInfo(`[rooms] loaded ${sessions.size} persisted room(s) from ${dir}`
@@ -430,8 +527,11 @@ function createSessionStore(options) {
    * **No room is removed for age** (spec AC 11, amended 2026-08-05: retention is
    * indefinite). `removed` is therefore always empty and is kept only so the
    * return shape and the callers stay stable; the sweep's remaining job is
-   * clearing the legacy expiry markers written by the previous 30-day build.
-   * Always logged, so a sweep that runs is visible in the pm2 log (AC 11).
+   * clearing expiry markers once they are old enough
+   * (`DEFAULT_TOMBSTONE_RETENTION_MS`) - both the legacy ones written by the
+   * previous 30-day build, and the eviction tombstones `evict()` writes now
+   * (round-4 defect D7). Always logged, so a sweep that runs is visible in the
+   * pm2 log (AC 11).
    *
    * `liveSessions` is accepted for the same stability reason and is no longer
    * mutated — nothing here can take a room out of memory any more.
@@ -537,8 +637,14 @@ module.exports = {
   ROOM_FILE_SUFFIX,
   TOMBSTONE_FILE_SUFFIX,
   TEMP_FILE_SUFFIX,
+  CORRUPT_FILE_SUFFIX,
   DEFAULT_WRITE_DEBOUNCE_MS,
   ROOM_RETENTION_INDEFINITE,
   DEFAULT_TOMBSTONE_RETENTION_MS,
-  DEFAULT_SWEEP_INTERVAL_MS
+  DEFAULT_SWEEP_INTERVAL_MS,
+  // Exported so `server.js`'s `gm:create-session` collision/tombstone
+  // regenerate loop can apply the same bounded-attempts discipline
+  // `createRoomCode` already uses internally, instead of an unbounded
+  // `while` (D-J, durable-rooms review round 7).
+  ROOM_CODE_MAX_ATTEMPTS
 };
