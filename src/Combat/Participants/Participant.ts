@@ -351,6 +351,19 @@ export class Participant extends Undoable implements IParticipant {
     this.Set("ooc", val);
   }
 
+  /**
+   * The manual "bench this participant" flag only - never the damage-derived
+   * half of `ooc` above. Read-only: write it through `ooc`. Exists so
+   * `buildGmParticipantState` can restore exactly what the GM flagged on a
+   * rejoin, rather than re-deriving it from damage vs. health a second time
+   * (brief "GM reconnect state loss" D6). Overridden on
+   * `DetachedGruntParticipant`, whose `ooc` setter writes a differently-named
+   * backing field.
+   */
+  get manualOoc(): boolean {
+    return this._ooc;
+  }
+
   get edge(): boolean {
     return this._edge;
   }

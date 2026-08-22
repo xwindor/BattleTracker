@@ -193,6 +193,16 @@ export class DetachedGruntParticipant extends Participant {
   }
 
   /**
+   * `Participant.manualOoc` reads `_ooc`, which this class never writes - its
+   * `ooc` setter above writes `_manualOoc` instead. Overridden so the GM-only
+   * rehydration channel restores the flag this class actually keeps (brief
+   * "GM reconnect state loss" D6).
+   */
+  override get manualOoc(): boolean {
+    return this._manualOoc;
+  }
+
+  /**
    * Alive-or-dead once downed, by the same p. 379 comparison `GruntMember` uses
    * (shared implementation, so detaching cannot change the verdict).
    */

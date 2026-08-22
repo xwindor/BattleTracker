@@ -22,6 +22,14 @@ export interface IParticipant
   hasPainEditor: boolean;
   readonly wm: number;
   ooc: boolean;
+  /**
+   * The manual out-of-combat flag only, never the damage-derived half of
+   * `ooc`. Read-only - write it through the ordinary `ooc` setter. Exists so
+   * the GM-only rehydration channel can restore exactly what the GM flagged,
+   * without re-deriving it from damage vs. health a second time (brief
+   * "GM reconnect state loss" D6, `buildGmParticipantState`).
+   */
+  readonly manualOoc: boolean;
   edge: boolean;
   status: StatusEnum;
   painTolerance: number;

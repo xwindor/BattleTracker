@@ -562,3 +562,37 @@ pasted.
 `(x/y)` fraction from both texts. Ordinary participants already log this way
 via `flushDamageLog` and need no change. Any new log line reporting a Condition
 Monitor change follows the same rule.
+
+## 2026-08-19 — `GruntMember.hasActed` goes on the session-sync wire after all
+
+**Ruling:** NPC-group Decision 18 ("has this NPC already gone in the current
+Initiative Pass" — `GruntMember.hasActed` — is GM bookkeeping only and does
+not survive a rejoin) is **reversed**. `hasActed` now round-trips through the
+session-sync wire, on the **GM-only** channel, and is restored on rejoin via
+`GruntMemberSnapshot`/`GruntMember.fromSnapshot()`.
+
+**Why:** Decision 18's reasoning — that the marker is cleared at every pass
+boundary anyway, so losing it is harmless — holds for an ordinary pass but not
+for a GM rejoin mid-pass, which is exactly the moment the GM most needs it:
+with six gangers in a row and no record of who has gone, the GM has to
+reconstruct the pass from memory or table notes. `briefs/gm-reconnect-state-
+loss.md`'s Decision D2 makes restoring it the point, not an afterthought.
+
+**How to apply:** `GruntMemberSnapshot.hasActed` (optional, `GruntMember.ts`)
+carries the flag on the domain side; `GruntMember.toSnapshot()`/`fromSnapshot()`
+are its read/write sides there, unchanged. On the wire, it carries as
+`SharedGmParticipantState.rowMemberHasActed` (`boolean[]`, index-aligned with
+the same row's `rowMembers` array) — **not** as a field on
+`SharedGruntMemberState`/`rowMembers` itself. Corrected 2026-08-19 (same day,
+adversarial review defect D5): an earlier draft of this ruling put it on
+`rowMembers`, which is part of `SharedParticipantState` and therefore reaches
+every player socket via `session:update-state` — directly contradicting this
+brief's own "no new field on `SharedParticipantState`" promise. `hasActed` is
+GM bookkeeping, not something a player is meant to see, so it belongs
+exclusively on the GM-only channel `session:update-gm-state` uses
+(`ARCHITECTURE.md` §7, "The GM-only channel") — `buildGmParticipantState()`
+writes it, `buildRestoredParticipant()` reads it back by row-member index. It
+is still cleared at every pass boundary and Combat Turn boundary exactly as
+before (`resetMemberActed()`) — only the *rejoin* behaviour changed, and it
+carries no rules content either way — it is presentation/bookkeeping, the same
+class of thing `rowMembers` already was.

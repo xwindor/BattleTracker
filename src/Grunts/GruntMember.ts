@@ -118,6 +118,14 @@ export interface GruntMemberSnapshot {
   damage: number;
   lastDamageType: GruntDamageType | null;
   lastDamageValue: number;
+  /**
+   * Has this NPC already gone this Initiative Pass (brief "GM reconnect state
+   * loss" D2, reversing NPC-group Decision 18 - see `RULINGS.md`). Optional
+   * so `DetachedGruntParticipant.toMemberSnapshot()` (a grunt that was never
+   * inside a row and so has no per-member Act marker to carry) does not have
+   * to invent one.
+   */
+  hasActed?: boolean;
 }
 
 /** What a single damage application did, for logging and for the row's score. */
@@ -306,7 +314,8 @@ export class GruntMember extends Undoable {
       willpower: this._willpower,
       damage: this._damage,
       lastDamageType: this._lastDamageType,
-      lastDamageValue: this._lastDamageValue
+      lastDamageValue: this._lastDamageValue,
+      hasActed: this._hasActed
     };
   }
 
@@ -331,6 +340,7 @@ export class GruntMember extends Undoable {
         ? snapshot.lastDamageType
         : null);
     member.Set("lastDamageValue", Math.max(0, Math.floor(Number(snapshot.lastDamageValue ?? 0))));
+    member.Set("hasActed", snapshot.hasActed === true);
     return member;
   }
 

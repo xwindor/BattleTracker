@@ -8,6 +8,9 @@ const {
   createSessionStore, createRoomCode, hasPersistableContent, ROOM_CODE_MAX_ATTEMPTS
 } = require("./server/session-store");
 const {
+  validateGmStatePayload
+} = require("./server/gm-state-channel");
+const {
   createRoomCreationLimiter, creationOriginKey, roomCapReached, findEvictableRoom,
   authorizeRoomPacket, detachFromPreviousRoom, reapContentlessRooms,
   releaseAllClaimsOnBoot,
@@ -135,6 +138,10 @@ function isSharedState(v) {
     && Array.isArray(v.participants);
 }
 
+// `isGmState` / the `gmState` size cap live in `server/gm-state-channel.js`
+// now (review round 2026-08-19, defect D4) - see `validateGmStatePayload`,
+// used by the `session:update-gm-state` handler below.
+
 function isSharedLogEntry(v) {
   return v && typeof v === "object"
     && typeof v.actor === "string"
@@ -175,6 +182,12 @@ function reject(socket, event, reason) {
  * ownership from it, and the GM's next `gm:join-session` still needs to read
  * it) - only the copy handed to a player-reachable channel is trimmed, and
  * only a shallow copy, so the stored object is never mutated by a broadcast.
+ *
+ * `gmState` (brief "GM reconnect state loss") needs no stripping here at all:
+ * it is never a property of `state` in the first place - it lives on its own
+ * `session.gmState`, touched only by `session:update-gm-state` and returned
+ * only from the `gm:join-session`/`gm:create-session` acks. There is nothing
+ * for this function to remove.
  */
 function playerFacingState(state) {
   if (!state || typeof state !== "object" || !("oocOwnership" in state)) {
@@ -300,6 +313,11 @@ function getOrCreateSession(room) {
     sessions.set(room, {
       state: null,
       log: [],
+      // GM-only rehydration data (brief "GM reconnect state loss"). Never
+      // read by anything that reaches a player socket - see
+      // `session:update-gm-state` and the `gm:join-session`/`gm:create-session`
+      // acks, the only two places this is ever sent back out.
+      gmState: null,
       lastActivity: Date.now(),
       // Stamped so `reapContentlessRooms` can prove a room is both empty and
       // old before dropping it (spec AC 16). Rooms restored from disk have no
@@ -313,24 +331,30 @@ function getOrCreateSession(room) {
 /**
  * The one place a room's persisted copy is marked dirty.
  *
- * There are **five** callers, not three (review defect D3, durable-rooms
+ * There are **seven** callers, not three (review defect D3, durable-rooms
  * review round 6 - the count drifted twice already as handlers were added,
  * which is exactly what this comment exists to stop happening a third time):
  * `session:update-state`, `session:append-log`, the in-place `ownerName`
  * strip in `releasePlayerClaims` (itself reached from a genuine disconnect,
  * `evacuateRoom`, and `detachSocketFromPreviousRoom` - one call site, three
  * triggers), `gm:join-session` (so a room's `lastActivity` and persisted copy
- * both advance on a bare rejoin, not only on the next write), and
- * `gm:close-session` (an immediate flush point, spec Open Decision 2). They
+ * both advance on a bare rejoin, not only on the next write),
+ * `gm:close-session` (an immediate flush point, spec Open Decision 2),
+ * `session:update-gm-state`'s happy path (brief "GM reconnect state loss" -
+ * the GM-only rehydration channel persists exactly like every other write
+ * here; it just never broadcasts), and `session:update-gm-state`'s own
+ * refusal path (review defect D4, 2026-08-19 follow-up - a refused packet
+ * still clears `session.gmState` to `null`, and that clear must itself reach
+ * disk or a restart resurrects the stale value it exists to discard). They
  * all come through here so a further site added later cannot quietly skip
  * persistence (spec, Proposed approach part 1). If a handler is added that
  * calls this, update the count here, in `releasePlayerClaims`'s doc comment,
- * at each of the five inline `write site N of 5` markers below (D-H,
+ * at each of the seven inline `write site N of 7` markers below (D-H,
  * durable-rooms review round 7: an earlier version of this comment said
- * "both", which was never true - there have always been five, not two), in
- * `server/session-store.js`'s matching comment and in `ARCHITECTURE.md`
- * §7 - or better, do not trust any of those to stay in sync by hand: grep
- * this file for `touchSession(` and count.
+ * "both", which was never true - there have always been more than two), in
+ * `server/session-store.js`'s matching comment and in `ARCHITECTURE.md` §7 -
+ * or better, do not trust any of those to stay in sync by hand: grep this
+ * file for `touchSession(` and count.
  */
 function touchSession(room) {
   const session = sessions.get(room);
@@ -342,7 +366,7 @@ function touchSession(room) {
 
 /**
  * Release every claim `playerName` holds in `room`: strip `ownerName` from
- * any claimable participant they own, persist (write site 3 of 5 - see
+ * any claimable participant they own, persist (write site 3 of 7 - see
  * `touchSession`'s doc comment for the full count) and rebroadcast, so a
  * returning player can re-claim cleanly.
  *
@@ -788,7 +812,9 @@ io.on("connection", (socket) => {
     // (`hasPersistableContent`). That backstop is *not* the bound - see the
     // rate limit above and the contentless reaper below (spec AC 16).
     if (typeof cb === "function") {
-      cb({ room, ok: true, state: session.state, log: session.log });
+      // `gmState` is always null for a brand-new room (shape symmetry with
+      // `gm:join-session`'s ack) - there is nothing to rehydrate yet.
+      cb({ room, ok: true, state: session.state, log: session.log, gmState: null });
     }
   });
 
@@ -814,8 +840,16 @@ io.on("connection", (socket) => {
     socket.data.role = "gm";
     socket.data.room = room;
     setGmPresence(room, socket.id, true);
-    touchSession(room); // write site 4 of 5 (see touchSession's doc comment for the full count)
-    if (typeof cb === "function") cb({ ok: true, state: session.state, log: session.log });
+    touchSession(room); // write site 4 of 7 (see touchSession's doc comment for the full count)
+    if (typeof cb === "function") {
+      // The one place `gmState` is ever returned to a client - a per-socket
+      // ack, not a room broadcast (brief "GM reconnect state loss"). Absent
+      // on a room persisted before this change: `session.gmState` stays
+      // `null` from `getOrCreateSession`/`loadAll`, and the GM tab treats
+      // that identically to deploy skew (an old server with no listener for
+      // `session:update-gm-state` at all).
+      cb({ ok: true, state: session.state, log: session.log, gmState: session.gmState || null });
+    }
   });
 
   socket.on("player:join", ({ room, playerName } = {}, cb) => {
@@ -874,10 +908,66 @@ io.on("connection", (socket) => {
     if (!room) return;
     const session = getOrCreateSession(room);
     session.state = state;
-    touchSession(room); // write site 1 of 5 (see touchSession's doc comment for the full count)
+    touchSession(room); // write site 1 of 7 (see touchSession's doc comment for the full count)
     // GM-only `oocOwnership` stripped before this reaches every socket in the
     // room, players included (D-G) - see `playerFacingState`.
     io.to(room).emit("session:state", playerFacingState(state));
+  });
+
+  /**
+   * The GM-only rehydration channel (brief "GM reconnect state loss").
+   * Write-only: stored on `session.gmState` and returned only in the
+   * `gm:join-session`/`gm:create-session` acks (per-socket, GM only) - **there
+   * is no broadcast here**, unlike `session:update-state` immediately above.
+   * That is the whole safety property: no code path from `gmState` reaches a
+   * player socket, so a future handler cannot leak it by forgetting a strip
+   * rule the way `playerFacingState` requires for `session:state`.
+   *
+   * Role/room ownership: the `socket.use` choke point above, from
+   * `ROOM_SCOPED_EVENTS` (`server/room-guards.js`), which pins this to GM-only
+   * explicitly rather than falling back to the GM-or-player default.
+   *
+   * Validation (`validateGmStatePayload`, `server/gm-state-channel.js`) is
+   * pure - it only decides accept/refuse, it never touches `session`. On a
+   * refusal (bad shape or over the 64 KB cap) this handler still emits
+   * `session:error`, same as before, but now also CLEARS the room's stored
+   * `session.gmState` to `null` (review round 2026-08-19, defect D7) rather
+   * than leaving whatever was there before. Without that, a refused push left
+   * `session.state` moving (every `session:update-state` still succeeds
+   * independently) while `session.gmState` silently stopped following it -
+   * "quietly wrong", not "lost", and the restore path
+   * (`restoreFromSharedState`) has no way to tell the two apart. A `null`
+   * `gmState` is a state it already handles correctly (legacy room / deploy
+   * skew), so clearing on rejection turns an undetectable divergence into the
+   * same safe "lost" degradation this whole channel already promises.
+   */
+  socket.on("session:update-gm-state", ({ room, gmState } = {}) => {
+    const verdict = validateGmStatePayload(gmState);
+    if (!verdict.ok) {
+      reject(socket, "session:update-gm-state", verdict.reason);
+      // Clear rather than create: this socket is already authorized for
+      // `room` (the `socket.use` choke point above), so the room's session
+      // normally already exists - `sessions.get`, not `getOrCreateSession`,
+      // so a malformed packet alone can never spin up a fresh empty room.
+      const existing = room ? sessions.get(room) : null;
+      if (existing && existing.gmState !== null) {
+        existing.gmState = null;
+        // write site 7 of 7 (see touchSession's doc comment for the full
+        // count) - review defect D4 (2026-08-19 follow-up): the clear above
+        // must itself be persisted, or a server restart resurrects the
+        // stale `gmState` this branch exists to discard. Gated on
+        // `existing.gmState !== null` so a refused packet can dirty only a
+        // room whose stored gmState actually changed, never an unrelated
+        // or already-clear room.
+        touchSession(room);
+      }
+      return;
+    }
+    if (!room) return;
+    const session = getOrCreateSession(room);
+    session.gmState = gmState;
+    touchSession(room); // write site 6 of 7 (see touchSession's doc comment for the full count)
+    // Deliberately no emit: this channel is never rebroadcast, to anyone.
   });
 
   socket.on("session:append-log", ({ room, entry } = {}) => {
@@ -899,7 +989,7 @@ io.on("connection", (socket) => {
     if (session.log.length > 300) {
       session.log.shift();
     }
-    touchSession(room); // write site 2 of 5 (see touchSession's doc comment for the full count)
+    touchSession(room); // write site 2 of 7 (see touchSession's doc comment for the full count)
     io.to(room).emit("session:log-entry", entry);
   });
 
@@ -973,7 +1063,7 @@ io.on("connection", (socket) => {
       cb({ ok: true, persisted: true });
     }
     // Flush before anyone leaves: a deliberate close is a zero-loss point
-    // (spec Open Decision 2). Write site 5 of 5 (see touchSession's doc
+    // (spec Open Decision 2). Write site 5 of 7 (see touchSession's doc
     // comment for the full count).
     touchSession(room);
     store.flush(room);
@@ -1024,7 +1114,7 @@ io.on("connection", (socket) => {
     if (!room || !playerName) {
       return;
     }
-    // Write site 3 of 5 (see `touchSession`'s doc comment for the full
+    // Write site 3 of 7 (see `touchSession`'s doc comment for the full
     // count), and the one the spec calls out as easiest to miss:
     // `releasePlayerClaims` mutates `session.state.participants` (and, since
     // review defect D2, `session.state.oocOwnership`) in place without going

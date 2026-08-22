@@ -21,6 +21,15 @@ export interface SharedGruntMemberState {
   /** 'physical' | 'stun' - the final attack's type, for alive/dead (p. 379). */
   lastDamageType?: string | null;
   lastDamageValue?: number;
+  // `hasActed` (GruntMember.hasActed, brief "GM reconnect state loss" D2,
+  // reversing NPC-group Decision 18) is deliberately NOT here. This type is
+  // shared verbatim by `SharedParticipantState.rowMembers` - which reaches
+  // every player socket (`session:update-state`) - so a per-member Act
+  // marker riding it would break the brief's own promise that
+  // `SharedParticipantState` gains no new field reachable by a player
+  // (review defect D5, fix round 2026-08-19). It instead rides
+  // `SharedGmParticipantState.rowMemberHasActed`, GM-only and index-aligned
+  // with this same `rowMembers` array - see that field's doc comment.
 }
 
 export interface SharedParticipantState {
@@ -207,6 +216,125 @@ export interface SharedCombatState {
   // shared types are stable from Phase 1 onward).
   matrixTargets?: SharedMatrixTarget[];
   currentHostName?: string;
+}
+
+/**
+ * One committed Interrupt Action, flattened for the wire. Mirrors
+ * `Interfaces/Action`. GM-only (`SharedGmParticipantState.actionHistory`) -
+ * never appears on `SharedParticipantState`.
+ */
+export interface SharedActionState {
+  key: string;
+  iniMod: number;
+  persist?: boolean;
+  martialArt?: boolean;
+  edge?: boolean;
+}
+
+/**
+ * GM-only per-participant rehydration data, keyed to a participant by `id`.
+ *
+ * Everything here is state the tracker already computes and already displays
+ * to the GM - none of it is new information, only a new (GM-only) transport
+ * for it. Carried on `session:update-gm-state`/`SharedGmState`, never on
+ * `SharedCombatState`/`SharedParticipantState`, so there is no code path from
+ * any of these fields to a player socket (brief "GM reconnect state loss",
+ * "Proposed approach" - an allowlist by construction, not a denylist strip).
+ *
+ * `ICParticipant` reconstruction is explicitly out of scope (brief Decision
+ * D5): no `isIC`/`icType`/`hostRating`/`linkedTargetId` here. An IC still
+ * restores as a plain `MatrixParticipant`, a known, accepted gap.
+ */
+export interface SharedGmParticipantState {
+  id: string;
+
+  /**
+   * This participant's index in the **full**, unfiltered
+   * `combatManager.participants.items` roster at the moment this snapshot was
+   * built - i.e. the same index `buildGmState()` uses for a withheld entry's
+   * `order` on `withheldParticipants`.
+   *
+   * Fix round 2026-08-19 (review defect D1): `state.participants[].order` is
+   * numbered on the **post-filter** scale (`getSharedParticipants()`'s own
+   * index, unchanged, player-facing) while `gmState.withheldParticipants[].order`
+   * is numbered on the **full-roster** scale - two different rulers. Sorting
+   * both lists together by `order` directly, as the merge in
+   * `restoreFromSharedState()` used to, collided: a withheld participant
+   * sitting above a live one could land on the exact same `sortOrder` as that
+   * live one. `rosterIndex` is a single, authoritative ruler carried once per
+   * participant (present or withheld) on this GM-only side, so the merge
+   * ranks every entry on it instead whenever a `gmState` is present - falling
+   * back to `order` only for a legacy/deploy-skew restore with no `gmState`
+   * at all, where every surviving entry is on the same (post-filter) scale
+   * anyway and there is nothing to reconcile.
+   */
+  rosterIndex: number;
+
+  // Condition Monitor shape and contents.
+  physicalHealth: number;
+  stunHealth: number;
+  overflowHealth: number;
+  physicalDamage: number;
+  stunDamage: number;
+  painTolerance: number;
+  hasPainEditor: boolean;
+
+  // Score bookkeeping, restored verbatim rather than re-derived.
+  /** RAW backing field - NOT `getCurrentInitiative()`. */
+  baseIni: number;
+  currentInitiativeScore: number;
+  appliedInitiativeAttribute: number;
+
+  // Turn state.
+  /** Numeric `StatusEnum`. */
+  status: number;
+  edge: boolean;
+  actionHistory: SharedActionState[];
+  /** The MANUAL out-of-combat flag only (`Participant.manualOoc`), not the derived getter. */
+  ooc: boolean;
+  tieBreaker: number;
+
+  // DetachedGruntParticipant (standalone or detached grunt), set only when
+  // `hasGruntConditionMonitor(p)`.
+  isGrunt?: boolean;
+  gruntBody?: number;
+  gruntWillpower?: number;
+  lastDamageType?: "physical" | "stun" | null;
+  lastDamageValue?: number;
+
+  // NpcRowParticipant extras not already carried by `SharedParticipantState.rowMembers`.
+  /** Set only when `isNpcRow(p)`. */
+  rowSpentFlagged?: boolean;
+  /**
+   * Each row member's `hasActed` (GruntMember.hasActed, brief "GM reconnect
+   * state loss" D2), index-aligned with the same row's
+   * `SharedParticipantState.rowMembers` array. Set only when `isNpcRow(p)`.
+   *
+   * Lives here, GM-only, rather than on `rowMembers[].hasActed` itself (fix
+   * round 2026-08-19, review defect D5): `rowMembers` is part of
+   * `SharedParticipantState`, which reaches every player socket, and the
+   * brief promises that type gains no new field a player can see.
+   */
+  rowMemberHasActed?: boolean[];
+}
+
+/**
+ * The GM-only half of a room snapshot (brief "GM reconnect state loss").
+ * Transported on its own channel (`session:update-gm-state`), stored as
+ * `session.gmState` server-side, and returned only in the `gm:join-session`
+ * ack - never broadcast to a room, never sent in a `player:join` ack. See
+ * `ARCHITECTURE.md` §7, "The GM-only channel".
+ */
+export interface SharedGmState {
+  version: 1;
+  /**
+   * Participants `getSharedParticipants()` withholds as out-of-action and
+   * non-claimable. Same type as the player-facing entries on purpose: one
+   * participant shape, no second format to drift.
+   */
+  withheldParticipants: SharedParticipantState[];
+  /** One entry per participant currently in the encounter, withheld or not. */
+  participants: SharedGmParticipantState[];
 }
 
 export interface SharedLogEntry {
@@ -472,13 +600,17 @@ export class SessionSyncService {
     return { room: res.room };
   }
 
-  async joinAsGm(room: string): Promise<{ state: SharedCombatState | null; log: SharedLogEntry[] }> {
-    const res = await this.emitWithAck<{ ok: boolean; reason?: string; state: SharedCombatState | null; log: SharedLogEntry[] }>("gm:join-session", { room });
+  async joinAsGm(room: string): Promise<{ state: SharedCombatState | null; log: SharedLogEntry[]; gmState?: SharedGmState | null }> {
+    const res = await this.emitWithAck<{
+      ok: boolean; reason?: string; state: SharedCombatState | null; log: SharedLogEntry[];
+      /** Absent on an old server that predates this channel (deploy skew) - defaults to null, same as never having one. */
+      gmState?: SharedGmState | null;
+    }>("gm:join-session", { room });
     if (!res?.ok) {
       throw new Error(res?.reason || "Unable to join GM session.");
     }
     this.currentRoom = room;
-    return { state: res.state, log: res.log || [] };
+    return { state: res.state, log: res.log || [], gmState: res.gmState ?? null };
   }
 
   async joinAsPlayer(room: string, playerName: string): Promise<{ state: SharedCombatState | null; log: SharedLogEntry[]; gmConnected: boolean }> {
@@ -519,6 +651,19 @@ export class SessionSyncService {
   broadcastState(state: SharedCombatState) {
     if (!this.currentRoom) return;
     this.socket?.emit("session:update-state", { room: this.currentRoom, state });
+  }
+
+  /**
+   * Push the GM-only half of the room snapshot. Write-only from this client's
+   * point of view - there is no broadcast back, and no player-reachable event
+   * ever carries it (brief "GM reconnect state loss"). An old server with no
+   * listener for this event simply drops it (Socket.IO default), which is the
+   * intended deploy-skew degradation: the GM falls back to today's lossy pull,
+   * never a leak.
+   */
+  broadcastGmState(gmState: SharedGmState) {
+    if (!this.currentRoom) return;
+    this.socket?.emit("session:update-gm-state", { room: this.currentRoom, gmState });
   }
 
   appendLog(entry: SharedLogEntry) {

@@ -54,6 +54,12 @@ export interface NpcRowSnapshot {
   rowWoundModifier: number;
   /** Distinguishes an *emptied* row from one the GM has not filled in yet. */
   everPopulated: boolean;
+  /**
+   * Has this row already been reported as spent (brief "GM reconnect state
+   * loss", so a rejoin does not re-announce a wiped-out row's collapse)? See
+   * `NpcRowParticipant.spentFlagged`.
+   */
+  spentFlagged: boolean;
 }
 
 export class NpcRowParticipant extends Participant {
@@ -463,7 +469,8 @@ export class NpcRowParticipant extends Participant {
     return {
       members: this._members.map(m => m.toSnapshot()),
       rowWoundModifier: this._rowWoundModifier,
-      everPopulated: this._everPopulated
+      everPopulated: this._everPopulated,
+      spentFlagged: this._spentFlagged
     };
   }
 
@@ -491,6 +498,11 @@ export class NpcRowParticipant extends Participant {
     }
     this.rowWoundModifier = Math.max(0, Math.floor(Number(snapshot.rowWoundModifier ?? 0)));
     this.everPopulated = snapshot.everPopulated === true || this._members.length > 0;
+    // Applied *after* members are added, so nothing that runs during member
+    // restoration (there is none today, but see `flagSpentNpcRows()`
+    // elsewhere) can re-announce a collapse this row already reported before
+    // the rejoin (brief "GM reconnect state loss" AC 3).
+    this.spentFlagged = snapshot.spentFlagged === true;
   }
 
   /**

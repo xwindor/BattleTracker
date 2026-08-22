@@ -11,6 +11,12 @@
 export interface PersistedSession {
   state: any;
   log: any[];
+  /**
+   * GM-only rehydration data (brief "GM reconnect state loss"). Never
+   * returned to a player socket - see `session:update-gm-state` and the
+   * `gm:join-session`/`gm:create-session` acks in `server.js`.
+   */
+  gmState?: any;
   lastActivity?: number;
   /** When the room entered the in-memory Map; used by the contentless reaper. */
   createdAt?: number;

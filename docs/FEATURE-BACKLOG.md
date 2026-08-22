@@ -123,7 +123,32 @@ instruction not to expand scope.
   was left unmet rather than fixed as a drive-by. `npm test` and `npm run
   build` both pass cleanly.
 
-## HIGH PRIORITY — Participant-level damage is not on the session-sync wire at all
+## CLOSED — Participant-level damage is not on the session-sync wire at all
+
+**Closed by `briefs/gm-reconnect-state-loss.md` (2026-08-19).** Option (d) from
+this section's own "Recommended approach" was built: a separate, GM-only
+`session:update-gm-state` channel now carries damage, Condition Monitor shape,
+out-of-action combatants, turn state and committed interrupts, persisted
+alongside the room and never reaching a player socket. `getSharedParticipants()`
+and `SharedParticipantState` are unchanged. See `ARCHITECTURE.md` §7, "The
+GM-only channel."
+
+The 2026-08-07 scope-update below asked step 1 of the fix to "re-verify the
+row-member restore path specifically," on a suspicion the live-tested reset
+might also affect rows. **Checked, and the row path was sound**: a row that is
+not wiped out has always restored correctly (`NpcRowParticipant.toRowSnapshot`/
+`restoreRowSnapshot`, covered by `src/Grunts/npc-row.spec.ts`, D4). The live
+symptom was the *wiped-out row* case: a fully wiped-out row reads `ooc === true`
+and was filtered off the player-facing wire entirely before its snapshot was
+ever built, so it — and its whole roster — vanished, which reads identically to
+"row restore is broken" at the table even though the snapshot mechanism itself
+was fine. The GM-only channel's `withheldParticipants` closes this too (a
+wiped-out row is exactly the kind of entry it carries).
+
+Left below verbatim as the historical record of the defect and the options
+considered.
+
+---
 
 Found 2026-08-03 while implementing the "Add Grunt" / merge addendum to
 `briefs/npc-group-initiative.md`. Confirmed by direct code inspection, not
@@ -409,7 +434,25 @@ out of that change's scope. All in
   of scope for a logging-only change; this only notes that the logging change
   makes an existing quirk more visible at the table.
 
-## Durable rooms — what a restore still cannot bring back (from `briefs/persistent-rooms.md`, Open Decision 4)
+## CLOSED — Durable rooms — what a restore still cannot bring back (from `briefs/persistent-rooms.md`, Open Decision 4)
+
+**Closed by `briefs/gm-reconnect-state-loss.md` (2026-08-19).** Option (d)
+below was the one built — a separate GM-only snapshot, `session:update-gm-state`
+→ `session.gmState`, persisted alongside the room and returned only to the
+room's own GM. It reuses `SharedParticipantState` verbatim for its withheld-
+participant list rather than inventing a second participant format, which is
+exactly what answers this section's objection to (d) ("a second serialisation
+format for participants"). Option (c) was not built and stays rejected for the
+reason stated below (it would have widened the player-visible payload).
+
+Every item in the "also still lost" paragraph below is now restored, except
+`ICParticipant` (Decision D5, explicitly out of scope — still restores as a
+`MatrixParticipant`, a known, accepted gap). See `ARCHITECTURE.md` §7, "The GM-
+only channel," and §6 for the row/grunt-specific detail.
+
+Left below verbatim as the historical record.
+
+---
 
 Persistence made "rejoin the room" the normal resume path, so the losses in
 `restoreFromSharedState()` matter more than they used to. That change fixed

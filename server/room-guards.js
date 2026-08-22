@@ -383,6 +383,12 @@ const ROOM_ENTRY_PAYLOAD_EVENTS = new Set([
  */
 const ROOM_SCOPED_EVENTS = new Map([
   [ "session:update-state", { roles: [ "gm" ] } ],
+  // GM-only rehydration channel (brief "GM reconnect state loss"). Default-deny
+  // by payload shape already covers this (it names a `room`, so it would fall
+  // back to GM-or-player without this entry) - the explicit entry is what pins
+  // it to GM-only rather than that fallback, matching `session:update-state`
+  // and `session:append-log` immediately below/above.
+  [ "session:update-gm-state", { roles: [ "gm" ] } ],
   // GM-only (P2-3, durable-rooms review round 5): `isSharedLogEntry` type-checks
   // `entry.actor` but never compares it to the caller's authenticated identity
   // the way `session:command` compares `command.player` below - and unlike a

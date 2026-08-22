@@ -135,6 +135,9 @@ function hasPersistableContent(session) {
   if (session.state !== null && session.state !== undefined) {
     return true;
   }
+  if (session.gmState !== null && session.gmState !== undefined) {
+    return true;
+  }
   return Array.isArray(session.log) && session.log.length > 0;
 }
 
@@ -269,7 +272,12 @@ function createSessionStore(options) {
       room,
       lastActivity: session.lastActivity || now(),
       state: session.state === undefined ? null : session.state,
-      log: Array.isArray(session.log) ? session.log : []
+      log: Array.isArray(session.log) ? session.log : [],
+      // GM-only rehydration data (brief "GM reconnect state loss"). Additive:
+      // a room file written before this change simply has no key here, and
+      // `loadAll()` below defaults that to `null`, same as a brand-new room -
+      // no format-version bump or migration needed (Decision D7).
+      gmState: session.gmState === undefined ? null : session.gmState
     });
   }
 
@@ -289,12 +297,14 @@ function createSessionStore(options) {
 
   /**
    * The single funnel every server-side mutation goes through. `server.js`'s
-   * `touchSession` has **five** callers, not three (review defect D3,
-   * durable-rooms review round 6 - this count already drifted twice; see
-   * `touchSession`'s own doc comment in `server.js` for the current list and
-   * for what to update if a sixth is ever added) — routing every one of them
-   * through this single helper is what stops a further site added later from
-   * silently failing to persist (spec, Proposed approach 1).
+   * `touchSession` has **seven** callers, not three (review defect D3,
+   * durable-rooms review round 6, plus review defect D4's 2026-08-19
+   * follow-up which added the seventh - this count already drifted twice
+   * before that; see `touchSession`'s own doc comment in `server.js` for the
+   * current list and for what to update if an eighth is ever added) —
+   * routing every one of them through this single helper is what stops a
+   * further site added later from silently failing to persist (spec,
+   * Proposed approach 1).
    */
   function touch(room, session) {
     if (!isRoomCode(room) || !session) {
@@ -483,6 +493,10 @@ function createSessionStore(options) {
         sessions.set(room, {
           state: doc.state === undefined ? null : doc.state,
           log: doc.log,
+          // Absent on a file written before this change (Decision D7 - no
+          // migration promised, just "does not crash"): defaults to `null`,
+          // identical to a brand-new room's `getOrCreateSession` seed.
+          gmState: doc.gmState === undefined ? null : doc.gmState,
           lastActivity: Number(doc.lastActivity) || now()
         });
       } catch (err) {

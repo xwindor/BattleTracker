@@ -366,6 +366,19 @@ Shared sync:
 
 - `session:update-state`
 - `session:state`
+- `session:update-gm-state` — GM-only, write-only, never broadcast (spec
+  "GM reconnect state loss"). Carries damage, Condition Monitor shape,
+  out-of-action combatants, turn state and committed interrupts, alongside the
+  player-facing `session:update-state`. Stored as `session.gmState` and
+  returned only in the `gm:join-session`/`gm:create-session` acks — no room
+  broadcast, no `session:state`-style fan-out. Payload cap 64 KB, same as
+  `session:update-state`; a schema failure or oversize payload is refused via
+  `session:error` with `invalid-payload: gmState` / `payload-too-large:
+  gmState` — and, since the adversarial review round 2026-08-19 (defect D7),
+  the room's stored `session.gmState` is CLEARED to `null` rather than left
+  holding its previous value, so a refused push cannot silently drift out of
+  sync with `session.state`. Validation (`server/gm-state-channel.js`) is a
+  small pure module, in the same shape as `room-guards.js`/`session-store.js`.
 - `session:append-log`
 - `session:log-entry`
 - `session:command`

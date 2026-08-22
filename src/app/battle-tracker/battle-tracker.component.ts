@@ -16,10 +16,14 @@ import { FormsModule } from '@angular/forms';
 import { DragDropModule } from '@angular/cdk/drag-drop';
 import { CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import ActionHandler from "Combat/ActionHandler";
+import { interruptTable } from "InterruptTable";
 import { ConditionMonitorComponent } from "app/condition-monitor/condition-monitor.component";
 import { ConfirmationDialogService } from 'app/confirmation-dialog/confirmation-dialog.service';
 import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
-import { SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState } from "app/services/session-sync.service";
+import {
+  SessionCommand, SessionSyncService, SharedCombatState, SharedLogEntry, SharedParticipantState,
+  SharedGmState, SharedGmParticipantState, SharedActionState
+} from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode } from "Matrix";
@@ -305,6 +309,24 @@ const CLAIM_FORCE_RELEASED_TEXT = "claim cleared by the GM";
  */
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count !== 1 ? "s" : ""}`;
+}
+
+/**
+ * Coerce a box count read off the GM-only restore channel.
+ *
+ * `restoreFromSharedState` has always coerced the player-facing fields
+ * (`Math.max(0, Number(...))`) and guarded the Score with `Number.isFinite`,
+ * because a room file is untrusted input. The GM-only channel added by the
+ * "GM reconnect state loss" brief initially assigned its numbers raw, and none
+ * of `Participant`'s Condition Monitor setters coerce or clamp - so a corrupt
+ * or truncated snapshot wrote `NaN` into a damage track instead of degrading
+ * (review defect D6). A non-finite or negative value falls back to whatever
+ * the freshly constructed participant already had, which is the same thing a
+ * missing `gm` entry produces.
+ */
+function gmCount(raw: unknown, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
 /** GM-action shared-log entries added by the Action Log attribution change. */
@@ -1585,7 +1607,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     try {
       this.sessionSync.connect();
-      const { state, log } = await this.sessionSync.joinAsGm(room);
+      const { state, log, gmState } = await this.sessionSync.joinAsGm(room);
       if (pushLocalState) {
         if (this.liveEncounterDivergedFrom(room)) {
           // Defensive backstop only (durable-rooms review round 6): the
@@ -1644,8 +1666,16 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
             + "nothing was replaced, and players are back in sync.";
         return;
       }
-      if (this.snapshotHasEncounter(state)) {
-        const replaced = !!state && Array.isArray(state.participants) && state.participants.length > 0;
+      if (this.snapshotHasEncounter(state, gmState)) {
+        // A new-format room's GM-only channel can carry a real encounter (the
+        // withheld/out-of-action roster) even when `state.participants` is
+        // empty - e.g. every combatant down - so "did this pull actually
+        // replace anything" has to ask both lists, not just the player-facing
+        // one (brief "GM reconnect state loss" AC 5: the abandon branch below
+        // stays reachable only for a legacy snapshot with nothing on either
+        // channel).
+        const replaced = (!!state && Array.isArray(state.participants) && state.participants.length > 0)
+          || (!!gmState && Array.isArray(gmState.withheldParticipants) && gmState.withheldParticipants.length > 0);
         if (!replaced) {
           // Everyone in the saved encounter is out of action, so there was
           // nothing on the wire to rebuild - and nothing was replaced here
@@ -1656,7 +1686,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           // anyway" shape - durable-rooms review round 5, Symptom B, "the
           // round-3 OOC-only branch has the same shape" - and, per review
           // round 6, reachable from a room this tab was actively running,
-          // which must not be silently abandoned by discovering that).
+          // which must not be silently abandoned by discovering that). Only
+          // reachable for a room saved before this change (spec D7): a
+          // new-format room's all-down encounter now restores in full above.
           const ooc = this.snapshotOocCount(state);
           await this.abandonJoinAndRestore(room, previousRoom,
             `Room ${room}'s saved encounter is ${ooc} participant${ooc === 1 ? "" : "s"} out of action, `
@@ -1685,7 +1717,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         this.clearSharedLogDecodeAnimations();
         this.pendingLogScroll = true;
         this.attachShareListeners();
-        this.restoreFromSharedState(state);
+        this.restoreFromSharedState(state, gmState);
         // A pull *replaces* this tab's encounter, so every earlier association
         // is now stale and the set is reset to this room alone, fingerprinted
         // against what was just restored (round-4 fix D6) - not against what
@@ -1884,10 +1916,19 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // honest about the condition instead of promising a discard that
       // `restoreFromSharedState`'s empty-snapshot no-op may never perform
       // (review defect D4).
+      //
+      // Wording deliberately stronger, not weaker, than it used to be (brief
+      // "GM reconnect state loss"): this tab's on-screen damage and condition
+      // monitors are now genuinely, permanently discarded by this action -
+      // before this change they were already unrecoverable either way, so
+      // there was nothing to strengthen the warning against; now that a
+      // rejoin can actually bring a room's own damage back, discarding this
+      // tab's own is the one way real data is lost here.
       parts.push(`Joining room ${room} replaces this tab's encounter with that room's last saved broadcast. `
         + `If that room has a saved encounter, ${count} participant${count === 1 ? "" : "s"} on screen `
-        + `${count === 1 ? "is" : "are"} discarded, along with damage and condition monitors, anyone `
-        + "out of action, committed interrupt actions and the undo history. This cannot be undone. "
+        + `${count === 1 ? "is" : "are"} discarded for good - their damage, condition monitors, anyone `
+        + "out of action, committed interrupt actions, spent Edge and the undo history all go with them. "
+        + "This cannot be undone. "
         + `If room ${room} turns out to have no saved encounter, nothing is replaced and this tab keeps `
         + "what it has.");
     }
@@ -2188,12 +2229,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * the UI still exclude OOC participants from "active participants" on purpose,
    * and none of that changes.
    */
-  private snapshotHasEncounter(state: SharedCombatState | null): boolean {
+  private snapshotHasEncounter(state: SharedCombatState | null, gmState: SharedGmState | null = null): boolean {
     if (!state) {
       return false;
     }
     const listed = Array.isArray(state.participants) ? state.participants.length : 0;
-    return listed > 0 || this.snapshotOocCount(state) > 0;
+    const withheld = Array.isArray(gmState?.withheldParticipants) ? gmState!.withheldParticipants.length : 0;
+    return listed > 0 || withheld > 0 || this.snapshotOocCount(state) > 0;
   }
 
   /**
@@ -3142,6 +3184,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         }))
     };
     this.sessionSync.broadcastState(sharedState);
+    // GM-only rehydration channel (brief "GM reconnect state loss"), pushed
+    // from this single choke point so every one of this file's ~50 mutation
+    // paths is covered by one line rather than a second "remember to also
+    // push GM state" obligation. Never broadcast to players - see
+    // `SessionSyncService.broadcastGmState` and `server.js`'s
+    // `session:update-gm-state` handler.
+    this.sessionSync.broadcastGmState(this.buildGmState());
     // Symptom C fix (durable-rooms review round 5, Part 1): refresh this
     // room's fingerprint on every successful push, not only at join/create
     // time. `liveEncounterDivergedFrom()` compares the *current* roster
@@ -3179,93 +3228,196 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   private getSharedParticipants(): SharedParticipantState[] {
     return this.combatManager.participants.items
       .filter(p => !p.ooc || this.isClaimableOrOwnedOoc(p))
-      .map((p, index) => {
-        const base: SharedParticipantState = {
-          id: this.getParticipantId(p),
-          name: p.name || `Participant ${index + 1}`,
-          order: index + 1,
-          active: this.combatManager.currentActors.contains(p),
-          initiativeScore: p.getCurrentInitiative(),
-          playerControlled: this.participantOwners.has(p),
-          claimable: this.participantClaimable.get(p) === true,
-          ownerName: this.participantOwners.get(p),
-          // Downed (out of action) - see this field's doc comment on
-          // `SharedParticipantState`. Almost always false: the only entries
-          // that can be `ooc: true` here at all are the claimable exception
-          // this method's own filter admits.
-          ooc: p.ooc,
-          // A downed character must never be offered as playable just because
-          // it is claimable (a downed character being claimable must not
-          // become a downed character being playable) - every action
-          // affordance is forced off here, at the source, rather than trusted
-          // to every UI consumer to re-derive the same guard.
-          canAct: !p.ooc && (p.status === StatusEnum.Active || p.status === StatusEnum.Delaying),
-          canDelay: !p.ooc && p.status === StatusEnum.Active,
-          // A member of a linked NPC row can never take an Interrupt Action
-          // (brief "NPC Group Initiative" criterion 17 / Decision 3, a
-          // deliberate departure from p. 167) - so the row itself never offers
-          // one, however high its shared Score.
-          canInterrupt: !p.ooc && !isNpcRow(p) && p.getCurrentInitiative() >= 1,
-          initiativeDice: p.dices,
-          pendingRoll: p.diceIni <= 0,
-          // Carried so a rejoining GM can reconstruct "already rolled" state
-          // instead of re-offering the once-per-Combat-Turn Initiative Test
-          // (p. 159/160). See restoreFromSharedState().
-          rolledInitiativeTotal: p.diceIni,
-          edgeRating: this.getParticipantEdgeRating(p),
-          reaction: this.getParticipantReaction(p),
-          intuition: this.getParticipantIntuition(p)
-        };
+      .map((p, index) => this.buildSharedParticipant(p, index));
+  }
 
-        if (this.isMatrix(p)) {
-          base.isMatrix = true;
-          base.vrMode = p.vrMode;
-          base.overwatch = p.overwatch;
-          base.overwatchAlert = p.overwatchAlert;
-          base.jackedIn = p.jackedIn;
-          base.isVRCatatonic = p.blocksPhysicalActions;
-          base.dataProcessing = p.dataProcessing;
-          base.attack = p.attack;
-          base.sleaze = p.sleaze;
-          base.firewall = p.firewall;
-          base.deviceRating = p.deviceRating;
-        }
+  /**
+   * One player-facing wire entry for `p`. Factored out of `getSharedParticipants()`
+   * so `buildGmState()`'s `withheldParticipants` (brief "GM reconnect state
+   * loss") can build the exact same shape for an out-of-action, non-claimable
+   * participant without a second, drifting copy of this mapping - "Two lists,
+   * one type" in the spec's proposed approach.
+   *
+   * `order` is whatever index the caller passes: `getSharedParticipants()`
+   * passes the post-filter index (unchanged from before this change - the
+   * player-facing array is byte-identical), `buildGmState()` passes the
+   * participant's index in the *full*, unfiltered roster.
+   */
+  private buildSharedParticipant(p: IParticipant, index: number): SharedParticipantState {
+    const base: SharedParticipantState = {
+      id: this.getParticipantId(p),
+      name: p.name || `Participant ${index + 1}`,
+      order: index + 1,
+      active: this.combatManager.currentActors.contains(p),
+      initiativeScore: p.getCurrentInitiative(),
+      playerControlled: this.participantOwners.has(p),
+      claimable: this.participantClaimable.get(p) === true,
+      ownerName: this.participantOwners.get(p),
+      // Downed (out of action) - see this field's doc comment on
+      // `SharedParticipantState`. Almost always false: the only entries
+      // that can be `ooc: true` here at all are the claimable exception
+      // this method's own filter admits.
+      ooc: p.ooc,
+      // A downed character must never be offered as playable just because
+      // it is claimable (a downed character being claimable must not
+      // become a downed character being playable) - every action
+      // affordance is forced off here, at the source, rather than trusted
+      // to every UI consumer to re-derive the same guard.
+      canAct: !p.ooc && (p.status === StatusEnum.Active || p.status === StatusEnum.Delaying),
+      canDelay: !p.ooc && p.status === StatusEnum.Active,
+      // A member of a linked NPC row can never take an Interrupt Action
+      // (brief "NPC Group Initiative" criterion 17 / Decision 3, a
+      // deliberate departure from p. 167) - so the row itself never offers
+      // one, however high its shared Score.
+      canInterrupt: !p.ooc && !isNpcRow(p) && p.getCurrentInitiative() >= 1,
+      initiativeDice: p.dices,
+      pendingRoll: p.diceIni <= 0,
+      // Carried so a rejoining GM can reconstruct "already rolled" state
+      // instead of re-offering the once-per-Combat-Turn Initiative Test
+      // (p. 159/160). See restoreFromSharedState().
+      rolledInitiativeTotal: p.diceIni,
+      edgeRating: this.getParticipantEdgeRating(p),
+      reaction: this.getParticipantReaction(p),
+      intuition: this.getParticipantIntuition(p)
+    };
 
-        if (this.isAstral(p)) {
-          base.isAstral = true;
-          base.isAstralProjecting = p.astralProjecting;
-        }
+    if (this.isMatrix(p)) {
+      base.isMatrix = true;
+      base.vrMode = p.vrMode;
+      base.overwatch = p.overwatch;
+      base.overwatchAlert = p.overwatchAlert;
+      base.jackedIn = p.jackedIn;
+      base.isVRCatatonic = p.blocksPhysicalActions;
+      base.dataProcessing = p.dataProcessing;
+      base.attack = p.attack;
+      base.sleaze = p.sleaze;
+      base.firewall = p.firewall;
+      base.deviceRating = p.deviceRating;
+    }
 
-        // Presentation only (addendum Decision 12): a standalone grunt is badged
-        // on the player view the way a group row is, so players can tell a lone
-        // grunt from a PC or an ordinary NPC at a glance. Nothing downstream
-        // reads it as rules state.
-        if (hasGruntConditionMonitor(p)) {
-          base.isDetachedGrunt = true;
-        }
+    if (this.isAstral(p)) {
+      base.isAstral = true;
+      base.isAstralProjecting = p.astralProjecting;
+    }
 
-        // A linked row carries state no other participant type has: its NPCs
-        // (each with its own Condition Monitor, criteria 3-4/7, p. 379) and the
-        // shared wound accumulator (criterion 5 / Decision 1). All of it is on
-        // the wire so a rejoining GM rebuilds the row as a row - see
-        // buildRestoredParticipant.
-        if (isNpcRow(p)) {
-          const snapshot = p.toRowSnapshot();
-          base.isNpcRow = true;
-          base.rowWoundModifier = snapshot.rowWoundModifier;
-          base.rowEverPopulated = snapshot.everPopulated;
-          base.rowMembers = snapshot.members.map(m => ({
-            name: m.name,
-            body: m.body,
-            willpower: m.willpower,
-            damage: m.damage,
-            lastDamageType: m.lastDamageType,
-            lastDamageValue: m.lastDamageValue
-          }));
-        }
+    // Presentation only (addendum Decision 12): a standalone grunt is badged
+    // on the player view the way a group row is, so players can tell a lone
+    // grunt from a PC or an ordinary NPC at a glance. Nothing downstream
+    // reads it as rules state.
+    if (hasGruntConditionMonitor(p)) {
+      base.isDetachedGrunt = true;
+    }
 
-        return base;
-      });
+    // A linked row carries state no other participant type has: its NPCs
+    // (each with its own Condition Monitor, criteria 3-4/7, p. 379) and the
+    // shared wound accumulator (criterion 5 / Decision 1). All of it is on
+    // the wire so a rejoining GM rebuilds the row as a row - see
+    // buildRestoredParticipant.
+    if (isNpcRow(p)) {
+      const snapshot = p.toRowSnapshot();
+      base.isNpcRow = true;
+      base.rowWoundModifier = snapshot.rowWoundModifier;
+      base.rowEverPopulated = snapshot.everPopulated;
+      base.rowMembers = snapshot.members.map(m => ({
+        name: m.name,
+        body: m.body,
+        willpower: m.willpower,
+        damage: m.damage,
+        lastDamageType: m.lastDamageType,
+        lastDamageValue: m.lastDamageValue
+        // Deliberately no `hasActed` here (fix round 2026-08-19, review
+        // defect D5): this method builds both the player-facing entry AND
+        // (via buildGmState()) a withheld entry, and `rowMembers` is part of
+        // `SharedParticipantState` - the type `session:update-state` sends to
+        // every player socket. `hasActed` rides
+        // `SharedGmParticipantState.rowMemberHasActed` instead, GM-only and
+        // index-aligned with this same array - see buildGmParticipantState().
+      }));
+    }
+
+    return base;
+  }
+
+  /**
+   * The GM-only half of the room snapshot (brief "GM reconnect state loss").
+   * Built and pushed from the same single choke point as the player-facing
+   * broadcast (`syncSharedState()`), never anywhere else.
+   */
+  private buildGmState(): SharedGmState {
+    const all = this.combatManager.participants.items;
+    const withheldParticipants: SharedParticipantState[] = [];
+    all.forEach((p, index) => {
+      if (p.ooc && !this.isClaimableOrOwnedOoc(p)) {
+        // `order` here is the full-roster index, not the post-filter one
+        // `getSharedParticipants()` uses for the player-facing array - see
+        // `buildSharedParticipant`'s doc comment. The restore does NOT sort
+        // by this `order` field when a `gmState` is present (review defect
+        // D1 fix): it ranks by `buildGmParticipantState(p, index)`'s
+        // `rosterIndex` below instead, which is on the same full-roster scale
+        // for every participant, withheld or not - see that method's doc
+        // comment and `SharedGmParticipantState.rosterIndex`'s.
+        withheldParticipants.push(this.buildSharedParticipant(p, index));
+      }
+    });
+    return {
+      version: 1,
+      withheldParticipants,
+      participants: all.map((p, index) => this.buildGmParticipantState(p, index))
+    };
+  }
+
+  /**
+   * One GM-only rehydration entry for `p` - see `SharedGmParticipantState`.
+   *
+   * `rosterIndex` is `p`'s index in the same full, unfiltered `all` array
+   * `buildGmState()` iterates - the single authoritative ruler the restore's
+   * merge sorts by (review defect D1 fix, 2026-08-19): see
+   * `SharedGmParticipantState.rosterIndex`'s doc comment for why the two
+   * player-facing/withheld `order` fields cannot be compared against each
+   * other directly.
+   */
+  private buildGmParticipantState(p: IParticipant, rosterIndex: number): SharedGmParticipantState {
+    const gm: SharedGmParticipantState = {
+      id: this.getParticipantId(p),
+      rosterIndex,
+      physicalHealth: p.physicalHealth,
+      stunHealth: p.stunHealth,
+      overflowHealth: p.overflowHealth,
+      physicalDamage: p.physicalDamage,
+      stunDamage: p.stunDamage,
+      painTolerance: p.painTolerance,
+      hasPainEditor: p.hasPainEditor,
+      baseIni: p.baseIni,
+      currentInitiativeScore: p.currentInitiativeScore,
+      appliedInitiativeAttribute: p.appliedInitiativeAttribute,
+      status: p.status,
+      edge: p.edge,
+      actionHistory: p.actionHistory.map(a => ({
+        key: a.key,
+        iniMod: a.iniMod,
+        persist: a.persist,
+        martialArt: a.martialArt,
+        edge: a.edge
+      })),
+      ooc: p.manualOoc,
+      tieBreaker: this.getParticipantTieBreaker(p)
+    };
+    if (hasGruntConditionMonitor(p)) {
+      gm.isGrunt = true;
+      gm.gruntBody = p.gruntBody;
+      gm.gruntWillpower = p.gruntWillpower;
+      gm.lastDamageType = p.lastDamageType;
+      gm.lastDamageValue = p.lastDamageValue;
+    }
+    if (isNpcRow(p)) {
+      gm.rowSpentFlagged = p.spentFlagged;
+      // Index-aligned with the player-facing rowMembers array built from the
+      // same toRowSnapshot() call in buildSharedParticipant() - see
+      // `rowMemberHasActed`'s doc comment for why this rides the GM-only
+      // channel rather than `rowMembers[].hasActed` itself.
+      gm.rowMemberHasActed = p.toRowSnapshot().members.map(m => m.hasActed === true);
+    }
+    return gm;
   }
 
   private appendSharedLog(actor: string, text: string, extra?: Partial<SharedLogEntry>) {
@@ -3850,7 +4002,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * option (b)). No wire-format change: every field read below is already on
    * the wire today.
    */
-  private buildRestoredParticipant(shared: SharedParticipantState): Participant {
+  private buildRestoredParticipant(
+    shared: SharedParticipantState,
+    gm: SharedGmParticipantState | undefined
+  ): Participant {
     // Rows first: a row is never a decker or a magician (an NPC changing
     // Initiative type has to be detached off the row first, criterion 13), and
     // a row rebuilt as a plain Participant loses its members, its shared wound
@@ -3860,7 +4015,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (shared.isNpcRow === true) {
       const row = new NpcRowParticipant();
       row.restoreRowSnapshot({
-        members: (shared.rowMembers ?? []).map(m => ({
+        members: (shared.rowMembers ?? []).map((m, memberIndex) => ({
           name: String(m.name ?? ""),
           body: Math.max(0, Number(m.body ?? 0)),
           willpower: Math.max(0, Number(m.willpower ?? 0)),
@@ -3868,13 +4023,29 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
           lastDamageType: m.lastDamageType === "physical" || m.lastDamageType === "stun"
             ? m.lastDamageType
             : null,
-          lastDamageValue: Math.max(0, Number(m.lastDamageValue ?? 0))
+          lastDamageValue: Math.max(0, Number(m.lastDamageValue ?? 0)),
+          // Brief "GM reconnect state loss" D2 (reverses NPC-group Decision
+          // 18), sourced from the GM-only channel and index-aligned with this
+          // same `rowMembers` array (fix round 2026-08-19, review defect D5:
+          // `m.hasActed` no longer exists on the player-facing wire at all).
+          // Absent with no `gm` (legacy/deploy skew) - defaults to false,
+          // same as never having acted.
+          hasActed: gm?.rowMemberHasActed?.[memberIndex] === true
         })),
         rowWoundModifier: Math.max(0, Number(shared.rowWoundModifier ?? 0)),
-        everPopulated: shared.rowEverPopulated === true
+        everPopulated: shared.rowEverPopulated === true,
+        // So a restored wiped-out row does not re-announce its own collapse
+        // (brief "GM reconnect state loss" AC 3). Absent on a legacy/deploy-
+        // skew restore with no `gm` - a wiped-out row was never on the
+        // player-facing wire at all before this change, so there is nothing
+        // to restore it *from* in that case either.
+        spentFlagged: gm?.rowSpentFlagged === true
       });
       return row;
     }
+    // ICParticipant reconstruction is explicitly out of scope (brief Decision
+    // D5) - an IC still comes back as an ordinary MatrixParticipant below, a
+    // known, accepted gap.
     if (shared.isMatrix === true) {
       const mp = new MatrixParticipant();
       mp.dataProcessing = Math.max(0, Number(shared.dataProcessing || 0));
@@ -3897,6 +4068,27 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       ap.blocksPhysicalActions = shared.isAstralProjecting === true;
       return ap;
     }
+    // A standalone/detached grunt has no flag on the player-facing wire that
+    // reconstruction may use (`isDetachedGrunt` is presentation-only, by
+    // design - see `SharedParticipantState.isDetachedGrunt`'s doc comment).
+    // `gm.isGrunt`, GM-only, is what makes this branch reachable at all
+    // (brief "GM reconnect state loss" AC 9); with no `gm` this still falls
+    // through to a plain Participant, the pre-existing, known gap.
+    if (gm?.isGrunt === true) {
+      const grunt = new DetachedGruntParticipant();
+      // Both Condition Monitor inputs, set together, before any damage is
+      // written (rehydration contract step 2) - sizes the single combined
+      // track from p. 379's formula exactly as the live class does.
+      grunt.setGruntAttributes(
+        Math.max(0, Number(gm.gruntBody ?? 0)),
+        Math.max(0, Number(gm.gruntWillpower ?? 0))
+      );
+      grunt.lastDamageType = gm.lastDamageType === "physical" || gm.lastDamageType === "stun"
+        ? gm.lastDamageType
+        : null;
+      grunt.lastDamageValue = Math.max(0, Number(gm.lastDamageValue ?? 0));
+      return grunt;
+    }
     return new Participant();
   }
 
@@ -3910,8 +4102,93 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
   }
 
-  private restoreFromSharedState(state: SharedCombatState | null) {
-    if (!state || !state.participants || state.participants.length === 0) {
+  /**
+   * The Initiative attribute to restore, replacing the inline formula this
+   * method used to duplicate (a pre-existing defect, independent of the GM
+   * reconnect state loss but swept up by this rewrite: it omitted the astral
+   * INT x2 branch entirely - see `getParticipantBaseInitiative`).
+   *
+   * The GM-only channel's `baseIni` is the raw backing field, restored
+   * verbatim - preferred whenever it is present. With no `gm` (legacy
+   * snapshot or deploy skew), fall back to re-deriving from the player-facing
+   * wire fields alone, same three cases `getParticipantBaseInitiative` covers:
+   * plain, jacked-in Matrix, and a projecting astral.
+   */
+  private restoredBaseIni(
+    shared: SharedParticipantState,
+    gm: SharedGmParticipantState | undefined,
+    participant: IParticipant
+  ): number {
+    if (gm) {
+      return Math.max(0, Number(gm.baseIni || 0));
+    }
+    const safeReaction = Math.max(0, Number(shared.reaction || 0));
+    const safeIntuition = Math.max(0, Number(shared.intuition || 0));
+    // A jacked-in decker's Initiative Attribute is Data Processing +
+    // Intuition, not Reaction + Intuition (MatrixParticipant.applyJackInMode);
+    // both inputs are already on the player-facing wire.
+    const jackedInMatrixAttribute = this.isMatrix(participant)
+      && shared.jackedIn === true
+      && Number(shared.dataProcessing || 0) > 0
+      ? Math.max(0, Number(shared.dataProcessing)) + safeIntuition
+      : 0;
+    if (jackedInMatrixAttribute > 0) {
+      return jackedInMatrixAttribute;
+    }
+    // A projecting magician's Initiative Attribute is Intuition x2
+    // (`getParticipantBaseInitiative`) - the branch the pre-existing formula
+    // was missing.
+    if (this.isAstral(participant) && shared.isAstralProjecting === true) {
+      return Math.max(0, safeIntuition * 2);
+    }
+    if (safeReaction + safeIntuition > 0) {
+      return safeReaction + safeIntuition;
+    }
+    return shared.pendingRoll
+      ? PARTICIPANT_DEFAULT_BASE_INI
+      : Math.max(0, Number(shared.initiativeScore || 0));
+  }
+
+  /**
+   * Map one GM-only wire entry back onto the **identity-shared** `Action`
+   * object `interruptTable` holds for that key, rather than a freshly-built
+   * object with the same fields.
+   *
+   * Required because `Participant.canUseAction`'s persist gate is
+   * `this._actionHistory.includes(action)` - object identity, not a value
+   * comparison (`Participant.ts`) - and `ActionHandler.coreInterrupts` holds
+   * those exact same references. A JSON-reconstructed Full Defense action
+   * would round-trip every field correctly and still silently fail the
+   * persist gate, letting it be bought a second time in the same Combat Turn
+   * (brief "GM reconnect state loss" AC 7 / D4).
+   */
+  private resolveRestoredAction(entry: SharedActionState): Action {
+    const known = interruptTable.find(a => a.key === entry.key);
+    if (known) {
+      return known;
+    }
+    // Unknown key (a custom/future action not in the mechanically-offered
+    // table): fall back to a fresh object built from the wire fields, so the
+    // restore never throws and the Score still reads correctly even though
+    // the persist gate cannot be identity-matched for it.
+    return {
+      key: entry.key,
+      iniMod: entry.iniMod,
+      persist: entry.persist,
+      martialArt: entry.martialArt,
+      edge: entry.edge
+    };
+  }
+
+  private restoreFromSharedState(state: SharedCombatState | null, gmState: SharedGmState | null = null) {
+    // "Restore merges before it rebuilds": an all-withheld (all out-of-action,
+    // non-claimable) encounter now has real content on the GM-only channel
+    // even though the player-facing `state.participants` is empty (brief AC 5)
+    // - so the no-op guard must ask both lists, not just the player-facing
+    // one, or a fully-downed encounter would silently fail to restore.
+    const hasPlayerFacing = !!state && Array.isArray(state.participants) && state.participants.length > 0;
+    const hasWithheld = !!gmState && Array.isArray(gmState.withheldParticipants) && gmState.withheldParticipants.length > 0;
+    if (!state || (!hasPlayerFacing && !hasWithheld)) {
       return;
     }
 
@@ -3945,10 +4222,84 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.combatManager.passEnded = Boolean(state.passEnded);
     this.combatManager.currentInitiative = Number(state.currentInitiative ?? this.combatManager.currentInitiative);
 
-    const ordered = [ ...state.participants ].sort((a, b) => a.order - b.order);
-    for (const shared of ordered) {
-      const participant = this.buildRestoredParticipant(shared);
+    // Merge before rebuilding ("Restore merges before it rebuilds", spec
+    // proposed approach): a withheld (out-of-action, non-claimable)
+    // participant rides the GM-only channel under the exact same wire shape
+    // as everyone else, so one loop below reconstructs both. A duplicate id -
+    // a claimable OOC participant legitimately present on both lists -
+    // resolves to the player-facing copy, which is authoritative for it.
+    const seenIds = new Set<string>();
+    const merged: SharedParticipantState[] = [];
+    for (const shared of [ ...(state.participants ?? []), ...(gmState?.withheldParticipants ?? []) ]) {
+      if (seenIds.has(shared.id)) {
+        continue;
+      }
+      seenIds.add(shared.id);
+      merged.push(shared);
+    }
+
+    const gmById = new Map((gmState?.participants ?? []).map(g => [ g.id, g ]));
+
+    // Rank the merged roster for the rebuild loop and the sortOrder each
+    // entry is pinned to below - by `rosterIndex` (review defect D1 fix,
+    // 2026-08-19), not by `order` directly. `state.participants[].order` is
+    // numbered on the post-filter scale and `gmState.withheldParticipants[].order`
+    // on the full-roster scale - two different rulers that collide when
+    // sorted together (a withheld participant above a live one could land on
+    // the exact same slot as that live one). `rosterIndex`, carried once per
+    // participant on the GM-only channel, is the one ruler both lists can be
+    // read against consistently. With no `gmState` at all (legacy snapshot or
+    // deploy skew) there is only ever the player-facing list, already on one
+    // scale with nothing to reconcile, so `order` remains the correct fallback.
+    //
+    // This has to be a single decision for the WHOLE restore, not one taken
+    // per entry (review defect D5, 2026-08-19 follow-up): a torn snapshot -
+    // `gmState` present but missing an entry for some id (an older `gmState`
+    // paired with a newer `state`, or a mid-write race) - used to fall back to
+    // `order` for just that one entry while every other entry ranked on
+    // `rosterIndex`, mixing the two scales in a single sort and reproducing
+    // exactly the collision `rosterIndex` exists to prevent (e.g. sortOrders
+    // `[0, 1, 1]`). If every merged entry has a usable `rosterIndex`, rank all
+    // of them by it; otherwise rank all of them by `order`. Never mix within
+    // one restore.
+    const canRankByRosterIndex = merged.length > 0 && merged.every(entry => {
+      const gmEntry = gmById.get(entry.id);
+      return !!gmEntry && Number.isFinite(gmEntry.rosterIndex);
+    });
+    const rosterRank = (entry: SharedParticipantState): number => {
+      return canRankByRosterIndex
+        ? (gmById.get(entry.id) as SharedGmParticipantState).rosterIndex
+        : Number(entry.order || 0);
+    };
+    merged.sort((a, b) => rosterRank(a) - rosterRank(b));
+
+    for (const [mergedIndex, shared] of merged.entries()) {
+      // Rehydration contract, in exactly this order (spec "GM reconnect
+      // state loss") - the damage/attribute setters below each move the
+      // running Initiative Score by a delta, so the Score itself must be
+      // pinned only after every one of them has run (step 12's comment,
+      // further down, says why).
+      const gm = gmById.get(shared.id);
+      const participant = this.buildRestoredParticipant(shared, gm);
       participant.name = shared.name;
+
+      // Condition-monitor shape. A grunt-shaped participant was already sized
+      // by setGruntAttributes() inside buildRestoredParticipant - writing
+      // physicalHealth/stunHealth again here would fight
+      // syncConditionMonitorToAttributes(). With no `gm` at all, leave
+      // constructor defaults (legacy/deploy-skew behaviour, unchanged).
+      if (!hasGruntConditionMonitor(participant) && gm) {
+        participant.overflowHealth = gmCount(gm.overflowHealth, participant.overflowHealth);
+        participant.physicalHealth = gmCount(gm.physicalHealth, participant.physicalHealth);
+        participant.stunHealth = gmCount(gm.stunHealth, participant.stunHealth);
+      }
+      if (gm) {
+        participant.painTolerance = gmCount(gm.painTolerance, participant.painTolerance);
+        participant.hasPainEditor = gm.hasPainEditor === true;
+        participant.physicalDamage = gmCount(gm.physicalDamage, participant.physicalDamage);
+        participant.stunDamage = gmCount(gm.stunDamage, participant.stunDamage);
+      }
+
       // Reconstructing existing state, not a change event: no roll is owed
       // (the Score is restored verbatim below). The 5D6 cap still applies.
       participant.setDicesWithoutRoll(Number(shared.initiativeDice || 1));
@@ -3961,23 +4312,31 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       participant.setDiceIniWithoutScoreChange(
         this.restoredRolledTotal(shared, participant)
       );
+      participant.baseIni = this.restoredBaseIni(shared, gm, participant);
+
       const safeReaction = Math.max(0, Number(shared.reaction || 0));
       const safeIntuition = Math.max(0, Number(shared.intuition || 0));
-      // A jacked-in decker's Initiative Attribute is Data Processing +
-      // Intuition, not Reaction + Intuition (MatrixParticipant.applyJackInMode);
-      // both inputs are already on the wire. The running Score is restored
-      // verbatim below regardless - this only keeps future recomputes honest.
-      const jackedInMatrixAttribute = shared.isMatrix === true
-        && shared.jackedIn === true
-        && Number(shared.dataProcessing || 0) > 0
-        ? Math.max(0, Number(shared.dataProcessing)) + safeIntuition
-        : 0;
-      participant.baseIni = jackedInMatrixAttribute > 0
-        ? jackedInMatrixAttribute
-        : (safeReaction + safeIntuition > 0
-          ? safeReaction + safeIntuition
-          : (shared.pendingRoll ? 6 : Math.max(0, Number(shared.initiativeScore || 0))));
-      const sharedSortOrder = Math.max(0, Number(shared.order || 1) - 1);
+      // Position in the already-sorted merged list, not a re-derivation from
+      // `rosterIndex`/`order`.
+      //
+      // `merged` was ranked above by one ruler for the whole restore (review
+      // defects D1 and D5). Taking the position from that finished ranking is
+      // what actually guarantees the property those defects were about:
+      // `sortOrder` values are unique by construction, because array indices
+      // are. Re-deriving them from the wire values instead does not - and the
+      // D5 follow-up test proves it. A torn snapshot (a newer `state` paired
+      // with an older `gmState` that has no entry for some id) forces the
+      // whole restore onto the `order` ruler, but `order` is itself two
+      // different scales across the two lists: the player-facing entries are
+      // numbered by post-filter index and the withheld entries by full-roster
+      // index. Ranking everyone by `order` therefore still collided
+      // (sortOrders `[0, 1, 0]` for a withheld DownA + Live1 + an unseen
+      // Live2). The merged position cannot collide regardless of which ruler
+      // ranked it, and it reproduces the old value exactly on both healthy
+      // paths - the legacy path's `merged` is `state.participants` sorted by
+      // `order`, so index === order - 1, and the rosterIndex path's roster
+      // indices are contiguous from 0, so index === rosterIndex.
+      const sharedSortOrder = mergedIndex;
       if (shared.ownerName) {
         this.participantOwners.set(participant, shared.ownerName);
       }
@@ -3986,46 +4345,121 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       this.participantReactions.set(participant, safeReaction > 0 ? safeReaction : Math.max(0, Number(participant.baseIni || 0)));
       this.participantIntuitions.set(participant, safeIntuition);
       this.participantIds.set(participant, shared.id);
+      if (gm) {
+        // The coin-toss tie-breaker, restored rather than re-rolled (brief
+        // "GM reconnect state loss" AC 7) - a tie can otherwise resolve
+        // differently after a rejoin than it did before it.
+        const gmTieBreaker = Number(gm.tieBreaker);
+        this.participantTieBreakers.set(
+          participant,
+          Number.isFinite(gmTieBreaker) ? gmTieBreaker : Math.random()
+        );
+      }
       // The broadcast payload carries each participant's *current* running
       // Initiative Score, already reduced by every pass that has elapsed
       // (brief pp. 159-160). Reconstruct it verbatim rather than re-deriving
       // it from the pass count, and tell addParticipant() not to apply the
       // late-entry decay on top (it would double-count).
       this.combatManager.addParticipant(participant, true);
-      const restoredScore = Number(shared.initiativeScore);
-      if (Number.isFinite(restoredScore)) {
-        participant.currentInitiativeScore = restoredScore;
-        participant.appliedInitiativeAttribute = participant.initiativeAttribute;
+
+      // Pin the Score last of everything that moves it. physicalDamage,
+      // stunDamage, painTolerance, hasPainEditor and baseIni above each call
+      // syncInitiativeAttribute(), which applies a signed delta to the
+      // running Score - pinning it before them would be silently overwritten;
+      // pinning it after makes every one of them a no-op for the Score.
+      // Getting this backwards shifts every wounded combatant's position in
+      // the initiative order.
+      if (gm) {
+        // Coerced with the same Number.isFinite discipline the legacy branch
+        // below already used (review defect D6): none of Participant's setters
+        // coerce or clamp, so a corrupt room file would otherwise write NaN
+        // straight into the running Score and scramble the whole order rather
+        // than degrading. A non-finite Score falls back to the participant's
+        // own reconstructed value instead of poisoning the sort.
+        const gmScore = Number(gm.currentInitiativeScore);
+        if (Number.isFinite(gmScore)) {
+          participant.currentInitiativeScore = gmScore;
+        }
+        const gmApplied = Number(gm.appliedInitiativeAttribute);
+        participant.appliedInitiativeAttribute = Number.isFinite(gmApplied)
+          ? gmApplied
+          : participant.initiativeAttribute;
+      } else {
+        const restoredScore = Number(shared.initiativeScore);
+        if (Number.isFinite(restoredScore)) {
+          participant.currentInitiativeScore = restoredScore;
+          participant.appliedInitiativeAttribute = participant.initiativeAttribute;
+        }
       }
+
+      // Committed Interrupt Actions (brief AC 7 / D4) - pushed onto the
+      // history without touching currentInitiativeScore, so
+      // getCurrentInitiative() reproduces the pre-crash effective Score
+      // exactly (the cost was already folded into the pinned Score above).
+      if (gm) {
+        for (const action of gm.actionHistory) {
+          participant.doAction(this.resolveRestoredAction(action));
+        }
+      }
+
       participant.sortOrder = sharedSortOrder;
+      // Seeded from the just-restored values (closes defect 15: previously
+      // seeded from the fresh constructor's 0/0 defaults, so the first
+      // post-restore damage edit logged a wrong delta).
       this.lastKnownDamage.set(shared.id, {
         physical: Math.max(0, Number(participant.physicalDamage || 0)),
         stun: Math.max(0, Number(participant.stunDamage || 0))
       });
+
       if (shared.active) {
         participant.status = StatusEnum.Active;
         this.combatManager.currentActors.insert(participant, false);
+      } else if (gm) {
+        // `shared.active` is authoritative for currentActors membership - a
+        // restored non-active participant is never Active even if the
+        // GM-only channel says so (brief AC 6, D3: Finished/Delaying both
+        // round-trip verbatim otherwise).
+        // An unrecognised status from a corrupt snapshot degrades to Waiting
+        // rather than leaving the participant in a state CombatManager cannot
+        // schedule (review defect D6).
+        const gmStatus = Number(gm.status);
+        const knownStatus = Number.isFinite(gmStatus) && StatusEnum[gmStatus] !== undefined;
+        participant.status = !knownStatus || gmStatus === StatusEnum.Active
+          ? StatusEnum.Waiting
+          : gmStatus;
       } else {
         participant.status = StatusEnum.Waiting;
       }
+
+      // Edge (brief AC 7: "edge ... round-trip"), Score-neutral so order
+      // relative to the pinned Score above does not matter. Not on the
+      // player-facing wire at all, so only restorable when `gm` is present.
+      if (gm) {
+        participant.edge = gm.edge === true;
+      }
+
       // A claimable participant that was out of action when this snapshot was
       // taken must come back out of action, never silently revived - the
-      // highest-risk part of this change (a GM rejoining and finding a downed
-      // PC standing up again would be worse than not being able to reclaim it
-      // at all). `Participant.ooc` is otherwise only ever the manual flag or
-      // derived from damage vs. health (`Participant.ts`), and damage is not
-      // on the wire at all (Open Decision 4) - restoring the manual flag is
-      // therefore the only way to bring a restored participant back down.
-      // Only ever set true here: `new Participant()` already defaults it
-      // false, and a non-claimable OOC participant is never on the wire to
-      // read `shared.ooc` from in the first place.
-      if (shared.ooc === true) {
+      // highest-risk part of the original gap (a GM rejoining and finding a
+      // downed PC standing up again would be worse than not being able to
+      // reclaim it at all). With a `gm` entry the manual flag is restored
+      // verbatim (brief AC 2/3: a non-claimable downed NPC comes back down
+      // too, not just a claimable PC); with no `gm`, fall back to the
+      // player-facing `shared.ooc`, exactly as before this change.
+      if (gm ? gm.ooc === true : shared.ooc === true) {
         participant.ooc = true;
+      }
+
+      // So a restored wiped-out row is not re-announced as newly spent
+      // (belt-and-braces with the same write inside restoreRowSnapshot -
+      // brief AC 3).
+      if (isNpcRow(participant) && gm?.rowSpentFlagged) {
+        participant.spentFlagged = true;
       }
     }
 
     this.combatManager.participants.sortBySortOrder();
-    this.restoreWarning = this.buildRestoreWarning();
+    this.restoreWarning = this.buildRestoreWarning(gmState);
 
     // Discard the whole undo history, including this rebuild's own chapter.
     // There is no history from before the restore to walk back into, and the
@@ -4036,31 +4470,35 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * What a restore could not bring back, in the GM's words.
+   * What a restore could not bring back, in the GM's words. Two different
+   * texts, chosen by whether a GM-only channel snapshot was present (brief
+   * "GM reconnect state loss" D8):
    *
-   * Participant subclasses *are* restored now (spec Open Decision 4, option
-   * (b)). Health and damage are not: `SharedParticipantState` has no damage
-   * fields at all, and widening the player-visible payload to carry them is
-   * explicitly a separate change - it is logged in `docs/FEATURE-BACKLOG.md`.
-   * Undo history never leaves the browser (ARCHITECTURE §7), so a resumed
-   * room starts with none.
-   *
-   * Out-of-action participants split in two, since the GM decision that
-   * broadcasts a claimable one changes what comes back for each:
-   * - **Non-claimable** (almost always an NPC) is still never on the wire at
-   *   all (`getSharedParticipants` withholds it on purpose - the same privacy
-   *   property as before this change), so it is not restored and is not
-   *   distinguishable from "never existed".
-   * - **Claimable** (a player character) *is* restored - still out of
-   *   action, per its `ooc` flag on the wire - but without its damage/health,
-   *   same gap as everyone else; only that it was down, not by how much.
-   *
-   * The one exception to the damage gap is a linked NPC row: its members'
-   * Condition Monitors *are* on the wire and are restored (they are row
-   * state, not the participant-level damage fields), so the warning says so
-   * rather than telling the GM to re-key damage they already have back.
+   * - **With `gmState`** (a room saved after this change, or an unaffected
+   *   push-path reconnect): damage, condition monitors, turn state, committed
+   *   interrupts and out-of-action combatants all come back now - the only
+   *   things that still cannot are this tab's own transient panel state and
+   *   the undo/redo history, which never leaves the browser (ARCHITECTURE §7).
+   * - **With no `gmState`** (a legacy room persisted before this change, or
+   *   deploy skew - an old server/client on one end of the join): kept
+   *   byte-for-byte identical to the pre-change text, so a rejoin into a
+   *   pre-existing room still reads correctly and the existing legacy-snapshot
+   *   tests keep passing unchanged (spec D7).
    */
-  private buildRestoreWarning(): string {
+  private buildRestoreWarning(gmState: SharedGmState | null): string {
+    if (gmState) {
+      // Deliberately avoids the word "damage" (spec scenario S1 asserts its
+      // absence): this text must never read as a claim that anything was
+      // lost. D11 (review round 2026-08-19): scoped to what this particular
+      // snapshot actually held ("this snapshot's ... came back with it"),
+      // rather than a blanket "everyone's ... came back intact" - the earlier
+      // wording promised more than any one push is actually guaranteed to
+      // carry.
+      return "Restored from the room's last broadcast: this snapshot's injuries, "
+        + "condition monitors and turn state came back with it. Not included: "
+        + "undo/redo history, and this tab's own panel/selection state - re-open "
+        + "anything you had expanded.";
+    }
     return "Restored from the room's last broadcast. Not included: damage and "
       + "condition monitors (linked NPC rows excepted - their NPCs come back "
       + "with theirs), any non-claimable participant who was out of action, "
