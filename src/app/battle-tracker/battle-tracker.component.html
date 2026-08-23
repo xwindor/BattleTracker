@@ -652,11 +652,12 @@
               <!-- Damage Value, not just "one more box": p. 379 decides a
                    downed grunt's alive-or-dead from the DV of the final attack
                    against his Body, so the DV of the hit has to be enterable.
-                   Left at 1 the two buttons behave exactly like the old +1
-                   taps. -->
+                   Three buttons share this one DV: P and S apply it as
+                   damage, H (heal) takes that many boxes back off — left at 1
+                   all three behave exactly like the old +1/-1 taps. -->
               <div class="input-group input-group-sm npc-row-damage gm-inline-input-group">
                 <span class="input-group-text gm-stat-chip"
-                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379).">DV</span>
+                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379). The heal button takes back this same number of boxes.">DV</span>
                 <input class="form-control text-center gm-stat-input npc-row-dv" type="number" [min]="1"
                   [ngModel]="getRowMemberDamageValue(m)"
                   (ngModelChange)="setRowMemberDamageValue(m, $event)">
@@ -667,8 +668,8 @@
                   (click)="hitRowMemberStun(asNpcRow(p), m)"
                   title="Apply that DV as Stun damage">S</button>
                 <button type="button" class="btn btn-sm btn-outline-success npc-row-heal"
-                  (click)="healRowMember(asNpcRow(p), m, 1)"
-                  title="Heal one box / take back a mis-keyed hit. Healing a downed NPC below a full Condition Monitor puts it back in the fight (p. 379).">-1</button>
+                  (click)="healRowMember(asNpcRow(p), m)"
+                  title="Take that many boxes off. Healing a downed NPC below a full Condition Monitor puts it back in the fight (p. 379).">H</button>
               </div>
               <button type="button" class="btn btn-sm btn-outline-secondary npc-row-detach"
                 (click)="detachRowMember(asNpcRow(p), m)"
@@ -1062,10 +1063,11 @@
                          remaining boxes could never be recorded for p. 379's
                          "DV of the final attack vs. Body" comparison. Same
                          controls as the row panel's per-member DV
-                         (`npc-row-damage`). -->
+                         (`npc-row-damage`): P and S apply the DV as damage,
+                         H (heal) takes that many boxes back off. -->
                     <div class="input-group input-group-sm mt-2 grunt-damage gm-inline-input-group">
                       <span class="input-group-text gm-stat-chip"
-                        title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379).">DV</span>
+                        title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379). The heal button takes back this same number of boxes.">DV</span>
                       <input class="form-control text-center gm-stat-input grunt-dv" type="number" [min]="1"
                         [ngModel]="getGruntDamageValue(selectedActor)"
                         (ngModelChange)="setGruntDamageValue(selectedActor, $event)">
@@ -1076,8 +1078,8 @@
                         (click)="hitGruntStun(asGrunt(selectedActor))"
                         title="Apply that DV as Stun damage">S</button>
                       <button type="button" class="btn btn-sm btn-outline-success grunt-heal"
-                        (click)="healGrunt(asGrunt(selectedActor), 1)"
-                        title="Heal one box / take back a mis-keyed hit. Healing a downed grunt below a full Condition Monitor puts it back in the fight (p. 379).">-1</button>
+                        (click)="healGrunt(asGrunt(selectedActor))"
+                        title="Take that many boxes off. Healing a downed grunt below a full Condition Monitor puts it back in the fight (p. 379).">H</button>
                     </div>
                     <!-- Body and Willpower are kept per grunt because they are
                          the two inputs to the track above,

@@ -259,7 +259,7 @@ export class DetachedGruntParticipant extends Participant {
   }
 
   /**
-   * Undo a mis-keyed hit / apply healing to the combined track (the -1
+   * Undo a mis-keyed hit / apply healing to the combined track (the "H"
    * control next to the DV buttons, Decision 20). Cuts Physical first,
    * mirroring `syncConditionMonitorToAttributes`'s own convention for a track
    * that shrinks - there is no fictional meaning to "half a box of Stun, half

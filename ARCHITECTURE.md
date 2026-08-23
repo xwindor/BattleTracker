@@ -724,10 +724,12 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
   detached grunt's Condition Monitor widget could only ever apply as many boxes
   as were left on the track — a killing blow bigger than the remaining boxes
   was unrecordable — so this gives the standalone/detached panel the same `DV`
-  + `P`/`S`/`-1` GM controls the row panel already had
+  + `P`/`S`/`H` GM controls the row panel already had
   (`getGruntDamageValue`/`setGruntDamageValue`/`hitGruntPhysical`/
   `hitGruntStun`/`healGrunt` in the GM component, all thin plumbing over the
-  two domain methods). The Condition Monitor *widget's* box-clicking still
+  two domain methods); the `H` (heal) control reads the same DV input the
+  `P`/`S` controls read, and takes that many boxes back off rather than always
+  taking one. The Condition Monitor *widget's* box-clicking still
   writes `physicalDamage`/`stunDamage` directly and cannot express an over-max
   hit.
 

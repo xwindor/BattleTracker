@@ -5992,7 +5992,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   // the row panel's per-member DV controls (`getRowMemberDamageValue` and
   // friends), keyed by participant instead of by `GruntMember`.
 
-  /** The Damage Value the next P/S tap will apply, defaulting to a single box. */
+  /** The Damage Value the next P/S/H tap will apply, defaulting to a single box. */
   getGruntDamageValue(p: IParticipant): number {
     return this.gruntDamageValues.get(p) ?? DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
   }
@@ -6036,8 +6036,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return result;
   }
 
-  /** Heal one box / take back a mis-keyed hit (the row panel's "-1" button). */
-  healGrunt(p: DetachedGruntParticipant, boxes: number) {
+  /**
+   * Take boxes off a standalone / detached grunt's combined track (the
+   * grunt panel's "H" button), defaulting to the same DV the P/S buttons
+   * read so correcting a mis-keyed hit needs no retyping.
+   */
+  healGrunt(p: DetachedGruntParticipant, boxes = this.getGruntDamageValue(p)) {
     UndoHandler.StartActions();
     const healed = p.healDamage(boxes);
     this.onParticipantDamageChanged();
@@ -6357,18 +6361,20 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * The Damage Value queued against one NPC in a row, defaulting to a single
-   * box so the panel still works as a one-tap "+1" for chip damage.
+   * The Damage Value queued against one NPC in a row - what the next "P"/"S"/"H"
+   * tap will apply or take back - defaulting to a single box so the panel still
+   * works as a one-tap "+1" for chip damage and a one-tap "-1" to take it off.
    */
   getRowMemberDamageValue(member: GruntMember): number {
     return this.rowMemberDamageValues.get(member) ?? DEFAULT_ROW_MEMBER_DAMAGE_VALUE;
   }
 
   /**
-   * Set the DV the next hit on this NPC will apply. Clamped to at least one box
-   * (a DV of 0 is not an attack) and to no more than a full Condition Monitor's
-   * worth plus the row's own headroom - the excess is discarded anyway, since
-   * grunts take no overflow damage (p. 379).
+   * Set the DV the next hit or heal on this NPC will apply. Clamped to at least
+   * one box (a DV of 0 is neither an attack nor a heal) and to no more than a
+   * full Condition Monitor's worth plus the row's own headroom. Either way the
+   * excess is discarded: a hit because grunts take no overflow damage (p. 379),
+   * a heal because it is clamped to the damage actually on the track.
    */
   setRowMemberDamageValue(member: GruntMember, value: number): void {
     const parsed = Math.floor(Number(value));
@@ -6415,8 +6421,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * total, players see only that healing happened (Decision 17). The Condition
    * Monitor's maximum is dropped from the GM's copy too (Decision 25,
    * `RULINGS.md` 2026-08-13).
+   *
+   * `boxes` defaults to the same DV `hitRowMemberPhysical`/`Stun` read, so the
+   * "H" button defaults to the same DV the "P"/"S" buttons read, without the
+   * GM having to retype it.
    */
-  healRowMember(row: NpcRowParticipant, member: GruntMember, boxes: number) {
+  healRowMember(row: NpcRowParticipant, member: GruntMember, boxes = this.getRowMemberDamageValue(member)) {
     UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
     // Read before the call so the "back on its feet" line can be written from

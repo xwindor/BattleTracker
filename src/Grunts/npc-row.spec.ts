@@ -1,7 +1,11 @@
 // Acceptance-criteria tests for the linked NPC row feature
 // (briefs/npc-group-initiative.md). One describe per criterion, in the brief's
-// order. The named gameplay scenarios S1-S8 live in
-// src/scenarios/npc-group-initiative.spec.ts.
+// order. The named gameplay scenarios S1-S8 for that brief live in
+// src/scenarios/npc-group-initiative.spec.ts. The Heal-DV scenarios for the
+// later, narrower brief on the grunt heal control
+// (briefs/grunt-heal-uses-dv-input-spec.md) live in
+// src/scenarios/grunt-heal-dv-input.spec.ts; the DV controls those scenarios
+// exercise are covered per-criterion under "D20" below.
 
 import { ComponentFixture, TestBed, discardPeriodicTasks, fakeAsync, flush, tick } from '@angular/core/testing';
 import {
@@ -2664,7 +2668,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       expect(detached.ooc).toBeTrue();
     });
 
-    it('renders the DV + P/S/-1 controls on the standalone grunt panel, and drops the old CM note (Decision 25)', () => {
+    it('renders the DV + P/S/H controls on the standalone grunt panel, and drops the old CM note (Decision 25)', () => {
       const grunt = component.addGrunt('Lone Ganger');
       component.selectActor(grunt);
       fixture.detectChanges();
@@ -2672,7 +2676,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       expect(fixture.nativeElement.querySelector('.grunt-dv')).withContext('DV input').toBeTruthy();
       expect(fixture.nativeElement.querySelector('.grunt-hit-physical')).withContext('P button').toBeTruthy();
       expect(fixture.nativeElement.querySelector('.grunt-hit-stun')).withContext('S button').toBeTruthy();
-      expect(fixture.nativeElement.querySelector('.grunt-heal')).withContext('-1 button').toBeTruthy();
+      expect(fixture.nativeElement.querySelector('.grunt-heal')).withContext('H button').toBeTruthy();
       expect(fixture.nativeElement.querySelector('.grunt-cm-note'))
         .withContext('old blurb removed (Decision 25)').toBeFalsy();
     });
