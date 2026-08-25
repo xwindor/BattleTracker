@@ -17,8 +17,8 @@ import { PlayerViewComponent } from 'app/player-view/player-view.component';
 import { LogHandler } from 'Logging';
 
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;

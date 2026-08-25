@@ -82,7 +82,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 3. On Spawn: an ICParticipant appears in the tracker with `baseIni = rating × 2`, dices = 2 (Patrol) or 4 (others). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #4]`
 4. The IC row shows a distinct badge (e.g., "IC — Patrol" label, no OS chip, no PHYS LOCKED).
 5. IC acts on its initiative like any other participant (existing engine handles this with no changes).
-6. Undo removes the IC.
+6. The ordinary Delete control removes the IC, same as any other participant.
 
 **Unlocks:** Step 4 (the workflow stepper needs IC spawning to be complete for the InsideHost step to be useful).
 
@@ -137,14 +137,15 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 **Files to create/modify:**
 - `src/app/matrix/target-card/target-card.component.{ts,html,css}` — add mark dots (●○○ style), decker selector for "+Mark" button, "Remove Mark" per decker
-- `src/app/services/matrix-state.service.ts` — `addMark(target, deckerId)`, `removeMark(target, deckerId)` with UndoHandler wrapping
+- `src/app/services/matrix-state.service.ts` — `addMark(target, deckerId)`, `removeMark(target, deckerId)`, each mutating `MatrixRunState` directly (no wrapper - see `ARCHITECTURE.md` §3 for the backing-field convention these should follow)
 
 **Acceptance criteria:**
 1. Clicking "+Mark" on a target card: dropdown selects decker → mark count increments (max 3). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #5]`
 2. Dots rendered: e.g., `●●○` for 2 marks.
 3. "×" button next to each decker's dot row removes 1 mark.
 4. Cannot place a 4th mark (button disabled at 3). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #5]`
-5. Undo removes the last mark placed.
+5. The "×" control removes the last mark placed - the correction path for a
+   mis-tapped "+Mark" (there is no undo control; see `ARCHITECTURE.md` §3).
 6. Mark data persists across step navigation (stays in MatrixRunState).
 
 **Unlocks:** Step 7 (reveals use marks as a prerequisite check in the UI hint text).
@@ -188,7 +189,11 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 3. Modify → GM enters custom delta → OS increments by that amount.
 4. Cancel → no OS change.
 5. Non-illegal actions (Analyze, Browse, etc.) produce no OS prompt.
-6. Undo on the action also undoes the OS addition (both wrapped in the same UndoHandler.StartActions group).
+6. There is no undo control anywhere in the tracker (see `ARCHITECTURE.md`
+   §3): a mis-confirmed prompt has to be corrected by hand, via
+   `osTracking.resetOS()`/`addOS()` with the right delta. If this proves too
+   fiddly at the table, a dedicated correction control is a separate,
+   deliberate addition - not a side effect of this step.
 
 **Unlocks:** Step 9 (access method panels need full OS automation to be meaningful).
 
@@ -243,14 +248,18 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 2. A two-attribute swap UI appears: select "Attack" ↔ "Data Processing", click Swap.
 3. Both attribute values swap on the MatrixParticipant.
 4. If DP was swapped, `baseIni` recalculates immediately; badge initiative score updates.
-5. Undo restores both values.
+5. A mis-tapped swap is corrected by swapping the same two attributes back -
+   there is no undo control (`ARCHITECTURE.md` §3).
 
 ---
 
 ## Architecture rules for this module
 
 - **No changes to IParticipant or Participant** — MatrixParticipant/ICParticipant extend Participant and satisfy IParticipant via inheritance.
-- **All mutations go through UndoHandler.DoAction** — same as the existing engine.
+- **All mutations assign the matching backing field directly** — same
+  `_field` + getter/setter convention as the existing engine
+  (`ARCHITECTURE.md` §3). There is no undo/redo mechanism in this tracker;
+  do not reintroduce one.
 - **Side-data Maps in BattleTrackerComponent** — `participantReactions`, `participantIntuitions`, `participantEdgeRatings`, etc. still need entries for every participant (including Matrix). The `getParticipantBaseInitiative()` method must branch on `isMatrix(p)` to use `DP + INT` instead of `REA + INT`.
 - **No server changes needed** — `server.js` treats `SharedCombatState` as an opaque JSON blob; Matrix state additions to the interface are transparently relayed.
 - **Components go in `src/app/matrix/`** — one folder per component; all standalone.

@@ -15,7 +15,7 @@ export type MatrixStep =
  * MatrixRunState
  *
  * Top-level state object for the active Matrix run. A single instance lives
- * in MatrixStateService. Plain class — mutate via UndoHandler.DoAction.
+ * in MatrixStateService. Plain class - mutated directly by that service.
  *
  * Note: there is no static `noiseLevel` field. Per the new design, noise is
  * a per-roll modifier applied via RollModifierPromptComponent (see

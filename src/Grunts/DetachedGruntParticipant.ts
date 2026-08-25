@@ -59,7 +59,7 @@ export class DetachedGruntParticipant extends Participant {
   private _gruntBody = 0;
   get gruntBody(): number { return this._gruntBody; }
   set gruntBody(val: number) {
-    this.Set("gruntBody", Math.max(0, Math.floor(val)));
+    this._gruntBody = Math.max(0, Math.floor(val));
     this.syncConditionMonitorToAttributes();
   }
 
@@ -76,7 +76,7 @@ export class DetachedGruntParticipant extends Participant {
   private _gruntWillpower = 0;
   get gruntWillpower(): number { return this._gruntWillpower; }
   set gruntWillpower(val: number) {
-    this.Set("gruntWillpower", Math.max(0, Math.floor(val)));
+    this._gruntWillpower = Math.max(0, Math.floor(val));
     this.syncConditionMonitorToAttributes();
   }
 
@@ -89,8 +89,8 @@ export class DetachedGruntParticipant extends Participant {
    * trip would clamp damage away that the final size had room for.
    */
   setGruntAttributes(body: number, willpower: number): void {
-    this.Set("gruntBody", Math.max(0, Math.floor(body)));
-    this.Set("gruntWillpower", Math.max(0, Math.floor(willpower)));
+    this._gruntBody = Math.max(0, Math.floor(body));
+    this._gruntWillpower = Math.max(0, Math.floor(willpower));
     this.syncConditionMonitorToAttributes();
   }
 
@@ -146,12 +146,12 @@ export class DetachedGruntParticipant extends Participant {
   private _lastDamageType: GruntDamageType | null = null;
   /** Damage type of the attack that took this grunt out (p. 379). */
   get lastDamageType(): GruntDamageType | null { return this._lastDamageType; }
-  set lastDamageType(val: GruntDamageType | null) { this.Set("lastDamageType", val); }
+  set lastDamageType(val: GruntDamageType | null) { this._lastDamageType = val; }
 
   private _lastDamageValue = 0;
   /** DV of that attack, compared against Body for alive/dead (p. 379). */
   get lastDamageValue(): number { return this._lastDamageValue; }
-  set lastDamageValue(val: number) { this.Set("lastDamageValue", Math.max(0, Math.floor(val))); }
+  set lastDamageValue(val: number) { this._lastDamageValue = Math.max(0, Math.floor(val)); }
 
   constructor() {
     super();
@@ -189,7 +189,7 @@ export class DetachedGruntParticipant extends Participant {
   }
 
   override set ooc(val: boolean) {
-    this.Set("manualOoc", val);
+    this._manualOoc = val;
   }
 
   /**
@@ -259,7 +259,7 @@ export class DetachedGruntParticipant extends Participant {
   }
 
   /**
-   * Undo a mis-keyed hit / apply healing to the combined track (the "H"
+   * Correct a mis-keyed hit / apply healing to the combined track (the "H"
    * control next to the DV buttons, Decision 20). Cuts Physical first,
    * mirroring `syncConditionMonitorToAttributes`'s own convention for a track
    * that shrinks - there is no fictional meaning to "half a box of Stun, half

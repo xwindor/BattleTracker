@@ -1,5 +1,3 @@
-import { Undoable } from "Common";
-
 /**
  * One NPC inside a linked NPC row ("grunt", brief p. 378-379).
  *
@@ -9,9 +7,9 @@ import { Undoable } from "Common";
  * the rules keep per-NPC rather than per-row - its own Condition Monitor
  * (brief acceptance criteria 3-4, p. 379).
  *
- * Every mutable field follows the repo's `_field` + getter/setter +
- * `Undoable.Set` convention, so every change a GM makes to a member is part of
- * the same undo chain as everything else (ARCHITECTURE.md §4).
+ * Every mutable field follows the repo's `_field` + getter/setter convention
+ * (ARCHITECTURE.md §3), so `clone()`/`fromSnapshot()` and the row's promote/
+ * demote helpers can copy or restore state by name.
  */
 
 /**
@@ -141,19 +139,19 @@ export interface GruntDamageResult {
   wentOutOfAction: boolean;
 }
 
-export class GruntMember extends Undoable {
+export class GruntMember {
 
   private _name: string;
   get name(): string { return this._name; }
-  set name(val: string) { this.Set("name", val); }
+  set name(val: string) { this._name = val; }
 
   private _body: number;
   get body(): number { return this._body; }
-  set body(val: number) { this.Set("body", Math.max(0, Math.floor(val))); }
+  set body(val: number) { this._body = Math.max(0, Math.floor(val)); }
 
   private _willpower: number;
   get willpower(): number { return this._willpower; }
-  set willpower(val: number) { this.Set("willpower", Math.max(0, Math.floor(val))); }
+  set willpower(val: number) { this._willpower = Math.max(0, Math.floor(val)); }
 
   /**
    * Boxes filled on the single combined Physical + Stun track. Written through
@@ -184,10 +182,9 @@ export class GruntMember extends Undoable {
    */
   private _hasActed: boolean;
   get hasActed(): boolean { return this._hasActed; }
-  set hasActed(val: boolean) { this.Set("hasActed", val === true); }
+  set hasActed(val: boolean) { this._hasActed = val === true; }
 
   constructor(name = "", body = 3, willpower = 3) {
-    super();
     this._name = name;
     this._body = Math.max(0, Math.floor(body));
     this._willpower = Math.max(0, Math.floor(willpower));
@@ -263,11 +260,11 @@ export class GruntMember extends Undoable {
     const wasOut = this.outOfAction;
     const applied = Math.min(requested, this.remainingBoxes);
     if (requested > 0 && !wasOut) {
-      this.Set("lastDamageType", type);
-      this.Set("lastDamageValue", requested);
+      this._lastDamageType = type;
+      this._lastDamageValue = requested;
     }
     if (applied > 0) {
-      this.Set("damage", this._damage + applied);
+      this._damage = this._damage + applied;
     }
     return {
       applied,
@@ -279,9 +276,10 @@ export class GruntMember extends Undoable {
   }
 
   /**
-   * Undo a mis-keyed hit / apply healing. Kept symmetric with `applyDamage` so
-   * the GM can correct a mis-tap at the table without reaching for global undo
-   * (the row re-syncs the shared Initiative Score either way).
+   * Correct a mis-keyed hit / apply healing. Kept symmetric with `applyDamage`
+   * so the GM can correct a mis-tap at the table by healing rather than
+   * reaching for an undo control (the row re-syncs the shared Initiative
+   * Score either way; `RULINGS.md` 2026-08-07).
    *
    * **Healing a downed grunt brings it back up** (brief Decision 13,
    * `RULINGS.md` 2026-08-07, which reverses the 2026-08-02 refusal). There is
@@ -301,7 +299,7 @@ export class GruntMember extends Undoable {
     const requested = Math.max(0, Math.floor(boxes));
     const healed = Math.min(requested, this._damage);
     if (healed > 0) {
-      this.Set("damage", this._damage - healed);
+      this._damage = this._damage - healed;
     }
     return healed;
   }
@@ -322,10 +320,17 @@ export class GruntMember extends Undoable {
   /**
    * Rebuild a member from a snapshot, damage and final-attack record included.
    *
-   * Writes `damage` directly rather than replaying `applyDamage`, because a
+   * Writes `_damage` directly rather than replaying `applyDamage`, because a
    * replay would re-trigger the wound-modifier deltas the row's shared
    * accumulator is driven by (Decision 1) - the accumulator is restored
    * separately, from its own snapshot field, and must not be double-counted.
+   *
+   * `damage` / `lastDamageType` / `lastDamageValue` have no public setter -
+   * this is the one place outside the instance's own methods that has to
+   * write them, because a GM rejoin has to rebuild every row member's
+   * Condition Monitor from the wire (`ARCHITECTURE.md` §6, "Session sync for
+   * rows"). TypeScript `private` is class-scoped, so a static method of
+   * `GruntMember` may assign another instance's backing fields directly.
    */
   static fromSnapshot(snapshot: Partial<GruntMemberSnapshot>): GruntMember {
     const member = new GruntMember(
@@ -334,13 +339,13 @@ export class GruntMember extends Undoable {
       Number(snapshot.willpower ?? 0)
     );
     const damage = Math.max(0, Math.floor(Number(snapshot.damage ?? 0)));
-    member.Set("damage", Math.min(damage, member.conditionMonitorBoxes));
-    member.Set("lastDamageType",
+    member._damage = Math.min(damage, member.conditionMonitorBoxes);
+    member._lastDamageType =
       snapshot.lastDamageType === "physical" || snapshot.lastDamageType === "stun"
         ? snapshot.lastDamageType
-        : null);
-    member.Set("lastDamageValue", Math.max(0, Math.floor(Number(snapshot.lastDamageValue ?? 0))));
-    member.Set("hasActed", snapshot.hasActed === true);
+        : null;
+    member._lastDamageValue = Math.max(0, Math.floor(Number(snapshot.lastDamageValue ?? 0)));
+    member._hasActed = snapshot.hasActed === true;
     return member;
   }
 

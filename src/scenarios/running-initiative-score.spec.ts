@@ -25,15 +25,15 @@ function makeRolledParticipant(name: string, attribute: number, dice: number, ro
   const p = makeParticipant(name);
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;

@@ -49,11 +49,11 @@ export class AstralParticipant extends Participant {
 
   private _astralProjecting: boolean;
   get astralProjecting(): boolean { return this._astralProjecting; }
-  set astralProjecting(val: boolean) { this.Set("astralProjecting", val); }
+  set astralProjecting(val: boolean) { this._astralProjecting = val; }
 
   private _blocksPhysicalActions: boolean;
   get blocksPhysicalActions(): boolean { return this._blocksPhysicalActions; }
-  set blocksPhysicalActions(val: boolean) { this.Set("blocksPhysicalActions", val); }
+  set blocksPhysicalActions(val: boolean) { this._blocksPhysicalActions = val; }
 
   /**
    * How many Initiative Dice this participant *actually* gained when they
@@ -68,11 +68,10 @@ export class AstralParticipant extends Participant {
    * means recording it here rather than re-applying the constant blind.
    *
    * 0 while not projecting, and 0 while projecting if the cap absorbed the gain.
-   * Undoable like every other field, so undoing the toggle restores it.
    */
   private _projectionDiceGain: number;
   get projectionDiceGain(): number { return this._projectionDiceGain; }
-  set projectionDiceGain(val: number) { this.Set("projectionDiceGain", val); }
+  set projectionDiceGain(val: number) { this._projectionDiceGain = val; }
 
   constructor() {
     super();

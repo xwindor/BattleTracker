@@ -1,7 +1,6 @@
 import { CombatManager } from 'Combat';
 import { Participant, INITIATIVE_PASS_DECAY } from 'Combat/Participants/Participant';
 import { interruptTable } from 'InterruptTable';
-import { UndoHandler } from 'Common';
 import { MatrixParticipant } from 'Matrix';
 import { AstralParticipant } from 'Magic';
 import { StatusEnum } from 'Combat/Participants/StatusEnum';
@@ -32,15 +31,15 @@ function makeRolledParticipant(name: string, attribute: number, dice: number, ro
   const p = makeParticipant(name);
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -52,13 +51,13 @@ const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 
 describe('CombatManager.copyParticipant', () => {
   beforeEach(() => {
-    CombatManager.participants.clear(false);
+    CombatManager.participants.clear();
     CombatManager.nextSortOrder = 0;
   });
 
   it('duplicating "Razor" renames source to "Razor 1" and creates "Razor 2"', () => {
     const p = makeParticipant('Razor');
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
 
     CombatManager.copyParticipant(p);
 
@@ -71,8 +70,8 @@ describe('CombatManager.copyParticipant', () => {
   it('duplicating "Razor 1" when "Razor 2" already exists creates "Razor 3"', () => {
     const p1 = makeParticipant('Razor 1');
     const p2 = makeParticipant('Razor 2');
-    CombatManager.participants.insert(p1, false);
-    CombatManager.participants.insert(p2, false);
+    CombatManager.participants.insert(p1);
+    CombatManager.participants.insert(p2);
 
     CombatManager.copyParticipant(p1);
 
@@ -84,7 +83,7 @@ describe('CombatManager.copyParticipant', () => {
 
   it('does not throw for a name containing "." (e.g. "Razor.io Hacker")', () => {
     const p = makeParticipant('Razor.io Hacker');
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
 
     expect(() => CombatManager.copyParticipant(p)).not.toThrow();
     const names = CombatManager.participants.items.map(x => x.name);
@@ -94,7 +93,7 @@ describe('CombatManager.copyParticipant', () => {
 
   it('does not throw for a name containing parentheses (e.g. "Lone Star (Officer)")', () => {
     const p = makeParticipant('Lone Star (Officer)');
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
 
     expect(() => CombatManager.copyParticipant(p)).not.toThrow();
     const names = CombatManager.participants.items.map(x => x.name);
@@ -105,8 +104,8 @@ describe('CombatManager.copyParticipant', () => {
   it('"Troll" and "Trollkin Boss" are not treated as related', () => {
     const troll = makeParticipant('Troll');
     const trollkin = makeParticipant('Trollkin Boss 3');
-    CombatManager.participants.insert(troll, false);
-    CombatManager.participants.insert(trollkin, false);
+    CombatManager.participants.insert(troll);
+    CombatManager.participants.insert(trollkin);
 
     CombatManager.copyParticipant(troll);
 
@@ -242,19 +241,6 @@ describe('Initiative Score is a running value, not a recompute', () => {
       expect(p.currentInitiativeScore).toBe(before);
     });
 
-    it('is undoable as part of the surrounding chapter', () => {
-      const p = makeRolledParticipant('Jazzed', 9, 1, 4); // Score 13
-      UndoHandler.StartActions();
-
-      p.changeDiceCount(3, scriptedRoller([3, 4]));
-      expect(p.currentInitiativeScore).toBe(20);
-
-      UndoHandler.Undo();
-
-      expect(p.dices).toBe(1);
-      expect(p.diceIni).toBe(4);
-      expect(p.currentInitiativeScore).toBe(13);
-    });
   });
 
   // Acceptance criterion 10 (brief pp. 158, 160, 169)
@@ -338,7 +324,7 @@ describe('Initiative Score is a running value, not a recompute', () => {
     // (brief F6, p. 160 - once per elapsed pass, not twice).
     const unrolled = makeParticipant('Decker');
     unrolled.baseIni = 9;
-    CombatManager.participants.insert(unrolled, false);
+    CombatManager.participants.insert(unrolled);
     CombatManager.started = true;
 
     CombatManager.nextIniPass(); // pass 2
@@ -387,49 +373,19 @@ describe('Initiative Score is a running value, not a recompute', () => {
     // ...and the same for the Matrix/astral clone overrides.
     const mp = new MatrixParticipant();
     mp.baseIni = 10;
-    CombatManager.participants.insert(mp, false);
+    CombatManager.participants.insert(mp);
     mp.diceIni = 6;          // Score 16
     mp.doAction(FULL_DEFENSE); // -> 6
     expect(mp.clone().getCurrentInitiative()).toBe(6);
 
     const ap = new AstralParticipant();
     ap.baseIni = 10;
-    CombatManager.participants.insert(ap, false);
+    CombatManager.participants.insert(ap);
     ap.diceIni = 6;
     ap.doAction(FULL_DEFENSE);
     expect(ap.clone().getCurrentInitiative()).toBe(6);
   });
 
-  it('undo reverses a pass advance as a single step', () => {
-    const a = makeRolledParticipant('A', 10, 1, 5); // 15
-    const b = makeRolledParticipant('B', 8, 1, 4);  // 12
-
-    UndoHandler.StartActions();
-    CombatManager.nextIniPass();
-    expect(a.currentInitiativeScore).toBe(5);
-    expect(b.currentInitiativeScore).toBe(2);
-    expect(CombatManager.initiativePass).toBe(2);
-
-    UndoHandler.Undo();
-
-    expect(a.currentInitiativeScore).toBe(15);
-    expect(b.currentInitiativeScore).toBe(12);
-    expect(CombatManager.initiativePass).toBe(1);
-  });
-
-  it('undo reverses an Initiative attribute change back out of the Score', () => {
-    const p = makeRolledParticipant('Implanted', 8, 1, 3); // 11
-
-    UndoHandler.StartActions();
-    p.baseIni = 10;
-    expect(p.currentInitiativeScore).toBe(13);
-
-    UndoHandler.Undo();
-
-    expect(p.baseIni).toBe(8);
-    expect(p.currentInitiativeScore).toBe(11);
-    expect(p.appliedInitiativeAttribute).toBe(8);
-  });
 
   it('clone() and the Matrix/astral clone overrides carry the running Score', () => {
     const p = makeRolledParticipant('Original', 10, 1, 6); // 16
@@ -441,14 +397,14 @@ describe('Initiative Score is a running value, not a recompute', () => {
 
     const mp = new MatrixParticipant();
     mp.baseIni = 9;
-    CombatManager.participants.insert(mp, false);
+    CombatManager.participants.insert(mp);
     mp.diceIni = 8; // Score 17
     const matrixClone = mp.clone();
     expect(matrixClone.currentInitiativeScore).toBe(17);
 
     const ap = new AstralParticipant();
     ap.baseIni = 7;
-    CombatManager.participants.insert(ap, false);
+    CombatManager.participants.insert(ap);
     ap.diceIni = 4; // Score 11
     const astralClone = ap.clone();
     expect(astralClone.currentInitiativeScore).toBe(11);

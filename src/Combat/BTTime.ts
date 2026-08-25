@@ -1,6 +1,4 @@
-import { Undoable } from "Common";
-
-export class BTTime extends Undoable
+export class BTTime
 {
   public static readonly Start: number = Number.MAX_SAFE_INTEGER;
   public static readonly End: number = Number.MIN_SAFE_INTEGER;
@@ -17,7 +15,7 @@ export class BTTime extends Undoable
   }
   set combatTurn(val: number)
   {
-    this.Set("combatTurn", val);
+    this._combatTurn = val;
   }
 
   get initiativePass(): number
@@ -26,7 +24,7 @@ export class BTTime extends Undoable
   }
   set initiativePass(val: number)
   {
-    this.Set("initiativePass", val);
+    this._initiativePass = val;
   }
 
   get initiativeScore(): number
@@ -35,18 +33,17 @@ export class BTTime extends Undoable
   }
   set initiativeScore(val: number)
   {
-    this.Set("initiativeScore", val);
+    this._initiativeScore = val;
   }
 
   constructor(combatTurn: number, initiativePass: number = BTTime.Start, initiativeScore: number = BTTime.Start)
   {
-    super();
     this._combatTurn = combatTurn;
     this._initiativePass = initiativePass;
     this._initiativeScore = initiativeScore;
   }
 
-  public override toString(): string
+  public toString(): string
   {
     let text = "";
     if (this.combatTurn === BTTime.Start)

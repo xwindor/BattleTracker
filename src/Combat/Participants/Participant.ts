@@ -1,4 +1,3 @@
-import { Undoable, UndoHandler } from "Common";
 // Imported directly rather than through the "Combat" barrel: CombatManager
 // now imports this module for INITIATIVE_PASS_DECAY, and going through the
 // barrel would reintroduce an import cycle.
@@ -111,14 +110,14 @@ export const PARTICIPANT_BASE_BACKING_FIELDS = [
   "_currentInitiativeScore", "_appliedInitiativeAttribute"
 ];
 
-export class Participant extends Undoable implements IParticipant {
+export class Participant implements IParticipant {
 
   get name(): string {
     return this._name;
   }
 
   set name(val: string) {
-    this.Set("name", val);
+    this._name = val;
   }
 
   get waiting(): boolean {
@@ -126,7 +125,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set waiting(val: boolean) {
-    this.Set("waiting", val);
+    this._waiting = val;
   }
 
   get finished(): boolean {
@@ -134,7 +133,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set finished(val: boolean) {
-    this.Set("finished", val);
+    this._finished = val;
   }
 
   get active(): boolean {
@@ -142,7 +141,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set active(val: boolean) {
-    this.Set("active", val);
+    this._active = val;
   }
 
   get baseIni(): number {
@@ -150,7 +149,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set baseIni(val: number) {
-    this.Set("baseIni", val);
+    this._baseIni = val;
     // A change to the Initiative attribute applies as a same-sized delta to
     // the running Initiative Score (brief F4, p. 160).
     this.syncInitiativeAttribute();
@@ -170,7 +169,7 @@ export class Participant extends Undoable implements IParticipant {
    */
   set diceIni(val: number) {
     const previous = this._diceIni;
-    this.Set("diceIni", val);
+    this._diceIni = val;
     if (this._diceIni !== previous) {
       this.applyInitiativeScoreDelta(this._diceIni - previous);
     }
@@ -184,7 +183,7 @@ export class Participant extends Undoable implements IParticipant {
    * must not become a silent Score change.
    */
   setDiceIniWithoutScoreChange(val: number) {
-    this.Set("diceIni", val);
+    this._diceIni = val;
   }
 
   /**
@@ -210,7 +209,7 @@ export class Participant extends Undoable implements IParticipant {
    * The 5D6 hard cap still applies (brief criterion 9, pp. 52/288).
    */
   setDicesWithoutRoll(val: number) {
-    this.Set("dices", clampInitiativeDiceCount(val));
+    this._dices = clampInitiativeDiceCount(val);
   }
 
   /**
@@ -229,8 +228,8 @@ export class Participant extends Undoable implements IParticipant {
    * so when a decrease would push it below that floor the floored-off remainder
    * is applied to the Score as a separate delta instead of being silently lost.
    *
-   * All writes go through `Set` / `applyInitiativeScoreDelta`, so the whole
-   * change is undoable like any other mutation.
+   * All writes go through the backing-field setters / `applyInitiativeScoreDelta`,
+   * so a mis-keyed dice-count edit is corrected the same way any other field is.
    *
    * @param rollDie injected single-die roller, so callers (and tests) can
    *                supply a deterministic sequence.
@@ -271,7 +270,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set hasPainEditor(val: boolean) {
-    this.Set("hasPainEditor", val);
+    this._hasPainEditor = val;
     // Toggling the Pain Editor changes the wound modifier and therefore the
     // Initiative attribute (brief p. 160, p. 169).
     this.syncInitiativeAttribute();
@@ -288,7 +287,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set currentInitiativeScore(val: number) {
-    this.Set("currentInitiativeScore", val);
+    this._currentInitiativeScore = val;
   }
 
   /**
@@ -302,7 +301,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set appliedInitiativeAttribute(val: number) {
-    this.Set("appliedInitiativeAttribute", val);
+    this._appliedInitiativeAttribute = val;
   }
 
   /**
@@ -348,7 +347,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set ooc(val: boolean) {
-    this.Set("ooc", val);
+    this._ooc = val;
   }
 
   /**
@@ -369,7 +368,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set edge(val: boolean) {
-    this.Set("edge", val);
+    this._edge = val;
   }
 
   get status(): StatusEnum {
@@ -377,7 +376,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set status(val: StatusEnum) {
-    this.Set("status", val);
+    this._status = val;
   }
 
   get actionHistory(): Action[] {
@@ -385,7 +384,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set actionHistory(val: Action[]) {
-    this.Set("actionHistory", val);
+    this._actionHistory = val;
   }
 
   get painTolerance(): number {
@@ -393,7 +392,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set painTolerance(val: number) {
-    this.Set("painTolerance", val);
+    this._painTolerance = val;
     this.syncInitiativeAttribute();
   }
 
@@ -402,7 +401,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set overflowHealth(val: number) {
-    this.Set("overflowHealth", val);
+    this._overflowHealth = val;
   }
 
   get physicalHealth(): number {
@@ -410,7 +409,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set physicalHealth(val: number) {
-    this.Set("physicalHealth", val);
+    this._physicalHealth = val;
   }
 
   get stunHealth(): number {
@@ -418,7 +417,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set stunHealth(val: number) {
-    this.Set("stunHealth", val);
+    this._stunHealth = val;
   }
 
   get physicalDamage(): number {
@@ -426,7 +425,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set physicalDamage(val: number) {
-    this.Set("physicalDamage", val);
+    this._physicalDamage = val;
     // Wound modifiers apply to the Initiative attribute immediately on
     // injury, and thence to the Score (brief criterion 10, pp. 158/160/169).
     this.syncInitiativeAttribute();
@@ -437,7 +436,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set stunDamage(val: number) {
-    this.Set("stunDamage", val);
+    this._stunDamage = val;
     // See physicalDamage: wound modifier -> Initiative attribute -> Score.
     this.syncInitiativeAttribute();
   }
@@ -447,7 +446,7 @@ export class Participant extends Undoable implements IParticipant {
   }
 
   set sortOrder(val: number) {
-    this.Set("sortOrder", val);
+    this._sortOrder = val;
   }
 
   private _name: string;
@@ -493,7 +492,6 @@ export class Participant extends Undoable implements IParticipant {
   private _actionHistory: Action[] = [];
 
   constructor() {
-    super();
     this._status = StatusEnum.Waiting;
     this._waiting = false;
     this._finished = false;
@@ -560,8 +558,8 @@ export class Participant extends Undoable implements IParticipant {
    * This is the stored running Score (mutated only by deltas) plus the
    * Initiative already committed to Interrupt Actions this Combat Turn.
    * Interrupt costs are held in `actionHistory` rather than debited straight
-   * off the Score so that undoing / resetting an action returns the points;
-   * both accumulators are cleared at the same moment (the Combat Turn
+   * off the Score so that resetting an action returns the points; both
+   * accumulators are cleared at the same moment (the Combat Turn
    * boundary, `softReset()`), so the value matches debit-at-declaration
    * (brief F9, p. 167) at every point in the turn.
    *
@@ -628,18 +626,12 @@ export class Participant extends Undoable implements IParticipant {
       return;
     }
 
-    UndoHandler.DoAction(() => {
-      this.actionHistory.push(action);
-    },
-      () => {
-        this.actionHistory.pop();
-      });
+    this.actionHistory.push(action);
   }
 
   resetActions()
   {
-    const items = this.actionHistory;
-    UndoHandler.DoAction(() => this._actionHistory = [], () => { this._actionHistory = items; });
+    this._actionHistory = [];
   }
 
   isInFullDefense(): boolean {

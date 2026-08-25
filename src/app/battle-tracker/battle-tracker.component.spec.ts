@@ -8,7 +8,6 @@ import { SharedCombatState } from 'app/services/session-sync.service';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
 import { AstralParticipant } from 'Magic';
-import { UndoHandler } from 'Common';
 import { LogHandler } from 'Logging';
 import { interruptTable } from 'InterruptTable';
 
@@ -17,8 +16,8 @@ const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -31,7 +30,7 @@ function rolled(name: string, attribute: number, dice: number, roll: number): Pa
   p.name = name;
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
@@ -306,19 +305,6 @@ describe('BattleTrackerComponent', () => {
       expect(diceTotalInput(0).value).toBe('6');
     });
 
-    it('is a single undo step per edit', async () => {
-      const p = rolled('Wombat', 6, 1, 4);
-      p.baseIni = 8;
-      fixture.detectChanges();
-
-      await type(diceTotalInput(0), '44');
-      expect(p.currentInitiativeScore).toBe(14);
-
-      UndoHandler.Undo();
-
-      expect(p.diceIni).toBe(4);
-      expect(p.currentInitiativeScore).toBe(12);
-    });
   });
 
   // Defect 6 / acceptance criterion 8 (p. 160): losing Initiative Dice
@@ -331,7 +317,7 @@ describe('BattleTrackerComponent', () => {
       mp.dataProcessing = 7;
       mp.setDicesWithoutRoll(4);    // hot sim
       mp.baseIni = 12;              // DP 7 + INT 5
-      CombatManager.participants.insert(mp, false);
+      CombatManager.participants.insert(mp);
       mp.diceIni = 14;              // Score 26
       component['participantReactions'].set(mp, 5);
       component['participantIntuitions'].set(mp, 5);
@@ -511,22 +497,6 @@ describe('BattleTrackerComponent', () => {
       expect(input.value).toBe('5');
     });
 
-    it('is undoable as a single step', async () => {
-      const p = rolled('Wired', 8, 1, 3); // Score 11
-      CombatManager.started = true;
-      scriptDice(component, [4]);
-      fixture.detectChanges();
-
-      UndoHandler.StartActions();
-      await typeInto(rowDiceCountInput(0), '2');
-      expect(p.currentInitiativeScore).toBe(15);
-
-      UndoHandler.Undo();
-
-      expect(p.dices).toBe(1);
-      expect(p.diceIni).toBe(3);
-      expect(p.currentInitiativeScore).toBe(11);
-    });
   });
 
   // Broken site 2: onVRModeChange (the "Switch Mode" control) called
@@ -541,7 +511,7 @@ describe('BattleTrackerComponent', () => {
       mp.baseIni = 12;             // DP 7 + INT 5
       mp.vrMode = VRMode.ColdSim;
       mp.jackedIn = true;
-      CombatManager.participants.insert(mp, false);
+      CombatManager.participants.insert(mp);
       mp.diceIni = 10;             // Score 22
       component['participantReactions'].set(mp, 5);
       component['participantIntuitions'].set(mp, 5);
@@ -596,7 +566,7 @@ describe('BattleTrackerComponent', () => {
       ap.astralProjecting = true;
       ap.setDicesWithoutRoll(3);   // e.g. an Initiative-Dice enhancer is running
       ap.baseIni = 10;             // INT 5 x 2
-      CombatManager.participants.insert(ap, false);
+      CombatManager.participants.insert(ap);
       ap.diceIni = 12;             // Score 22
       component['participantReactions'].set(ap, 5);
       component['participantIntuitions'].set(ap, 5);
@@ -638,7 +608,7 @@ describe('BattleTrackerComponent', () => {
       mp.dataProcessing = 7;
       mp.setDicesWithoutRoll(1);
       mp.baseIni = 10;             // REA 5 + INT 5
-      CombatManager.participants.insert(mp, false);
+      CombatManager.participants.insert(mp);
       mp.diceIni = 4;              // Score 14
       component['participantReactions'].set(mp, 5);
       component['participantIntuitions'].set(mp, 5);
@@ -705,7 +675,7 @@ describe('BattleTrackerComponent', () => {
       ap.name = 'Mage';
       ap.setDicesWithoutRoll(dice);
       ap.baseIni = 10;             // REA 5 + INT 5
-      CombatManager.participants.insert(ap, false);
+      CombatManager.participants.insert(ap);
       ap.diceIni = roll;           // Score 14 at the defaults
       component['participantReactions'].set(ap, 5);
       component['participantIntuitions'].set(ap, 5);
@@ -776,22 +746,6 @@ describe('BattleTrackerComponent', () => {
 
       expect(ap.dices).toBe(2);                  // count still tracks the mode
       expect(ap.currentInitiativeScore).toBe(14); // no roll owed, Score untouched
-    });
-
-    it('is undoable as a single step', () => {
-      const ap = awakened();
-      CombatManager.started = true;
-      scriptDice(component, [5]);
-
-      component.toggleAstralProjecting(ap);
-      expect(ap.currentInitiativeScore).toBe(19);
-
-      UndoHandler.Undo();
-
-      expect(ap.astralProjecting).toBeFalse();
-      expect(ap.dices).toBe(1);
-      expect(ap.diceIni).toBe(4);
-      expect(ap.currentInitiativeScore).toBe(14);
     });
 
     // Defect D1: the return trip used to re-apply the constant -1 regardless of

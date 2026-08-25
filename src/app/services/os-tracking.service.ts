@@ -1,6 +1,5 @@
 import { Injectable } from "@angular/core";
 import { Observable, Subject } from "rxjs";
-import { UndoHandler } from "Common";
 import { MatrixParticipant } from "Matrix";
 
 export type OsAlertLevel = "none" | "ic-alert" | "convergence";
@@ -16,8 +15,7 @@ export interface OsThresholdEvent {
  *
  * Owns Overwatch Score accumulation and threshold detection. Kept separate
  * from MatrixStateService so the threshold logic can be unit-tested in
- * isolation. Mutations are wrapped in UndoHandler.DoAction so undoing an
- * illegal action also undoes its OS cost.
+ * isolation.
  *
  * Threshold semantics (Section 9.2 / Table 25):
  *   OS >= 20 → 'ic-alert'    (host spawns or escalates IC)
@@ -35,10 +33,7 @@ export class OsTrackingService {
     if (!amount) return;
     const previous = decker.overwatch;
     const previousAlert = this.getOSAlert(decker);
-    UndoHandler.DoAction(
-      () => { decker.overwatch = previous + amount; },
-      () => { decker.overwatch = previous; }
-    );
+    decker.overwatch = previous + amount;
     const newAlert = this.getOSAlert(decker);
     if (newAlert !== previousAlert && newAlert !== "none") {
       this._threshold$.next({ decker, alert: newAlert, reason });
@@ -46,12 +41,8 @@ export class OsTrackingService {
   }
 
   resetOS(decker: MatrixParticipant): void {
-    const previous = decker.overwatch;
-    if (previous === 0) return;
-    UndoHandler.DoAction(
-      () => { decker.overwatch = 0; },
-      () => { decker.overwatch = previous; }
-    );
+    if (decker.overwatch === 0) return;
+    decker.overwatch = 0;
   }
 
   getOSAlert(decker: MatrixParticipant): OsAlertLevel {

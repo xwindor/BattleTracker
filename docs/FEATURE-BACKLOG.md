@@ -6,6 +6,41 @@ Completed items are deleted from this file rather than kept as historical
 record — the change that shipped them is the record (`briefs/`,
 `ARCHITECTURE.md`, git history). Last swept 2026-08-23.
 
+## Clear interrupts control (deferred from "Remove the undo/redo system", Open Decision 1)
+
+`Participant.resetActions()` exists and is fully implemented (clears
+`actionHistory`, refunding any committed Interrupt Action cost such as Full
+Defense's -10) but has **no caller anywhere in `src/`** and no UI control
+reaches it. With the Undo control gone, a mis-tapped Interrupt Action
+(`btnAction_Click` -> `p.doAction(action)`) has no correction path at all
+until the Combat Turn ends and `softReset()` clears `actionHistory` for
+everyone. Wire a "Clear interrupts" control (per participant, or per the
+selected NPC row member) to `resetActions()`. Whether clearing Full Defense
+mid-turn refunds the -10 (it does, structurally, since the whole entry is
+removed) is already the behaviour `resetActions()` gives; if a *partial*
+clear (single action, not the whole history) turns out to be wanted instead,
+that is a different, larger change and a fresh table ruling in
+`RULINGS.md`, not assumed here.
+
+## Confirmation on the turn-ending Next Pass tap (deferred from "Remove the undo/redo system", Open Decision 2)
+
+`btnNextPass_Click()` already computes `const isRealNewPass =
+!this.combatManager.isOver()` before calling `nextIniPass()` -
+`CombatManager.isOver()` is the same predicate `endInitiativePass()` uses to
+decide whether the tap also ends the Combat Turn, so a turn-ending tap is
+detectable *before* any mutation runs. With the Undo control gone, a
+mis-tapped Next Pass that happens to end the Combat Turn triggers
+`softReset()` on every participant (dice, running Score, edge, status,
+`actionHistory` all reset - see `ARCHITECTURE.md` §2) with no way back.
+Add a confirmation dialog, but **only** when the tap would end the Combat
+Turn (`CombatManager.isOver()` evaluated *before* `nextIniPass()` runs, not
+at `btnNextPass_Click`'s current check position, which runs after the Score
+has already moved) - a prompt on every ordinary pass advance (2-4 taps per
+turn) is prompt fatigue for no benefit; a prompt on the one tap per turn that
+actually destroys state is not. Scenario S6 in
+`src/scenarios/remove-undo-system.spec.ts` pins the current (unconfirmed)
+behaviour as the baseline this change updates deliberately.
+
 ## Admin session manager — delete rooms from outside the GM view
 
 Requested by Xavier on 2026-08-18, right before the first live deployment of
@@ -300,6 +335,3 @@ is renumbered here.
   player view's transport-drop warning and the server's `gmConnected` presence
   signal end up saying similar things for different causes, so a player cannot
   tell "my connection dropped" from "the GM has left".
-- **D7 — stale release notice after an undo.** `findReleasedOwnCharacters()`
-  announces "the GM released your character"; if the GM immediately undoes the
-  release, the notice stays on the player's screen with nothing to act on.

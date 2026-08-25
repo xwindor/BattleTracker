@@ -1,4 +1,3 @@
-import { UndoHandler } from "Common";
 // Imported directly rather than through the "Combat" barrel: the barrel pulls
 // in CombatManager, which imports this module, and that would be a cycle.
 import {
@@ -79,12 +78,11 @@ export class NpcRowParticipant extends Participant {
    * has created but not populated yet (keep it: they are about to fill it) from
    * a row that has been emptied by removal or detach (drop it: it is a phantom
    * slot in the order that would otherwise be handed initiative and broadcast
-   * to players as an empty group). Undoable like every other field, so undoing
-   * the removal that emptied the row restores the row's history too.
+   * to players as an empty group).
    */
   private _everPopulated = false;
   get everPopulated(): boolean { return this._everPopulated; }
-  set everPopulated(val: boolean) { this.Set("everPopulated", val); }
+  set everPopulated(val: boolean) { this._everPopulated = val; }
 
   /**
    * The row's shared Wound Modifier (criterion 5 / Decision 1) - see `wm`.
@@ -97,7 +95,7 @@ export class NpcRowParticipant extends Participant {
    */
   private _rowWoundModifier = 0;
   get rowWoundModifier(): number { return this._rowWoundModifier; }
-  set rowWoundModifier(val: number) { this.Set("rowWoundModifier", Math.max(0, Math.floor(val))); }
+  set rowWoundModifier(val: number) { this._rowWoundModifier = Math.max(0, Math.floor(val)); }
 
   /**
    * Has this row already been reported as spent?
@@ -111,11 +109,11 @@ export class NpcRowParticipant extends Participant {
    *
    * Cleared again when the row stops being spent (a member healed back up per
    * Decision 13, or a new NPC added), so a row that drops a second time is
-   * announced a second time. Undoable like every other field.
+   * announced a second time.
    */
   private _spentFlagged = false;
   get spentFlagged(): boolean { return this._spentFlagged; }
-  set spentFlagged(val: boolean) { this.Set("spentFlagged", val === true); }
+  set spentFlagged(val: boolean) { this._spentFlagged = val === true; }
 
   constructor() {
     super();
@@ -290,10 +288,7 @@ export class NpcRowParticipant extends Participant {
    * joiner takes the row's current score, full stop.
    */
   addMember(member: GruntMember): GruntMember {
-    UndoHandler.DoAction(
-      () => { this._members.push(member); },
-      () => { this._members.pop(); }
-    );
+    this._members.push(member);
     this.everPopulated = true;
     return member;
   }
@@ -312,10 +307,7 @@ export class NpcRowParticipant extends Participant {
     if (index === -1) {
       return false;
     }
-    UndoHandler.DoAction(
-      () => { this._members.splice(index, 1); },
-      () => { this._members.splice(index, 0, member); }
-    );
+    this._members.splice(index, 1);
     return true;
   }
 
@@ -358,7 +350,8 @@ export class NpcRowParticipant extends Participant {
   /**
    * Healing counterpart of `applyDamageToMember`: a healing event gives the row
    * back exactly the shared penalty the matching wound event cost it, so a
-   * mis-keyed hit can be corrected at the table without global undo. Floored at
+   * mis-keyed hit can be corrected at the table by healing (`RULINGS.md`
+   * 2026-08-07). Floored at
    * 0 by the `rowWoundModifier` setter, so healing damage an NPC arrived with
    * (which never cost the row anything, see `addMember`) cannot make the row
    * faster than it started.
@@ -616,8 +609,8 @@ export interface GruntMergeResult {
  * selected grunt is the group's stat block; the GM can edit it on the row.
  *
  * Pure: it builds and returns the row and never touches the encounter's
- * participant list. Removing the merged grunts from the order is the caller's
- * job, so the whole swap lands in one undo chapter.
+ * participant list. Removing the merged grunts from the order is the
+ * caller's job.
  */
 export function mergeGruntsIntoRow(
   grunts: readonly DetachedGruntParticipant[],

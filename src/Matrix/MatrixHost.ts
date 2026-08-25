@@ -8,8 +8,7 @@ export type HostAccessMethod = "none" | "hack-on-fly" | "brute-force" | "direct-
  *
  * A target host (server / corporate node) the GM created or selected. Holds
  * its own A/S/D/F + Matrix CM, the contained MatrixTargets, and currently
- * active IC. Plain class (not Undoable) — mutate via UndoHandler.DoAction
- * from MatrixStateService.
+ * active IC. Plain class - mutated directly by MatrixStateService.
  */
 export class MatrixHost {
   id: string;

@@ -1,10 +1,8 @@
 /**
  * MatrixTarget
  *
- * A plain (non-Undoable) value object representing any interactive icon in
- * the Matrix — public icon, host content, or nested host. Mutations from
- * outside should be wrapped in UndoHandler.DoAction() so undo/redo still
- * works for Matrix actions.
+ * A plain value object representing any interactive icon in the Matrix —
+ * public icon, host content, or nested host. Mutated directly by callers.
  */
 export type MatrixTargetType = "device" | "file" | "persona" | "host" | "ic";
 export type MatrixTargetSpotted = "hidden" | "running-silent" | "spotted";

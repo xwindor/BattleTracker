@@ -1,4 +1,3 @@
-import { Undoable } from "Common";
 import { ParticipantList } from "./Participants/ParticipantList";
 import { StatusEnum } from "./Participants/StatusEnum";
 import { IParticipant } from "./Participants/IParticipant";
@@ -7,7 +6,7 @@ import { INITIATIVE_PASS_DECAY } from "./Participants/Participant";
 // import cycle is introduced (Grunts only depends on Combat/Participants).
 import { isNpcRow, NpcRowParticipant } from "Grunts/NpcRowParticipant";
 
-class CombatManager extends Undoable {
+class CombatManager {
   participants: ParticipantList;
   currentActors: ParticipantList;
   nextSortOrder = 0;
@@ -19,7 +18,7 @@ class CombatManager extends Undoable {
   }
 
   set started(val: boolean) {
-    this.Set("started", val);
+    this._started = val;
   }
 
   private _passEnded: boolean;
@@ -29,7 +28,7 @@ class CombatManager extends Undoable {
   }
 
   set passEnded(val: boolean) {
-    this.Set("passEnded", val);
+    this._passEnded = val;
   }
 
   private _combatTurn: number;
@@ -39,7 +38,7 @@ class CombatManager extends Undoable {
   }
 
   set combatTurn(val: number) {
-    this.Set("combatTurn", val);
+    this._combatTurn = val;
   }
 
   private _initiativePass: number;
@@ -49,7 +48,7 @@ class CombatManager extends Undoable {
   }
 
   set initiativePass(val: number) {
-    this.Set("initiativePass", val);
+    this._initiativePass = val;
   }
 
   private _currentInitiative: number;
@@ -58,11 +57,10 @@ class CombatManager extends Undoable {
   }
 
   set currentInitiative(val: number) {
-    this.Set("currentInitiative", val);
+    this._currentInitiative = val;
   }
 
   constructor() {
-    super();
     this._started = false;
     this._passEnded = true;
     this._combatTurn = 1;
@@ -98,12 +96,6 @@ class CombatManager extends Undoable {
    * below zero and participants currently out of combat - the latter so that
    * re-entering mid-turn lands on the correct "roll, then subtract 10 per
    * elapsed pass" value (brief F6, p. 160).
-   *
-   * Undo batching is the caller's responsibility: the production caller (the
-   * GM component's Next Pass button) calls `UndoHandler.StartActions()` first,
-   * so the whole advance collapses into one undo step. Called without an open
-   * chapter, each property write becomes its own chapter (still undoable, just
-   * not batched).
    */
   nextIniPass() {
     this.passEnded = false;
@@ -282,8 +274,8 @@ class CombatManager extends Undoable {
    * which must never re-enter `goToNextActors()` from inside its own pre-step,
    * or the newly-selected actors would immediately be marked `Finished` and
    * skipped.
-   * Transient control state, not combat state: deliberately not routed through
-   * `Undoable.Set`.
+   * Transient control state, not combat state: a plain field, not one of the
+   * getter/setter-backed combat fields above.
    */
   private advancingActors = false;
 
@@ -299,8 +291,8 @@ class CombatManager extends Undoable {
    * that went spent from there used to go silent. One listener, set by the GM
    * component, so both paths do exactly the same thing.
    *
-   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
-   * state.
+   * A wiring reference, not combat state: a plain field, not one of the
+   * getter/setter-backed combat fields above.
    */
   onSpentNpcRowsFlagged: ((rows: NpcRowParticipant[]) => void) | null = null;
 
@@ -312,8 +304,8 @@ class CombatManager extends Undoable {
    * (brief "Action Log entries for combat structural boundaries", Open
    * Decision 2).
    *
-   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
-   * state (same rationale as `onSpentNpcRowsFlagged` above).
+   * A wiring reference, not combat state (same rationale as
+   * `onSpentNpcRowsFlagged` above).
    */
   onInitiativePassEnded: ((pass: number, turn: number) => void) | null = null;
 
@@ -322,8 +314,8 @@ class CombatManager extends Undoable {
    * Combat Turn that is ending (not the incremented value) — see
    * `endCombatTurn()`.
    *
-   * Not routed through `Undoable.Set`: it is a wiring reference, not combat
-   * state (same rationale as `onSpentNpcRowsFlagged` above).
+   * A wiring reference, not combat state (same rationale as
+   * `onSpentNpcRowsFlagged` above).
    */
   onCombatTurnEnded: ((turn: number) => void) | null = null;
 
@@ -366,9 +358,7 @@ class CombatManager extends Undoable {
    * calls announce nothing, and it is cleared again if the row stops being
    * wiped out - healed back up (Decision 13), or reduced to an empty row by
    * removing its already-downed members by hand - so a second collapse is
-   * announced afresh. The flag write goes through `Undoable.Set`, so it is
-   * undoable like any other mutation; undo batching is the caller's
-   * responsibility as everywhere else (ARCHITECTURE.md §4).
+   * announced afresh.
    *
    * @returns the rows that were *newly* flagged as wiped out, for logging.
    */

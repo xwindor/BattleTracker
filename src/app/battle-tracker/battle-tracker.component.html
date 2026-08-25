@@ -47,7 +47,7 @@
   <div class="row">
     <div class="col-12">
       <div class="row">
-        <div class="col-6 gm-toolbar-col">
+        <div class="col-12 gm-toolbar-col">
           <div class="btn-group" role="group">
             @if(!combatManager.started)
             {
@@ -63,18 +63,6 @@
             }
             <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">
               End Combat
-            </button>
-          </div>
-        </div>
-        <div class="col-6 position-relative">
-          <div class="right btn-group" role="group">
-            <button type="button" class="btn btn-warning" (click)="btnUndo_Click()" title="Undo"
-              [disabled]="isUndoDisabled()">
-              <i class="fa fa-undo fa-lg fa-inverse"></i>
-            </button>
-            <button type="button" class="btn btn-warning" (click)="btnRedo_Click()" title="Redo"
-              [disabled]="isRedoDisabled()">
-              <i class="fa fa-redo fa-lg fa-inverse"></i>
             </button>
           </div>
         </div>
@@ -517,7 +505,8 @@
               <!-- A claim can outlive the client that made it (a player who
                    reloaded during a server restart comes back with a new
                    token). Without this the character is stuck: nobody holds
-                   the claim and no player can re-take it. One tap, undoable. -->
+                   the claim and no player can re-take it. One tap, reversible
+                   by re-claiming. -->
               @if (isParticipantClaimed(p)) {
               <button type="button" class="btn btn-outline-warning"
                 data-testid="release-claim-btn"

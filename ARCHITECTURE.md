@@ -4,8 +4,8 @@ This document maps how the tracker's combat engine actually behaves, based on
 reading the code rather than the intent behind it. It builds on
 `docs/APP_DOCUMENTATION.md` (which stays the broader reference for UI flows,
 deployment, and event names) — this file goes deeper specifically on
-initiative, turn/pass structure, participant state, tie-breaking, undo, and
-how session sync interacts with combat state. Where this doc and
+initiative, turn/pass structure, participant state, tie-breaking, and how
+session sync interacts with combat state. Where this doc and
 `docs/APP_DOCUMENTATION.md` disagree, this doc describes what the code does
 and calls out the conflict explicitly (see "Known rough edges" and inline
 notes below).
@@ -34,7 +34,7 @@ from a single flat collection:
   participant here simultaneously before UI-level tie-breaking trims it).
 
 `ParticipantList` (`src/Combat/Participants/ParticipantList.ts`) is a thin
-wrapper around a plain array (`_list: IParticipant[]`) with undo-aware
+wrapper around a plain array (`_list: IParticipant[]`) with
 `insert`/`insertAt`/`remove`/`clear` (and a `move()` composed from
 remove + insertAt), plus two comparator methods: `sortByInitiative()` (its own
 `initiativeComparator`) and `sortBySortOrder()`.
@@ -55,7 +55,7 @@ Either branch ends with `syncSharedState()`.
 
 Each participant carries a **stored, running Initiative Score** for the
 current Combat Turn — `Participant.currentInitiativeScore` (backing field
-`_currentInitiativeScore`, undoable like every other field). It is seeded
+`_currentInitiativeScore`). It is seeded
 once per Combat Turn and thereafter only ever moved by signed deltas; it is
 never recomputed from a base. `Participant.getCurrentInitiative()` reads:
 
@@ -68,8 +68,8 @@ currentInitiativeScore + actionIniModifier
   re-seeded when `diceIni` is assigned (the Initiative Test).
 - `actionIniModifier`: sum of `iniMod` for every entry in `actionHistory`
   (interrupts and declared actions that cost initiative — see §5). Interrupt
-  costs are held here rather than debited straight off the Score so undoing
-  or resetting an action gives the points back. In the normal turn loop both
+  costs are held here rather than debited straight off the Score so resetting
+  an action gives the points back. In the normal turn loop both
   accumulators clear at the same moment (the turn boundary), so the total
   matches a debit-at-declaration model at every point in the turn. The one
   place they part company is `clone()` (§3): a duplicated participant starts
@@ -114,8 +114,8 @@ re-derived from current initiative, not stored as authoritative state.
 
 ## 2. Combat Turn and Initiative Pass
 
-`CombatManager` tracks these as plain numeric/boolean fields (each routed
-through `Undoable.Set` so they're part of the undo chapter mechanism, §4):
+`CombatManager` tracks these as plain numeric/boolean fields, each behind a
+getter/setter that assigns the matching backing field directly:
 
 - `combatTurn: number` (starts at 1)
 - `initiativePass: number` (starts at 1)
@@ -139,7 +139,8 @@ participant who acts again after the pass has already ended (e.g. a Delaying
 participant) does not re-fire it — and it does **not** fire at all when that
 same transition also ends the Combat Turn; in that case only
 `onCombatTurnEnded` fires, never both. None of the three listener fields is
-routed through `Undoable.Set`: they are wiring references, not combat state.
+one of the getter/setter-backed fields above: they are plain wiring
+references, not combat state.
 
 **Pass boundary** (`nextIniPass()`): sets `passEnded = false`, increments
 `initiativePass`, then for every participant **subtracts
@@ -149,22 +150,6 @@ non-Delaying participant's `status` back to `Waiting`, and — for a linked NPC
 row — clears every member's per-NPC `hasActed` marker via `resetMemberActed()`
 (§6). Delaying participants are left alone: they carry their `Delaying` status
 across the pass boundary and re-enter scheduling only when explicitly acted on.
-
-Undo batching is the **caller's** responsibility, not `nextIniPass()`'s: the
-GM's Next Pass handler (`btnNextPass_Click`) calls `UndoHandler.StartActions()`
-first, which is what makes the click a single undo step. Called with **no**
-chapter open (e.g. from a spec), the writes are *not* split into one chapter
-each: the first write hits `UndoHandler.HandleProperty`'s `if (!this.recording)
-StartActions()` branch, which opens a chapter and leaves `recording === true`,
-so every subsequent write in the call — and every mutation after it, until
-something calls `StartActions()` or `Undo()` — accumulates into that same
-never-closed chapter. So an unwrapped `nextIniPass()` is undoable as one lump
-that also swallows whatever happens next, not as N separate steps. See §4.
-
-> **Stale comment warning.** `nextIniPass()`'s own doc comment still claims
-> that without an open chapter "each property write becomes its own chapter".
-> `UndoHandler` does not do that. The paragraph above describes the real
-> behaviour; the comment in the source is wrong.
 
 `addParticipant(participant, carriesRunningScore = false)` seeds a late
 entrant joining an already-started turn with `-(initiativePass - 1) * 10`.
@@ -204,13 +189,14 @@ called anywhere in the turn/pass lifecycle — it's a manual reset) also zeroes
 damage, sets `baseIni` to 0, and drops `dices` back to
 `PHYSICAL_INITIATIVE_DICE` (1) via `setDicesWithoutRoll`.
 
-> **`softReset()` is partially outside the undo system.** `diceIni`,
-> `currentInitiativeScore`, `edge`, `status` and `ooc` all go through `Set`
-> and are undoable. `actionHistory` does **not**: `softReset()` assigns
-> `this._actionHistory = []` directly, bypassing both `Set` and
-> `UndoHandler.DoAction`. Undoing across a turn boundary therefore restores
-> damage and the Score but **silently fails to restore committed interrupts**.
-> See §4 and "Known rough edges."
+> **`actionHistory` has a different write shape from everything else
+> `softReset()` touches.** `diceIni`, `currentInitiativeScore`, `edge`,
+> `status` and `ooc` all go through their normal setters. `actionHistory`
+> does not: `softReset()` assigns `this._actionHistory = []` directly. This
+> is one of four different ways `actionHistory` gets written across the
+> codebase — see `Participant.doAction` (pushes in place), `resetActions()`
+> (reassigns to `[]`), and the setter (assigns a whole new array) — worth
+> knowing if a future change needs to intercept every write.
 
 **What resets at a pass boundary:** `status` (Waiting/Delaying),
 `passEnded`/`initiativePass`, per-member `hasActed`, and the -10 applied to
@@ -223,10 +209,12 @@ pass; those only clear at the turn boundary.
 
 `Participant` (`src/Combat/Participants/Participant.ts`) implements
 `IParticipant`. Every mutable field is private with a backing `_field` and a
-getter/setter that routes through `Undoable.Set` (§4) — this is a hard
-convention: `Undoable.Set` throws if the backing field name doesn't match
-(`obj is missing property: _prop`), so a new property must always follow the
-`_foo` + `get foo()` + `set foo(val)` shape.
+getter/setter that assigns the backing field directly — this is a hard
+convention, held not by any runtime enforcement but by
+`PARTICIPANT_BASE_BACKING_FIELDS` (below) and the clone / in-place type-swap
+machinery that reads backing fields by name: a new property that doesn't
+follow the `_foo` + `get foo()` + `set foo(val)` shape is silently dropped by
+`clone()` and the promote/demote helpers rather than carried across.
 
 Fields: `name`, `status` (`StatusEnum`), `active`/`waiting`/`finished`
 (booleans that shadow `status` rather than being derived from it — see
@@ -237,8 +225,8 @@ rough edges), `baseIni`, `diceIni`, `dices`, `edge`, `sortOrder`,
 
 Several setters (`baseIni`, `physicalDamage`, `stunDamage`, `painTolerance`,
 `hasPainEditor`, `diceIni`) do a second, dependent write after their own
-`Set` in order to keep the running Initiative Score in step (§1). They land
-in the same undo chapter as the primary write.
+backing-field assignment, in order to keep the running Initiative Score in
+step (§1).
 
 `PARTICIPANT_BASE_BACKING_FIELDS` is the exported list of the 20 base backing
 fields a clone or in-place type swap has to carry over. It exists because
@@ -348,72 +336,13 @@ So a caller that uses `clone()` directly for anything other than
 source was. Name collision handling (in `copyParticipant`) appends an
 incrementing numeric suffix (`"Ganger 1"`, `"Ganger 2"`, …).
 
-## 4. Undo model
-
-Two cooperating pieces, both under `src/Common/`:
-
-- `Undoable` (base class `Participant`, `CombatManager`, `GruntMember`, and
-  the Matrix/astral/grunt subclasses all extend): `Set(prop, val)` just
-  forwards to `UndoHandler.HandleProperty`.
-- `UndoHandler` (singleton, `src/Common/UndoHandler.ts`): maintains
-  `pastHistory` / `futureHistory`, each a stack of "chapters"
-  (`HistoryEntry[]`), plus a `currentChapter` being built.
-
-**Property writes** (`HandleProperty`): compares old vs. new backing-field
-value; if different, mutates immediately and pushes an undo/redo closure
-pair onto `currentChapter`. If nothing is currently "recording"
-(`this.recording === false`), it auto-starts a chapter — but it never
-*closes* one, so that auto-opened chapter stays open and collects every later
-write until an explicit `StartActions()` (or an `Undo()`, which calls
-`EndActions()` first) closes it. A bare property set outside any explicit
-`StartActions()` is therefore not guaranteed to be its own single-entry
-chapter; it is the *start* of an open-ended one.
-
-**Non-property actions** (list insert/remove, action-history push/pop, NPC-row
-member-list mutations) go through `UndoHandler.DoAction(action, undoAction)`
-instead — this runs `action()` immediately and, **only if a chapter is
-already open**, appends the pair. Called directly by
-`ParticipantList.insert/insertAt/remove/clear`, `Participant.doAction` /
-`resetActions`, and `NpcRowParticipant.addMember` / `removeMember`.
-
-> **`DoAction` outside a chapter is silently non-undoable.** Unlike
-> `HandleProperty`, `DoAction` does *not* auto-open a chapter — it checks
-> `if (this.recording)` and otherwise just runs the action with no history
-> entry. So a list mutation performed with no chapter open is permanently
-> irreversible, while a property write in the same position would at least be
-> recorded. This asymmetry is the single most surprising thing about the undo
-> system; handlers that mutate lists must call `StartActions()` first.
-
-**Chaptering**: UI click handlers call `UndoHandler.StartActions()` first
-(e.g. `btnDelay_Click`, `btnDelete_Click`, `rollOutstandingInitiative`) so
-that everything the handler does — however many property sets and list
-mutations — collapses into one undo step. `StartActions()` closes any
-chapter already open, clears `futureHistory` (redo stack invalidated by new
-work), and opens a new one. Handlers that *don't* explicitly call
-`StartActions()` still get undo coverage per-property, but not *isolation*:
-their writes join whatever chapter the first of them auto-opened (see
-"Property writes" above), and that chapter keeps absorbing later mutations
-until something else calls `StartActions()`. Explicit `StartActions()` at the
-top of a handler is what bounds an undo step on both ends.
-
-`Undo()`/`Redo()` walk a chapter's entries in reverse/forward order and
-replay the closures; they don't recompute derived state (`ooc`, `wm`,
-`getCurrentInitiative()`), which is fine since those are always computed
-live from the restored backing fields.
-
-Nothing about undo is initiative-pass- or turn-scoped — the undo stack is a
-flat, session-lifetime history, not reset at pass or turn boundaries.
-
-**Undo across a Combat Turn boundary is incomplete.** Most of what
-`softReset()` does goes through `Set` and reverses correctly (damage was never
-touched; `diceIni`, the Score, `edge`, `status` and `ooc` all restore). But
-`softReset()` clears `actionHistory` by direct field assignment
-(`this._actionHistory = []`), not through `Set` or `DoAction`, so undoing back
-across a turn boundary leaves the participant with an empty action history:
-Full Defense and every other committed interrupt is gone, and
-`getCurrentInitiative()` is correspondingly too high by the restored Score's
-`actionIniModifier`. This is a real defect, not a documented trade-off; see
-"Known rough edges."
+> **Numbering note.** §4 ("Undo model") was deleted when Undo/Redo was
+> removed from the tracker (brief "Remove the undo/redo system"). The
+> remaining sections keep their original numbers rather than closing the
+> gap, because every section number here is cross-referenced from comments
+> throughout `src/`, `server.js`, and the other docs — renumbering would
+> have meant chasing down every one of those citations for no reader
+> benefit. §5 follows directly.
 
 ## 5. Actor progression through an initiative score
 
@@ -526,7 +455,7 @@ structure at the `CombatManager` level. Both `MatrixParticipant`
 (`src/Magic/AstralParticipant.ts`) are direct subclasses of `Participant`
 and insert into the exact same `CombatManager.participants` list as anyone
 else — same status lifecycle, same `getCurrentInitiative()` formula, same
-undo mechanics, same tie-break comparator. `ICParticipant` further extends
+tie-break comparator. `ICParticipant` further extends
 `MatrixParticipant` (still the same list, still the same engine).
 
 There are, in total, **four** `Participant` subclasses plus one grandchild:
@@ -562,7 +491,7 @@ plus a UI-gating flag:
   negate the constant: the funnel's 5D6 cap (pp. 52/288) can absorb the
   requested +1 into nothing (a magician already at 5D6 gains no die and the
   Score does not move), so `AstralParticipant` records what was actually
-  realized in `projectionDiceGain` — undoable, carried by `clone()` — and the
+  realized in `projectionDiceGain` — carried by `clone()` — and the
   return trip requests `-projectionDiceGain`, not `-1`. This keeps a capped-out
   round trip (project, return) net-zero on both dice count and Score, matching
   "you only roll and subtract dice you actually lose" (p. 160).
@@ -651,7 +580,7 @@ not a one-way street:
   from a row, or built from scratch by `createStandaloneGrunt()` (`RULINGS.md`
   2026-08-04 / addendum Decision 9) — the standalone case is not a
   second-class detach, it is a first-class way to add a grunt.
-- `GruntMember` — one NPC inside a row. An `Undoable`, but **not** an
+- `GruntMember` — one NPC inside a row. A plain class, **not** an
   `IParticipant`.
 
 #### Linked NPC rows (grunt groups)
@@ -710,7 +639,8 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
   count on every read, and the row's shared accumulator is paid back exactly as
   it is for a member who was never fully down (`RULINGS.md` 2026-08-07,
   reversing the 2026-08-02 refusal — the "use global Undo instead" correction
-  path it relied on stopped being workable once Undo was slated for removal).
+  path it relied on stopped being workable once Undo was removed from the
+  tracker).
   The final-attack `lastDamageType`/`lastDamageValue` record is untouched by a
   heal, so p. 379's alive/dead read stays correct history. Same for a
   `DetachedGruntParticipant`, whose `ooc` was always live-derived.
@@ -752,8 +682,8 @@ It returns a `GruntFinalState` of:
 `mergeGruntsIntoRow(grunts, rowName?)` (exported from `NpcRowParticipant.ts`)
 is the inverse of `detachMember` and the second half of the lifecycle above.
 It is a **pure function**: it builds and returns the row and never touches the
-encounter's participant list, so the caller removes the merged grunts and adds
-the row inside one undo chapter.
+encounter's participant list — removing the merged grunts and adding the row
+is the caller's job.
 
 - **Minimum size.** `MIN_MERGEABLE_GRUNTS` = 2. One grunt is not a group.
 - **The gate.** `hasRolledInitiativeThisTurn(p)` (`p.diceIni > 0`, the same
@@ -810,7 +740,7 @@ the GM component's damage/heal/detach/remove handlers so the flag lands on the
 tap that caused it, and it keys the flag/log/`ooc` consequence off `isWipedOut`
 while still pulling *any* `isSpent` row (wiped or merely emptied) out of
 `currentActors` if it was acting. The flag is remembered on the row
-(`spentFlagged`, undoable) so it is announced once, and cleared again if a heal
+(`spentFlagged`) so it is announced once, and cleared again if a heal
 brings a member back (Decision 13), or if a wiped-out row's downed members are
 later removed by hand until none are left (it reads as a plain empty row from
 that point, not a wiped-out one) — either way a later collapse is announced
@@ -830,10 +760,10 @@ row mutation that **prompts** (brief Decision 21): it always confirms first,
 the same `confirmationDialog.simpleConfirm` pattern `btnDelete_Click` uses, and
 when the NPC being removed is the row's last, the same single Yes/No answers
 both "remove this NPC" and "delete the now-empty row" — there is no second
-prompt. Deleting the row this way runs the identical undoable side-map cleanup
+prompt. Deleting the row this way runs the identical side-map cleanup
 `btnDelete_Click` does (`forgetParticipant`, plus
 `forgetMapEntry(rowMemberDamageValues, member)` for the member's own queued
-Damage Value), all in the same undo chapter as the removal. `detachRowMember`
+Damage Value). `detachRowMember`
 is unchanged in this respect — detaching is not destructive (the NPC goes on to
 its own initiative row), so it does not gain a new prompt.
 
@@ -877,14 +807,12 @@ log line — and that direction is deliberately **never** gated by
 `canRowMemberAct`, so a mis-tap can always be corrected regardless of whose
 turn it is.
 
-Member-list mutations go through `UndoHandler.DoAction`, so adding, removing,
-damaging and detaching are all undoable like any other mutation **provided a
-chapter is open** (§4); the GM component's handlers open one first so each tap
-is one undo step. The GM-local side-map cleanup that goes with a removal
-(`forgetParticipant()`) is undoable too, via `forgetMapEntry` /
-`forgetSetEntry` — otherwise undo would restore the row with a new participant
-id, a defaulted Reaction/Intuition and a fresh coin-toss tie-breaker, and
-re-announce it to players as a new participant. Since Decision 14 that cleanup
+Member-list mutations (add, remove, damage, detach) mutate the row's member
+array directly. The GM-local side-map cleanup that goes with a removal
+(`forgetParticipant()`) runs via `forgetMapEntry` / `forgetSetEntry` — every
+GM-local map keyed on the removed participant has to be dropped too, or the
+entry outlives the participant it was keyed on and a later re-add would show
+stale bookkeeping. Since Decision 14 that cleanup
 runs from `btnDelete_Click`, and since Decision 21 also from `removeRowMember()`
 when confirming the last member's removal deletes the now-empty row in the same
 tap; a merely-flagged (not deleted) row keeps every side-map entry either way,
@@ -1211,8 +1139,8 @@ calls the same `detachSocketFromPreviousRoom()` as
 `gm:create-session`/`gm:join-session`, which also releases the departing
 player's claim in the room they left.
 
-What is still *not* on the server: the GM's undo/redo history and GM-local
-hidden log entries. Damage/health, non-claimable OOC participants and
+What is still *not* on the server: GM-local hidden log entries and this tab's
+own transient panel/selection state. Damage/health, non-claimable OOC participants and
 `actionHistory` **are** now persisted — on a second, GM-only channel (see
 "The GM-only channel" below) — closing the gap the rest of this paragraph used
 to describe. `getSharedParticipants()` and the player-facing `session:state`
@@ -1332,10 +1260,11 @@ migration promised) and for deploy skew.
 
 `buildRestoreWarning()` now reads two different ways depending on whether a
 `gmState` was present: with one, nothing important was lost — only this tab's
-own transient panel state and the undo/redo history, which never left the
-browser to begin with; with none (a legacy room, or an old server/client on
-either end of a deploy), the text is kept byte-for-byte identical to the
-pre-change wording, so a room saved before this shipped still tells the GM
+own transient panel state, which never left the browser to begin with; with
+none (a legacy room, or an old server/client on either end of a deploy), the
+text is kept as close to the pre-change wording as still accurate (its "undo
+history" clause was dropped when Undo was removed — brief "Remove the
+undo/redo system" D5), so a room saved before this shipped still tells the GM
 accurately what did not come back.
 
 `gm:close-session` and `gm:end-session` are different actions: close *leaves*
@@ -1439,8 +1368,8 @@ The invariant that holds across both: `shareRoomCode` is never left assigned to
 a room the join declined to complete. Earlier rounds warned the GM once
 ("nothing was sent to the room") and then left `shareRoomCode` assigned to that
 room anyway, so the very
-next mutation anywhere in this file — a sort, a damage edit, Next Pass, an
-undo — pushed straight over the room's real saved state, because
+next mutation anywhere in this file — a sort, a damage edit, Next Pass —
+pushed straight over the room's real saved state, because
 `syncSharedState()`'s only gate is `if (!this.shareRoomCode) return;`. Neither
 branch in `btnJoinShareSession_Click()` ever leaves `shareRoomCode` assigned to
 a room the join declined to complete, so "authorized to push room X" cannot
@@ -1727,39 +1656,9 @@ which is the argument for auditing every writer of a flat map that is supposed
 to be per-room, not only the one named function whose job is switching between
 rooms.
 
-**Undo.** Ownership changes are categorised by what kind of operation they
-are, applied uniformly within each category:
-
-1. **A single GM edit to one participant's ownership** — `btnReleaseClaim_Click`
-   is the only member. Undoable, wrapped in its own chapter, a genuine "I made
-   a mistake, or the claim is stale, undo it" GM decision.
-2. **A live claim/release driven by a player command** — `claim_character` and
-   `release_claims` in `handleSessionCommand`. Never wrapped in undo: this is
-   collaborative state a *player* changed, not a local GM edit, so a GM's
-   Ctrl+Z reaching back to reverse another table member's own claim would be
-   surprising, not helpful.
-3. **A room-level operation that replaces which room's ownership is active** —
-   `restoreFromSharedState` and `switchActiveOwnershipRoom` (Create, Join push,
-   the "no saved encounter" Join branch). These two members do not behave
-   alike: `restoreFromSharedState` opens an explicit `UndoHandler.StartActions()`
-   chapter and discards it (`Initialize()`) before returning, so a rebuild that
-   touches many participants cannot be walked into by a later Ctrl+Z one step
-   at a time. `switchActiveOwnershipRoom` — and the
-   `shelveActiveOwnership`/`loadShelvedOwnership` it calls — do not bound a
-   chapter at all; they are plain `Map.clear()`/`.set()` writes with no
-   `UndoHandler` call anywhere in them. A room switch is deliberately not
-   GM-undoable at all — same reasoning as category 2: switching which room's
-   ownership is active is a bookkeeping fact about which room this tab is
-   looking at, not a state edit a GM would want to Ctrl+Z, so no `Undoable`
-   write means no auto-opened chapter for it to land in (§4). What round 7
-   actually fixed in this category was not an undo-chaptering defect — it was
-   that round 6's flat `participantOwners.clear()` at Create time destroyed
-   every other room's ownership outright, a data-loss bug in the
-   *representation*, fixed by shelving instead of clearing.
-
 ### The GM's local `CombatManager` is the single source of truth
 
-Nothing about turn/pass advancement, undo, or initiative computation is
+Nothing about turn/pass advancement or initiative computation is
 network-aware — those all run identically whether or not a share session is
 active. Session sync is a one-way derived broadcast layered on top:
 
@@ -1887,7 +1786,7 @@ when it happened, the GM tab still holds the old owner in `participantOwners`
 and pushes it back. The claim then belongs to a token no client holds, so
 `handleSessionCommand`'s `claim_character` branch replies with a `claim_denied`
 command naming the reason, logs it GM-only, and the GM can clear the claim in
-one undoable tap via `btnReleaseClaim_Click`. Push-not-pull is unchanged; this
+one tap via `btnReleaseClaim_Click`. Push-not-pull is unchanged; this
 is reconciliation *after* the push. The player end of that tap is
 `findReleasedOwnCharacters()` in the player view: a character the player owned
 in the previous state that is still present with no `ownerName` produces a
@@ -1939,12 +1838,9 @@ already-decayed Score. Belt-and-braces, `handleSessionCommand`'s non-delta
 `roll_submission` branch refuses a full Initiative Test for a participant who
 already has `diceIni > 0` while combat is started (rolled once per Combat Turn).
 A GM reconnecting after a crash gets back whatever was last successfully
-broadcast, and local undo history is not part of that snapshot (undo history is
-never sent to the server at all, so a page refresh loses undo/redo even though
-combat state survives). `restoreFromSharedState()` opens its own undo chapter
-and then calls `UndoHandler.Initialize()` at the end, so the rebuild is not
-itself undoable and cannot leave an open chapter for a later Ctrl+Z to walk
-into. It reconstructs the *correct participant class* from the broadcast
+broadcast; this tab's own transient panel/selection state is not part of that
+snapshot and is never sent to the server at all, so a page refresh loses it
+even though combat state survives. It reconstructs the *correct participant class* from the broadcast
 `isMatrix`/`isAstral`/`isNpcRow` flags (and, since "GM reconnect state loss,"
 the GM-only channel's `isGrunt` flag — §7, "The GM-only channel") rather than
 rebuilding everyone as a plain `Participant`.
@@ -1983,20 +1879,12 @@ channel (§7).
   does not hold the live encounter for that code but its `CombatManager` still
   has participants, `confirmDestructiveJoin()` names the count and what goes
   with it (damage, condition monitors, out-of-action participants, committed
-  interrupts, undo history) before `restoreFromSharedState()` runs. Cancelling
+  interrupts, spent Edge) before `restoreFromSharedState()` runs. Cancelling
   aborts before the `joinAsGm` call, so nothing local is touched. A tab with no
   real participants (`isUnusedPlaceholder()`) is never prompted. This is not
   the only confirmation on the Join button — a *push* can prompt too, for
   divergence or for abandoning another connected room; see "Authority" above
   for all three and which path reaches which.
-- **Undo/redo re-broadcast.** `btnUndo_Click`/`btnRedo_Click` call
-  `syncSharedState()` after `UndoHandler.Undo()`/`Redo()`. Undo reverses
-  player-visible state (a released claim being the case that made this a
-  defect: reverted locally but not on the wire, so the GM and the players
-  disagreed about who owned a character). They deliberately call
-  `syncSharedState()` and *not* `sort()`: `sort()` runs
-  `enforceSingleCurrentActor()`, whose `status` writes auto-open an undo chapter
-  (§4) and so would clear the redo stack the undo just created.
 
 ### The shared log entry shape
 
@@ -2050,16 +1938,6 @@ component.
   separate tie-break implementation (`ParticipantList.initiativeComparator`,
   with its own hardcoded ±100/±1000 edge and OOC weightings) that no longer
   reflects the actual tie-break rule used anywhere in the app.
-- **`softReset()` silently drops `actionHistory` from the undo record.** It
-  assigns `this._actionHistory = []` directly rather than going through `Set`
-  or `DoAction`, so undoing back across a Combat Turn boundary restores the
-  Score and damage but not committed interrupts. Every other field
-  `softReset()` touches is undoable. See §2 and §4.
-- **`UndoHandler.DoAction` is a no-op for history when no chapter is open**,
-  while `HandleProperty` in the same position auto-opens one. A list mutation
-  (participant insert/remove, NPC-row member add/remove) performed outside an
-  explicit `StartActions()` is therefore permanently irreversible, with no
-  error and no warning. See §4.
 - **`StatusEnum.OOC` is dead.** The enum defines `OOC = 4`, but nothing in
   `src/` ever assigns it — "out of combat" is entirely driven by the
   computed `ooc` getter (health-threshold based, and overridden by the grunt
@@ -2118,7 +1996,6 @@ component.
 - **`CombatManager.endCombat()` is also unreferenced by the turn loop** and
   does not fire `onCombatTurnEnded`, so a caller wiring it to a UI control
   would get no Action Log boundary line.
-- **`nextIniPass()`'s doc comment misdescribes undo chaptering** — see §2.
 - **No PC/NPC field anywhere in the domain model** (§3) — if a future
   feature needs to branch on that distinction inside `Combat/`, there's
   currently nothing to key off; it would have to be threaded through from
@@ -2141,7 +2018,7 @@ compiled or run, confirmed by testing several explicit `--include` glob
 variants against such a location, all of which matched zero tests. Anything
 meant to run under `npm test` must live under `src/`.
 
-**17 spec files** exist in the tree, in three groups.
+**19 spec files** exist in the tree, in three groups.
 
 *Domain / engine:*
 
@@ -2175,10 +2052,14 @@ brief reads as a standalone regression suite:
 - `src/scenarios/persistent-rooms.spec.ts`
 - `src/scenarios/gm-reconnect-state-loss.spec.ts` (S1-S6, brief "GM reconnect
   state loss")
+- `src/scenarios/remove-undo-system.spec.ts` (S1-S8, brief "Remove the
+  undo/redo system")
+- `src/scenarios/grunt-heal-dv-input.spec.ts` (brief "Grunt heal uses DV
+  input")
 
-Tie-breaking (`initiativeTieBreakComparator`), the undo/redo chapter
-mechanics, and `DeclaredActionEngine` have no dedicated spec files as of this
-writing; the session-sync command-handling path (`handleSessionCommand`) is
+Tie-breaking (`initiativeTieBreakComparator`) and `DeclaredActionEngine` have
+no dedicated spec files as of this writing; the session-sync
+command-handling path (`handleSessionCommand`) is
 exercised indirectly through `battle-tracker.component.spec.ts` and
 `src/scenarios/persistent-rooms.spec.ts` rather than by a spec of its own.
 Confirm current coverage with `npm test` rather than trusting this list to

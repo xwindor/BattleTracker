@@ -23,7 +23,7 @@ a room to see initiative order, roll, and declare actions.
 
 - **`ARCHITECTURE.md`** — authoritative reference for combat and initiative:
   initiative-order storage, turn/pass boundary semantics, participant state,
-  tie-breaking, undo, and how session sync interacts with combat state. Read
+  tie-breaking, and how session sync interacts with combat state. Read
   this before any change touching those areas.
 - **`docs/APP_DOCUMENTATION.md`** — broader reference for UI flows, the socket
   event catalog, deployment and infrastructure, and where to edit things.

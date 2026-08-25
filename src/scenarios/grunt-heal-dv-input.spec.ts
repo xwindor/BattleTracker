@@ -19,13 +19,12 @@ import { appConfig } from 'app/app.config';
 import { CombatManager } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
 import { LogHandler } from 'Logging';
-import { UndoHandler } from 'Common';
 import { NpcRowParticipant } from 'Grunts';
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -38,7 +37,7 @@ function makeRolledParticipant(name: string, attribute: number, dice: number, ro
   p.name = name;
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
@@ -114,23 +113,28 @@ describe('Grunt heal applies the DV input (briefs/grunt-heal-uses-dv-input.md)',
       .filter(t => /healed/.test(t)).length).toBe(0);
   });
 
-  it('Heal-DV3: a six-box heal is a single undo step that restores damage and score', () => {
+  it('Heal-DV3: healing all of a nine-box hit off restores damage and score, via healing rather than undo', () => {
     const row = gmRow('Gangers', 7, 8, ['G 1']);
     const g1 = row.members[0];
+    const scoreBeforeHit = row.getCurrentInitiative();
+    const accumulatorBeforeHit = row.rowWoundModifier;
+
     component.applyRowMemberDamage(row, g1, 9, 'physical');
     const damageAfterHit = g1.damage;
-    const scoreAfterHit = row.getCurrentInitiative();
-    const accumulatorAfterHit = row.rowWoundModifier;
-    component.setRowMemberDamageValue(g1, 6);
+    expect(damageAfterHit).toBeGreaterThan(0);
 
+    // Correction path: heal the same boxes back off in two taps
+    // (RULINGS.md 2026-08-07), not an undo control - there is none.
+    component.setRowMemberDamageValue(g1, 6);
     component.healRowMember(row, g1);
     expect(g1.damage).toBe(damageAfterHit - 6);
 
-    UndoHandler.Undo();
+    component.setRowMemberDamageValue(g1, damageAfterHit - 6);
+    component.healRowMember(row, g1);
 
-    expect(g1.damage).withContext('one step, not six').toBe(damageAfterHit);
-    expect(row.rowWoundModifier).toBe(accumulatorAfterHit);
-    expect(row.getCurrentInitiative()).toBe(scoreAfterHit);
+    expect(g1.damage).withContext('fully healed via two heals, not one undo').toBe(0);
+    expect(row.rowWoundModifier).toBe(accumulatorBeforeHit);
+    expect(row.getCurrentInitiative()).toBe(scoreBeforeHit);
   });
 
   it('Heal-DV4: mid-combat, one tap takes back a mis-keyed killing blow and puts the group back in the fight', () => {
@@ -181,10 +185,6 @@ describe('Grunt heal applies the DV input (briefs/grunt-heal-uses-dv-input.md)',
     expect(grunt.physicalDamage).toBe(0);
     expect(grunt.stunDamage).toBe(3);
     expect(grunt.combinedDamage).toBe(3);
-
-    UndoHandler.Undo();                       // still one step across two writes
-    expect(grunt.physicalDamage).toBe(2);
-    expect(grunt.stunDamage).toBe(6);
   });
 
   it('Heal-DV6a: the grunt heal control renders and heals by the DV in its input', () => {

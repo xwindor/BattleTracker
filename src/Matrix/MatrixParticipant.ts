@@ -13,8 +13,10 @@ const AR_INITIATIVE_DICE = 1;
  *
  * A decker (or persona) participating in the Matrix. Extends the standard
  * Participant so that it slots into the existing initiative tracker without
- * requiring engine changes. All mutable Matrix-specific properties are
- * Undoable: backing field _foo, getter, setter that calls this.Set('foo', val).
+ * requiring engine changes. All mutable Matrix-specific properties follow the
+ * standard convention: backing field _foo, getter, setter that assigns _foo
+ * directly - required so clone() and PARTICIPANT_BASE_BACKING_FIELDS-style
+ * type-swap helpers can copy fields by name.
  *
  * Important: blocksPhysicalActions is the VR-catatonia gate. The decker stays
  * in the initiative order at their Matrix initiative; the action planner is
@@ -26,48 +28,48 @@ export class MatrixParticipant extends Participant {
   // -- Deck attributes (ASDF) --
   private _attack: number;
   get attack(): number { return this._attack; }
-  set attack(val: number) { this.Set("attack", val); }
+  set attack(val: number) { this._attack = val; }
 
   private _sleaze: number;
   get sleaze(): number { return this._sleaze; }
-  set sleaze(val: number) { this.Set("sleaze", val); }
+  set sleaze(val: number) { this._sleaze = val; }
 
   private _dataProcessing: number;
   get dataProcessing(): number { return this._dataProcessing; }
-  set dataProcessing(val: number) { this.Set("dataProcessing", val); }
+  set dataProcessing(val: number) { this._dataProcessing = val; }
 
   private _firewall: number;
   get firewall(): number { return this._firewall; }
-  set firewall(val: number) { this.Set("firewall", val); }
+  set firewall(val: number) { this._firewall = val; }
 
   private _deviceRating: number;
   get deviceRating(): number { return this._deviceRating; }
-  set deviceRating(val: number) { this.Set("deviceRating", val); }
+  set deviceRating(val: number) { this._deviceRating = val; }
 
   // -- Matrix initiative state --
   private _vrMode: VRMode;
   get vrMode(): VRMode { return this._vrMode; }
-  set vrMode(val: VRMode) { this.Set("vrMode", val); }
+  set vrMode(val: VRMode) { this._vrMode = val; }
 
   private _overwatch: number;
   get overwatch(): number { return this._overwatch; }
-  set overwatch(val: number) { this.Set("overwatch", val); }
+  set overwatch(val: number) { this._overwatch = val; }
 
   private _jackedIn: boolean;
   get jackedIn(): boolean { return this._jackedIn; }
-  set jackedIn(val: boolean) { this.Set("jackedIn", val); }
+  set jackedIn(val: boolean) { this._jackedIn = val; }
 
   // -- Catatonia / action restriction --
   // True when in VR. Decker stays scheduled; action planner gates physical
   // action categories. Does NOT set ooc.
   private _blocksPhysicalActions: boolean;
   get blocksPhysicalActions(): boolean { return this._blocksPhysicalActions; }
-  set blocksPhysicalActions(val: boolean) { this.Set("blocksPhysicalActions", val); }
+  set blocksPhysicalActions(val: boolean) { this._blocksPhysicalActions = val; }
 
   // -- Marks placed by this decker on Matrix targets --
   private _marksPlaced: Map<string, number>;
   get marksPlaced(): Map<string, number> { return this._marksPlaced; }
-  set marksPlaced(val: Map<string, number>) { this.Set("marksPlaced", val); }
+  set marksPlaced(val: Map<string, number>) { this._marksPlaced = val; }
 
   /**
    * Computed Overwatch alert level used by components for CSS styling.

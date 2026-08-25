@@ -52,7 +52,6 @@
     <Content Include="src\assets\logo.svg" />
     <Content Include="src\assets\skull.svg" />
     <Content Include="src\assets\skull_red.svg" />
-    <Content Include="src\assets\undo.svg" />
     <Content Include="src\classes\logo.png" />
     <TypeScriptCompile Include="src\classes\Actions.ts" />
     <TypeScriptCompile Include="src\classes\InterruptTable.ts" />
@@ -60,7 +59,6 @@
     <TypeScriptCompile Include="src\classes\Participant.ts" />
     <TypeScriptCompile Include="src\classes\ParticipantList.ts" />
     <TypeScriptCompile Include="src\classes\StatusEnum.ts" />
-    <TypeScriptCompile Include="src\classes\UndoHandler.ts" />
     <TypeScriptCompile Include="src\environments\environment.prod.ts" />
     <TypeScriptCompile Include="src\environments\environment.ts" />
     <TypeScriptCompile Include="src\Interfaces\Action.ts" />

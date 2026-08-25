@@ -17,7 +17,6 @@ import { appConfig } from 'app/app.config';
 import { CombatManager, StatusEnum, IParticipant } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
 import { AstralParticipant } from 'Magic';
-import { UndoHandler } from 'Common';
 import { interruptTable } from 'InterruptTable';
 import {
   DetachedGruntParticipant, GruntMember, NpcRowParticipant,
@@ -38,8 +37,8 @@ const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -101,7 +100,7 @@ describe('GM reconnect state loss', () => {
       sam.physicalHealth = 11;
       sam.stunHealth = 10;
       sam.baseIni = 9;
-      CombatManager.participants.insert(sam, false);
+      CombatManager.participants.insert(sam);
       sam.diceIni = 4;
       sam.physicalDamage = 4;
       sam.stunDamage = 5;
@@ -110,7 +109,7 @@ describe('GM reconnect state loss', () => {
       const ganger = new Participant();
       ganger.name = 'Ganger';
       ganger.baseIni = 6;
-      CombatManager.participants.insert(ganger, false);
+      CombatManager.participants.insert(ganger);
       ganger.diceIni = 2;
       ganger.physicalDamage = 3;
 
@@ -155,7 +154,7 @@ describe('GM reconnect state loss', () => {
       row.addMember(g1);
       row.addMember(g2);
       row.baseIni = 8;
-      CombatManager.participants.insert(row, false);
+      CombatManager.participants.insert(row);
       row.diceIni = 5;
 
       // G1: a single hit exactly filling the track, DV > Body -> dead.
@@ -206,7 +205,7 @@ describe('GM reconnect state loss', () => {
       const drone = new Participant();
       drone.name = 'Drone';
       drone.physicalHealth = 8;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.physicalDamage = 8; // OOC, non-claimable
 
       component.shareRoomCode = 'ABC123';
@@ -270,51 +269,6 @@ describe('GM reconnect state loss', () => {
     });
   });
 
-  // ── S3 - Undo: the restore is not walkable, the next edit is ───────────
-  describe('S3 - the restore is not walkable, the next edit is (AC 20)', () => {
-    it('leaves no undo history, and the next edit undoes to the restored value, not to zero', () => {
-      const a = new Participant();
-      a.name = 'A';
-      a.baseIni = 8;
-      CombatManager.participants.insert(a, false);
-      a.diceIni = 3;
-      a.physicalDamage = 2;
-
-      const b = new Participant();
-      b.name = 'B';
-      b.baseIni = 7;
-      CombatManager.participants.insert(b, false);
-      b.diceIni = 2;
-
-      const c = new Participant();
-      c.name = 'C';
-      c.baseIni = 6;
-      CombatManager.participants.insert(c, false);
-      c.diceIni = 1;
-
-      component.shareRoomCode = 'ABC123';
-      component['syncSharedState']();
-      const { state, gmState } = lastBroadcast();
-
-      resetCombat();
-      component['restoreFromSharedState'](state, gmState);
-
-      expect(UndoHandler.hasPast()).toBeFalse();
-
-      const restoredA = CombatManager.participants.items.find(p => p.name === 'A')!;
-      const restoredScore = restoredA.getCurrentInitiative();
-
-      UndoHandler.StartActions();
-      restoredA.physicalDamage = 7;
-      UndoHandler.Undo();
-
-      expect(restoredA.physicalDamage).toBe(2);
-      expect(CombatManager.participants.items.length).toBe(3);
-      expect(CombatManager.participants.items.map(p => p.name)).toEqual(['A', 'B', 'C']);
-      expect(restoredA.getCurrentInitiative()).toBe(restoredScore);
-    });
-  });
-
   // ── S4 - Live at the table: GM's laptop dies mid-combat ─────────────────
   describe('S4 - GM\'s laptop dies mid-combat, five players waiting', () => {
     it('restores every combatant type in one pass, with none of the new GM-only damage fields on the player-facing wire (AC 2, 7, 9, 13, 14)', () => {
@@ -326,12 +280,12 @@ describe('GM reconnect state loss', () => {
       const wraith = new Participant();
       wraith.name = 'Wraith';
       wraith.baseIni = 9;
-      CombatManager.participants.insert(wraith, false);
+      CombatManager.participants.insert(wraith);
       wraith.diceIni = 5;
       wraith.physicalDamage = 9;
       wraith.stunDamage = 2;
       wraith.status = StatusEnum.Active;
-      CombatManager.currentActors.insert(wraith, false);
+      CombatManager.currentActors.insert(wraith);
       wraith.doAction(FULL_DEFENSE);
       component['participantClaimable'].set(wraith, true);
       component['participantOwners'].set(wraith, 'pl-1');
@@ -339,7 +293,7 @@ describe('GM reconnect state loss', () => {
       const rigger = new Participant();
       rigger.name = 'Rigger';
       rigger.baseIni = 7;
-      CombatManager.participants.insert(rigger, false);
+      CombatManager.participants.insert(rigger);
       rigger.diceIni = 2;
       rigger.status = StatusEnum.Delaying;
       rigger.edge = true;
@@ -349,7 +303,7 @@ describe('GM reconnect state loss', () => {
       const loneGanger = new DetachedGruntParticipant();
       loneGanger.name = 'Lone Ganger';
       loneGanger.setGruntAttributes(5, 3); // 8 + ceil(5/2) = 11-box track
-      CombatManager.participants.insert(loneGanger, false);
+      CombatManager.participants.insert(loneGanger);
       loneGanger.baseIni = 6;
       loneGanger.diceIni = 2;
       loneGanger.applyDamage(6, 'physical');
@@ -363,7 +317,7 @@ describe('GM reconnect state loss', () => {
       const s4 = new GruntMember('S4', 4, 3);
       [s1, s2, s3, s4].forEach(m => secGuards.addMember(m));
       secGuards.baseIni = 7;
-      CombatManager.participants.insert(secGuards, false);
+      CombatManager.participants.insert(secGuards);
       secGuards.diceIni = 3;
       secGuards.applyDamageToMember(s1, s1.conditionMonitorBoxes, 'physical');
       secGuards.applyDamageToMember(s2, s2.conditionMonitorBoxes, 'stun');
@@ -372,7 +326,7 @@ describe('GM reconnect state loss', () => {
       const drone = new Participant();
       drone.name = 'Drone';
       drone.baseIni = 5;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.diceIni = 1;
       drone.physicalHealth = 10;
       drone.physicalDamage = 10; // OOC, non-claimable -> withheld from players
@@ -453,7 +407,8 @@ describe('GM reconnect state loss', () => {
 
       expect(component.restoreWarning).toContain('damage');
       expect(component.restoreWarning).toContain('out of action');
-      expect(component.restoreWarning).toContain('undo history');
+      expect(component.restoreWarning).toContain('committed interrupt actions');
+      expect(component.restoreWarning).not.toContain('undo');
 
       const restored = CombatManager.participants.items[0];
       expect(restored.name).toBe('Ganger');
@@ -516,7 +471,8 @@ describe('GM reconnect state loss', () => {
 
       expect(component.restoreWarning).toContain('damage');
       expect(component.restoreWarning).toContain('out of action');
-      expect(component.restoreWarning).toContain('undo history');
+      expect(component.restoreWarning).toContain('committed interrupt actions');
+      expect(component.restoreWarning).not.toContain('undo');
     });
 
     it('the REAL broadcastGmState() still emits the event over the socket (an old server drops it) without throwing', () => {
@@ -543,7 +499,7 @@ describe('GM reconnect state loss', () => {
     it('AC 7: the coin-toss tie-breaker round-trips rather than being re-rolled', () => {
       const p = new Participant();
       p.name = 'Tied';
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       const originalTieBreaker = component['getParticipantTieBreaker'](p);
       p.diceIni = 3;
 
@@ -575,10 +531,10 @@ describe('GM reconnect state loss', () => {
       const wraith = new Participant();
       wraith.name = 'Wraith';
       wraith.baseIni = 20;
-      CombatManager.participants.insert(wraith, false);
+      CombatManager.participants.insert(wraith);
       wraith.diceIni = 5; // raw running Score 25
       wraith.status = StatusEnum.Active;
-      CombatManager.currentActors.insert(wraith, false);
+      CombatManager.currentActors.insert(wraith);
       wraith.doAction(FULL_DEFENSE); // effective initiative 25 - 10 = 15
 
       // Sanity: the score check alone must NOT already refuse this, or the
@@ -611,24 +567,24 @@ describe('GM reconnect state loss', () => {
       const p1 = new Participant();
       p1.name = 'First';
       p1.baseIni = 10;
-      CombatManager.participants.insert(p1, false);
+      CombatManager.participants.insert(p1);
       p1.diceIni = 5;
       const p2 = new Participant();
       p2.name = 'Second';
       p2.physicalHealth = 12;
       p2.baseIni = 8;
-      CombatManager.participants.insert(p2, false);
+      CombatManager.participants.insert(p2);
       p2.diceIni = 3;
       p2.physicalDamage = 6; // wounded - shifts the running Score via wound modifier
       const drone = new Participant();
       drone.name = 'Drone';
       drone.physicalHealth = 8;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.physicalDamage = 8; // OOC, non-claimable -> withheld from the player-facing wire
       const p3 = new Participant();
       p3.name = 'Third';
       p3.baseIni = 6;
-      CombatManager.participants.insert(p3, false);
+      CombatManager.participants.insert(p3);
       p3.diceIni = 1;
 
       component.shareRoomCode = 'ABC123';
@@ -659,14 +615,14 @@ describe('GM reconnect state loss', () => {
       const drone = new Participant();
       drone.name = 'Drone';
       drone.physicalHealth = 8;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.physicalDamage = 8; // OOC, non-claimable -> withheld
       const wraith = new Participant();
       wraith.name = 'Wraith';
-      CombatManager.participants.insert(wraith, false);
+      CombatManager.participants.insert(wraith);
       const rigger = new Participant();
       rigger.name = 'Rigger';
-      CombatManager.participants.insert(rigger, false);
+      CombatManager.participants.insert(rigger);
 
       component.shareRoomCode = 'ABC123';
       component['syncSharedState']();
@@ -685,15 +641,15 @@ describe('GM reconnect state loss', () => {
     it('D1: a withheld participant in the MIDDLE of the roster restores into its exact pre-crash slot, with unique sortOrder values', () => {
       const wraith = new Participant();
       wraith.name = 'Wraith';
-      CombatManager.participants.insert(wraith, false);
+      CombatManager.participants.insert(wraith);
       const drone = new Participant();
       drone.name = 'Drone';
       drone.physicalHealth = 8;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.physicalDamage = 8; // OOC, non-claimable -> withheld
       const rigger = new Participant();
       rigger.name = 'Rigger';
-      CombatManager.participants.insert(rigger, false);
+      CombatManager.participants.insert(rigger);
 
       component.shareRoomCode = 'ABC123';
       component['syncSharedState']();
@@ -715,14 +671,14 @@ describe('GM reconnect state loss', () => {
       // to use, which is why the original D1 collision hid for a whole round.
       const wraith = new Participant();
       wraith.name = 'Wraith';
-      CombatManager.participants.insert(wraith, false);
+      CombatManager.participants.insert(wraith);
       const rigger = new Participant();
       rigger.name = 'Rigger';
-      CombatManager.participants.insert(rigger, false);
+      CombatManager.participants.insert(rigger);
       const drone = new Participant();
       drone.name = 'Drone';
       drone.physicalHealth = 8;
-      CombatManager.participants.insert(drone, false);
+      CombatManager.participants.insert(drone);
       drone.physicalDamage = 8; // OOC, non-claimable -> withheld
 
       component.shareRoomCode = 'ABC123';
@@ -742,19 +698,19 @@ describe('GM reconnect state loss', () => {
       const downA = new Participant();
       downA.name = 'DownA';
       downA.physicalHealth = 8;
-      CombatManager.participants.insert(downA, false);
+      CombatManager.participants.insert(downA);
       downA.physicalDamage = 8;
       const live1 = new Participant();
       live1.name = 'Live1';
-      CombatManager.participants.insert(live1, false);
+      CombatManager.participants.insert(live1);
       const downB = new Participant();
       downB.name = 'DownB';
       downB.physicalHealth = 8;
-      CombatManager.participants.insert(downB, false);
+      CombatManager.participants.insert(downB);
       downB.physicalDamage = 8;
       const live2 = new Participant();
       live2.name = 'Live2';
-      CombatManager.participants.insert(live2, false);
+      CombatManager.participants.insert(live2);
 
       component.shareRoomCode = 'ABC123';
       component['syncSharedState']();
@@ -780,11 +736,11 @@ describe('GM reconnect state loss', () => {
       const downA = new Participant();
       downA.name = 'DownA';
       downA.physicalHealth = 8;
-      CombatManager.participants.insert(downA, false);
+      CombatManager.participants.insert(downA);
       downA.physicalDamage = 8; // withheld
       const live1 = new Participant();
       live1.name = 'Live1';
-      CombatManager.participants.insert(live1, false);
+      CombatManager.participants.insert(live1);
 
       component.shareRoomCode = 'ABC123';
       component['syncSharedState']();
@@ -794,7 +750,7 @@ describe('GM reconnect state loss', () => {
       // so `newState` carries an id the older `gmState` has never seen.
       const live2 = new Participant();
       live2.name = 'Live2';
-      CombatManager.participants.insert(live2, false);
+      CombatManager.participants.insert(live2);
       component['syncSharedState']();
       const newState = lastBroadcast().state;
 
@@ -814,7 +770,7 @@ describe('GM reconnect state loss', () => {
       // this asserts the GM-only fields now match that discipline.
       const sam = new Participant();
       sam.name = 'Street Sam';
-      CombatManager.participants.insert(sam, false);
+      CombatManager.participants.insert(sam);
 
       component.shareRoomCode = 'ABC123';
       component['syncSharedState']();
@@ -854,7 +810,7 @@ describe('GM reconnect state loss', () => {
       const p = new Participant();
       p.name = 'Tough';
       p.baseIni = 8;
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       p.diceIni = 3;
       p.overflowHealth = 6; // non-default (constructor default is 4)
       p.painTolerance = 2;
@@ -879,7 +835,7 @@ describe('GM reconnect state loss', () => {
       const grunt = new DetachedGruntParticipant();
       grunt.name = 'Loner';
       grunt.setGruntAttributes(4, 4); // 8 + ceil(4/2) = 10 boxes
-      CombatManager.participants.insert(grunt, false);
+      CombatManager.participants.insert(grunt);
       grunt.diceIni = 2;
       grunt.applyDamage(10, 'physical'); // fills the track, DV 10 > Body 4 -> dead
 
@@ -906,7 +862,7 @@ describe('GM reconnect state loss', () => {
       mage.name = 'Hexer';
       mage.astralProjecting = true;
       mage.blocksPhysicalActions = true;
-      CombatManager.participants.insert(mage, false);
+      CombatManager.participants.insert(mage);
       component['participantReactions'].set(mage, 4);
       component['participantIntuitions'].set(mage, 5);
       mage.baseIni = 10; // INT(5) x 2, as toggleAstralProjecting() would compute
@@ -948,7 +904,7 @@ describe('GM reconnect state loss', () => {
       row.addMember(g1);
       row.addMember(g2);
       row.baseIni = 8;
-      CombatManager.participants.insert(row, false);
+      CombatManager.participants.insert(row);
       row.diceIni = 4;
       g1.hasActed = true;
 
@@ -967,7 +923,7 @@ describe('GM reconnect state loss', () => {
     it('AC 13: SharedParticipantState and SharedCombatState gain no new top-level field, including nested rowMembers entries', () => {
       const p = new Participant();
       p.name = 'Plain';
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       p.diceIni = 2;
 
       // D5 (review round 2026-08-19): a row, with `hasActed` set on one
@@ -981,7 +937,7 @@ describe('GM reconnect state loss', () => {
       const g1 = new GruntMember('G1', 3, 3);
       row.addMember(g1);
       row.baseIni = 6;
-      CombatManager.participants.insert(row, false);
+      CombatManager.participants.insert(row);
       row.diceIni = 1;
       g1.hasActed = true;
 
@@ -1023,7 +979,7 @@ describe('GM reconnect state loss', () => {
     it('AC 14: broadcastState and broadcastGmState are pushed as two separate calls with disjoint payloads', () => {
       const wounded = new Participant();
       wounded.name = 'Wounded';
-      CombatManager.participants.insert(wounded, false);
+      CombatManager.participants.insert(wounded);
       wounded.diceIni = 1;
       wounded.physicalDamage = 5;
 
@@ -1038,7 +994,7 @@ describe('GM reconnect state loss', () => {
     it('AC 19: a transport reconnect still pushes and never pulls, and now pushes gmState too', async () => {
       const p = new Participant();
       p.name = 'Live';
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       p.diceIni = 3;
       component.shareRoomCode = 'ABC123';
 

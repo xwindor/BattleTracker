@@ -31,8 +31,8 @@ import { LogHandler } from 'Logging';
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -101,7 +101,7 @@ describe('Action Log entries for combat structural boundaries', () => {
     p.name = name;
     p.baseIni = baseIni;
     p.setDicesWithoutRoll(1);
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     p.diceIni = roll;
     return p;
   }
@@ -185,36 +185,6 @@ describe('Action Log entries for combat structural boundaries', () => {
     });
   });
 
-  // ── S3 ─────────────────────────────────────────────────────────────────
-
-  describe('S3 - the GM mis-taps Next Initiative Pass and undoes it', () => {
-    it('undo emits no new entries and removes none; the redo tap re-adds the pass-start line', async () => {
-      makeScored('A', 10, 5); // Score 15
-      makeScored('B', 3, 2);  // Score 5
-
-      await component.btnStartRound_Click();
-      actCurrent(); // A acts
-      actCurrent(); // B acts -> pass 1 ends
-      expect(sent.filter(e => e.text === formatPassEndLogText(1)).length).toBe(1);
-
-      component.btnNextPass_Click(); // -10 each: 5, -5 -> Start Initiative Pass 2
-      expect(CombatManager.initiativePass).toBe(2);
-      expect(sent.filter(e => e.text === passStart(2)).length).toBe(1);
-
-      const sentLengthBeforeUndo = sent.length;
-      component.btnUndo_Click();
-
-      expect(CombatManager.initiativePass).toBe(1);
-      expect(sent.length).toBe(sentLengthBeforeUndo);
-
-      component.btnNextPass_Click();
-
-      expect(CombatManager.initiativePass).toBe(2);
-      expect(sent.filter(e => e.text === passStart(2)).length).toBe(2);
-      expect(sent.filter(e => e.text === formatPassEndLogText(1)).length).toBe(1);
-    });
-  });
-
   // ── S4 ─────────────────────────────────────────────────────────────────
 
   describe('S4 - live at the table, mid-combat, players waiting', () => {
@@ -224,7 +194,7 @@ describe('Action Log entries for combat structural boundaries', () => {
       row.name = 'Gangers';
       row.baseIni = 1;
       row.setDicesWithoutRoll(1);
-      CombatManager.participants.insert(row, false);
+      CombatManager.participants.insert(row);
       row.diceIni = 1; // Score 2
       const g1 = new GruntMember('G 1', 3, 3);
       row.addMember(g1);
@@ -310,7 +280,7 @@ describe('Action Log entries for combat structural boundaries', () => {
       // here the way a GM starting a new scene actually would (deleting or
       // replacing the roster), leaving only the state this scenario cares
       // about: `combatTurn`/`started` already reset by End Combat.
-      CombatManager.participants.clear(false);
+      CombatManager.participants.clear();
       makeScored('Newcomer', 5, 5); // Score 10
       await component.btnStartRound_Click();
       actCurrent(); // Newcomer acts -> pass 1 ends

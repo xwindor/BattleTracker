@@ -4,8 +4,7 @@ export type MatrixIconType = "commlink" | "spam" | "vehicle-node" | "sensor" | "
  * MatrixIcon
  *
  * A public-space Matrix icon (commlink, vehicle node, spam, etc.) generated
- * by IconGeneratorService. Plain class — mutate via UndoHandler.DoAction
- * from outside.
+ * by IconGeneratorService. Plain class - mutated directly by callers.
  */
 export class MatrixIcon {
   id: string;

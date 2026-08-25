@@ -1,4 +1,3 @@
-import { UndoHandler } from "Common";
 import { IParticipant } from "Combat";
 
 export class ParticipantList
@@ -20,49 +19,22 @@ export class ParticipantList
     this._list = new Array<IParticipant>();
   }
 
-  insert(p: IParticipant, log = true)
+  insert(p: IParticipant)
   {
-    if (log)
-    {
-      UndoHandler.DoAction(
-        () => this.insert(p, false),
-        () => this.remove(p, false)
-      );
-    } else
-    {
-      this.items.push(p);
-    }
+    this.items.push(p);
   }
 
-  insertAt(p: IParticipant, i: number, log = true)
+  insertAt(p: IParticipant, i: number)
   {
-    if (log)
-    {
-      UndoHandler.DoAction(
-        () => this.insertAt(p, i, false),
-        () => this.remove(p, false)
-      );
-    } else
-    {
-      this.items.splice(i, 0, p);
-    }
+    this.items.splice(i, 0, p);
   }
 
-  remove(p: IParticipant, log = true): boolean
+  remove(p: IParticipant): boolean
   {
     const i = this.items.indexOf(p);
     if (i !== -1)
     {
-      if (log)
-      {
-        UndoHandler.DoAction(
-          () => this.remove(p, false),
-          () => this.insertAt(p, i, false)
-        );
-      } else
-      {
-        this.items.splice(i, 1);
-      }
+      this.items.splice(i, 1);
       return true;
     }
     return false;
@@ -78,22 +50,9 @@ export class ParticipantList
     }
   }
 
-  clear(log = true)
+  clear()
   {
-    if (log)
-    {
-      const items = this.items;
-      UndoHandler.DoAction(
-        () => this.clear(false),
-        () =>
-        {
-          this._list = items;
-        }
-      );
-    } else
-    {
-      this._list = [];
-    }
+    this._list = [];
   }
 
   contains(p: IParticipant): boolean

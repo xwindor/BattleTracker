@@ -2,7 +2,6 @@ import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, Temp
 import { CommonModule } from "@angular/common";
 import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { Subscription } from "rxjs";
-import { Undoable, UndoHandler } from "Common";
 import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
 import {
   Participant, PARTICIPANT_BASE_BACKING_FIELDS, MIN_DISPLAYED_DICE_TOTAL,
@@ -357,7 +356,7 @@ const GM_LOG_TEXT = {
     AstralBadgeComponent
   ]
 })
-export class BattleTrackerComponent extends Undoable implements OnInit, OnDestroy, AfterViewChecked {
+export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild("gmLogListContainer") gmLogListContainer?: ElementRef<HTMLElement>;
   /** The GM's dice roller, so its sticky "Roll as" state can be reset (p. 44). */
   @ViewChild("gmDiceRoller") gmDiceRoller?: DiceRollerComponent;
@@ -537,12 +536,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * `onGmDiceRolled`, because the check has to happen against the state at the
    * moment the dice land.
    *
-   * Not undoable, deliberately: this is transient view state in an OnPush
-   * child component, not combat state routed through `Undoable.Set`, and
-   * `UndoHandler` only replays property/list closures on domain objects.
-   * Re-arming it is one tap in the same field, and an undo of End Combat (or
-   * of a delete) that silently re-attributed the GM's dice to a dead NPC would
-   * be worse than retyping the name.
+   * Not persisted anywhere else, deliberately: this is transient view state in
+   * an OnPush child component, not combat state. Re-arming it is one tap in
+   * the same field.
    */
   private clearGmRollAttribution(): void {
     this.gmDiceRoller?.clearRollAs();
@@ -825,9 +821,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * glance in ~70px, so nothing is hidden - only made non-editable until asked
    * for.
    *
-   * Transient view state, the same class of thing as `expandedRowPanels`, so it
-   * deliberately does NOT go through `Undoable.Set`: it holds no game state and
-   * an undo that reopened a twirly would be noise.
+   * Transient view state, the same class of thing as `expandedRowPanels` -
+   * holds no game state.
    */
   expandedStatEditors = new Set<IParticipant>();
   /**
@@ -836,9 +831,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * Needed because p. 379 settles a downed grunt's alive-or-dead from the DV of
    * the **final attack** compared against Body — so the tracker has to be told
    * the attack's real DV, not just "one more box". Purely transient view state
-   * (the same class of thing as `expandedRowPanels`), so it is not routed
-   * through `Undoable.Set`: it holds nothing that survives applying the damage,
-   * and the damage application itself is fully undoable.
+   * (the same class of thing as `expandedRowPanels`): it holds nothing that
+   * survives applying the damage, and a mis-keyed DV is corrected by editing
+   * this field again before the tap, or by healing afterward.
    */
   private readonly rowMemberDamageValues = new Map<GruntMember, number>();
   /**
@@ -961,7 +956,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     public matrixState: MatrixStateService,
     public osTracking: OsTrackingService
   ) {
-    super();
     this.addParticipant();
     this.changeDetector = ref;
     // A linked NPC row can be found spent by the engine itself
@@ -1018,7 +1012,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!this.isMatrix(p)) return;
     const confirmed = await this.confirmationDialog.simpleConfirm(`Reset OS to 0 for ${p.name}?`);
     if (!confirmed) return;
-    UndoHandler.StartActions();
     this.osTracking.resetOS(this.asMatrix(p));
     this.syncSharedState();
     this.changeDetector.detectChanges();
@@ -1062,8 +1055,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   async ngOnInit() {
-    UndoHandler.Initialize();
-    UndoHandler.StartActions();
     this.observedLocalLogCount = this.logHandler.logbook.length;
     this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
       if (event.alert === "ic-alert") {
@@ -1517,9 +1508,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * thing to get backwards here).
    *
    * `restoreFromSharedState()` unconditionally clears both participant lists and
-   * all eight side-maps, rebuilds from the lossy server snapshot (no damage, no
-   * health, no OOC participants, no `NpcRowParticipant`/`ICParticipant`, no
-   * action history) and wipes undo history. Close Room's own on-screen advice is
+   * all eight side-maps and rebuilds from the lossy server snapshot (no damage,
+   * no health, no OOC participants, no `NpcRowParticipant`/`ICParticipant`, no
+   * action history). Close Room's own on-screen advice is
    * "rejoin with code X to pick it back up", so a mis-tapped Close followed by
    * that advice would otherwise irreversibly downgrade a live encounter. That is
    * the same hazard `handleSessionReconnected()` already solves for a transport
@@ -1868,11 +1859,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * broadcasting for (review defect D1, durable-rooms review round 6).
    *
    * A pull runs `restoreFromSharedState()`, which clears both participant lists
-   * and all eight side-maps, rebuilds from the lossy server snapshot and calls
-   * `UndoHandler.Initialize()` - so damage, condition monitors, out-of-action
-   * participants, committed interrupt actions and the whole undo history go,
-   * irreversibly, on one tap of a button sitting next to a text box. Naming the
-   * count is the difference between "are you sure" and an informed answer.
+   * and all eight side-maps and rebuilds from the lossy server snapshot - so
+   * damage, condition monitors, out-of-action participants and committed
+   * interrupt actions all go, irreversibly, on one tap of a button sitting next
+   * to a text box. Naming the count is the difference between "are you sure"
+   * and an informed answer.
    *
    * `previousRoom` is `shareRoomCode` as it stood before this join attempt -
    * the room whose players stop receiving updates the instant
@@ -1927,7 +1918,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       parts.push(`Joining room ${room} replaces this tab's encounter with that room's last saved broadcast. `
         + `If that room has a saved encounter, ${count} participant${count === 1 ? "" : "s"} on screen `
         + `${count === 1 ? "is" : "are"} discarded for good - their damage, condition monitors, anyone `
-        + "out of action, committed interrupt actions, spent Edge and the undo history all go with them. "
+        + "out of action, committed interrupt actions and spent Edge all go with them. "
         + "This cannot be undone. "
         + `If room ${room} turns out to have no saved encounter, nothing is replaced and this tab keeps `
         + "what it has.");
@@ -2686,14 +2677,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * back. Nobody then holds the claim and the player cannot re-take it - so the
    * GM needs a visible way to see and clear one.
    *
-   * Undoable: the ownership side-map is dropped through `forgetMapEntry`
-   * (`UndoHandler.DoAction`) inside its own chapter, so a mis-tap is one Ctrl+Z.
+   * Reversible: re-claiming (or the player re-taking it) puts the ownership
+   * side-map entry straight back.
    */
   btnReleaseClaim_Click(p: IParticipant) {
     if (!this.isParticipantClaimed(p)) {
       return;
     }
-    UndoHandler.StartActions();
     this.forgetMapEntry(this.participantOwners, p);
     this.appendPlayerCommandLog(p, CLAIM_FORCE_RELEASED_TEXT, RELEASED_CLAIM_FALLBACK_ACTOR);
     this.sort();
@@ -3484,7 +3474,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * test would reject a legitimate character name that merely looks token-like
    * ("PL-2077"). At `register_character` that rejection is not cosmetic - the
    * value is written straight onto `participant.name`, so a false positive
-   * renames the row permanently and only a GM edit can undo it.
+   * renames the row permanently and only a GM edit can correct it.
    */
   private nameUnlessToken(raw: unknown, token: string, fallback: string): string {
     const name = String(raw ?? "").trim();
@@ -4192,13 +4182,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
 
-    // Bound this rebuild's own undo chapter. A write made outside an explicit
-    // StartActions() auto-opens a chapter that then absorbs everything after it
-    // (ARCHITECTURE §4), so without this the GM's first post-restore Ctrl+Z
-    // would walk into the middle of the restore. The chapter is then discarded
-    // entirely below - see the Initialize() call at the end.
-    UndoHandler.StartActions();
-
     this.declaredActionSelections.clear();
     this.participantIds.clear();
     this.participantOwners.clear();
@@ -4209,8 +4192,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.participantTieBreakers.clear();
     this.lastKnownDamage.clear();
 
-    this.combatManager.participants.clear(false);
-    this.combatManager.currentActors.clear(false);
+    this.combatManager.participants.clear();
+    this.combatManager.currentActors.clear();
     this.combatManager.nextSortOrder = 0;
 
     // Turn/pass counters are restored *before* the participants, so the
@@ -4413,7 +4396,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
       if (shared.active) {
         participant.status = StatusEnum.Active;
-        this.combatManager.currentActors.insert(participant, false);
+        this.combatManager.currentActors.insert(participant);
       } else if (gm) {
         // `shared.active` is authoritative for currentActors membership - a
         // restored non-active participant is never Active even if the
@@ -4460,13 +4443,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
     this.combatManager.participants.sortBySortOrder();
     this.restoreWarning = this.buildRestoreWarning(gmState);
-
-    // Discard the whole undo history, including this rebuild's own chapter.
-    // There is no history from before the restore to walk back into, and the
-    // restore itself must not be undoable - "undo" would leave the tab holding
-    // whatever happened to be in memory before the join (spec scenario S3).
-    // `recording` is left false, so the GM's next edit opens a fresh chapter.
-    UndoHandler.Initialize();
   }
 
   /**
@@ -4477,13 +4453,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * - **With `gmState`** (a room saved after this change, or an unaffected
    *   push-path reconnect): damage, condition monitors, turn state, committed
    *   interrupts and out-of-action combatants all come back now - the only
-   *   things that still cannot are this tab's own transient panel state and
-   *   the undo/redo history, which never leaves the browser (ARCHITECTURE §7).
+   *   thing that still cannot is this tab's own transient panel/selection
+   *   state, which never leaves the browser (ARCHITECTURE §7).
    * - **With no `gmState`** (a legacy room persisted before this change, or
-   *   deploy skew - an old server/client on one end of the join): kept
-   *   byte-for-byte identical to the pre-change text, so a rejoin into a
-   *   pre-existing room still reads correctly and the existing legacy-snapshot
-   *   tests keep passing unchanged (spec D7).
+   *   deploy skew - an old server/client on one end of the join): kept as
+   *   close to byte-for-byte identical to the earlier text as possible, so a
+   *   rejoin into a pre-existing room still reads correctly - except that the
+   *   undo-history clause is dropped (brief "Remove the undo/redo system" D5),
+   *   since the tracker no longer has one to lose.
    */
   private buildRestoreWarning(gmState: SharedGmState | null): string {
     if (gmState) {
@@ -4496,13 +4473,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // carry.
       return "Restored from the room's last broadcast: this snapshot's injuries, "
         + "condition monitors and turn state came back with it. Not included: "
-        + "undo/redo history, and this tab's own panel/selection state - re-open "
+        + "this tab's own panel/selection state - re-open "
         + "anything you had expanded.";
     }
     return "Restored from the room's last broadcast. Not included: damage and "
       + "condition monitors (linked NPC rows excepted - their NPCs come back "
-      + "with theirs), any non-claimable participant who was out of action, "
-      + "committed interrupt actions, and undo history - re-enter those by "
+      + "with theirs), any non-claimable participant who was out of action, and "
+      + "committed interrupt actions - re-enter those by "
       + "hand. A claimable character who was out of action comes back "
       + "out of action.";
   }
@@ -4530,7 +4507,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   /// Button Handler
   btnAddParticipant_Click() {
-    UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, "AddParticipant_Click");
     this.addParticipant()
   }
@@ -4546,13 +4522,11 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   btnEdge_Click(sender: IParticipant) {
-    UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, sender.name + " Edge_Click");
     sender.seizeInitiative();
   }
 
   btnRollInitiative_Click(sender: IParticipant) {
-    UndoHandler.StartActions();
     this.rollAndLogInitiative(sender);
   }
 
@@ -4883,7 +4857,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * `briefs/action-log-readability-spec.md`).
    */
   private performAct(sender: IParticipant, declaredAction: string | null = null, submitter?: string) {
-    UndoHandler.StartActions();
     const actor = submitter || sender.name || PLAYER_COMMAND_FALLBACK_ACTOR;
     this.appendParticipantEventLog(actor, declaredAction || NO_DECLARED_ACTION_PHRASE);
     this.combatManager.act(sender);
@@ -4908,7 +4881,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * each take their own, and the initiative only moves on once they all have.
    */
   private performRowMemberAct(row: NpcRowParticipant, member: GruntMember, declaredAction: string | null = null): void {
-    UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
     const text = `${member.name} ${declaredAction ?? NO_DECLARED_ACTION_PHRASE}`;
     // Round-2 defect D5: `logRowEvent`'s local write is `${actor} ${text}`,
@@ -4930,7 +4902,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   btnDelay_Click(sender: IParticipant) {
-    UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, sender.name + " Delay_Click");
     sender.status = StatusEnum.Delaying;
     if (this.combatManager.currentActors.remove(sender)) {
@@ -4956,7 +4927,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   btnNextPass_Click() {
-    UndoHandler.StartActions();
     LogHandler.log(this.currentBTTime, "NextPass_Click");
     this.combatManager.nextIniPass();
     // Decide, before `goToNextActors()` runs, whether the pass `nextIniPass()`
@@ -5003,12 +4973,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       }
     }
     LogHandler.log(this.currentBTTime, sender.name + " Delete_Confirm");
-    UndoHandler.StartActions();
-    // Same undoable side-map cleanup the automatic row removal uses. Raw
-    // `.delete()` calls here made a manual delete only half-undoable: the
-    // participant came back from the undo stack with a brand-new id, a
-    // defaulted Reaction/Intuition and a fresh coin-toss tie-breaker, and was
-    // re-announced to players as somebody new (ARCHITECTURE.md §7/§8).
+    // Same side-map cleanup the automatic row removal uses (ARCHITECTURE.md
+    // §7/§8) - every GM-local map keyed on this participant has to be dropped
+    // too, or the entry outlives the participant it was keyed on.
     this.forgetParticipant(sender);
     // A row's per-member side map is keyed by `GruntMember`, not by the row, so
     // `forgetParticipant` cannot reach it: deleting a row left one entry per
@@ -5026,15 +4993,12 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     // say) goes out under a name no longer in the fight. Cleared only when it
     // is *this* name - deleting an unrelated combatant leaves it armed.
     this.clearGmRollAttributionIfNamed(sender.name || "");
-    // Deselecting the deleted participant is `forgetParticipant`'s job now, and
-    // it does it undoably - a bare assignment here would survive the undo and
-    // leave the restored participant unselected.
+    // Deselecting the deleted participant is `forgetParticipant`'s job now.
     this.syncSharedState();
   }
 
   btnDuplicate_Click(sender: IParticipant) {
     LogHandler.log(this.currentBTTime, sender.name + " Duplicate_Click");
-    UndoHandler.StartActions();
     const existing = new Set(this.combatManager.participants.items);
     this.combatManager.copyParticipant(sender);
     const clone = this.combatManager.participants.items.find(p => !existing.has(p));
@@ -5071,7 +5035,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     LogHandler.log(this.currentBTTime, "Reset_Confirm");
-    UndoHandler.StartActions();
     this.declaredActionSelections.clear();
     this.combatManager.endCombat();
     this.initiativePrepActive = false;
@@ -5105,7 +5068,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   btnLeaveCombat_Click(sender: IParticipant) {
     LogHandler.log(this.currentBTTime, sender.name + " LeaveCombat_Click");
-    UndoHandler.StartActions();
     sender.leaveCombat();
     // Logged before `combatManager.act()`: if `sender` is the current actor,
     // `act()` can cascade into `endInitiativePass()`/`endCombatTurn()`, which
@@ -5122,7 +5084,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   btnEnterCombat_Click(sender: IParticipant) {
     LogHandler.log(this.currentBTTime, sender.name + " EnterCombat_Click");
-    UndoHandler.StartActions();
     sender.enterCombat();
     // `enterCombat()` only clears the manual `_ooc` flag; the `ooc` getter can
     // still be true from damage, in which case the participant does *not*
@@ -5140,7 +5101,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     }
     const actor = submitter || p.name || PLAYER_COMMAND_FALLBACK_ACTOR;
     this.appendParticipantEventLog(actor, `interrupted, ${getInterruptVerbPhrase(action.key)}.`);
-    UndoHandler.StartActions();
     p.doAction(action);
     this.syncSharedState();
   }
@@ -5273,45 +5233,9 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     return this.expandedActionKey === action.key;
   }
 
-  isUndoDisabled() {
-    return !UndoHandler.hasPast();
-  }
-
-  isRedoDisabled() {
-    return !UndoHandler.hasFuture();
-  }
-
-  /**
-   * Undo/redo change player-visible state, so they must re-broadcast like every
-   * other mutation path - otherwise the GM tab and the players silently
-   * disagree. The case that made this a live defect: the GM releases a claim
-   * (broadcast), then undoes it (local only). Players still saw the character as
-   * free, a second player could claim it, and the original owner's re-claim was
-   * refused for a character their own screen said was unowned.
-   *
-   * `syncSharedState()` rather than `sort()`: `sort()` runs
-   * `enforceSingleCurrentActor()`, which writes participant `status` through the
-   * undo system. Any such write auto-opens a chapter (ARCHITECTURE §4) and
-   * `StartActions()` clears `futureHistory` - so sorting straight after an undo
-   * would destroy the redo stack it just created. `syncSharedState()` only reads
-   * and broadcasts.
-   */
-  btnUndo_Click() {
-    LogHandler.log(this.currentBTTime, "Undo_Click");
-    UndoHandler.Undo();
-    this.syncSharedState();
-  }
-
-  btnRedo_Click() {
-    LogHandler.log(this.currentBTTime, "Redo_Click");
-    UndoHandler.Redo();
-    this.syncSharedState();
-  }
-
   inpName_KeyDown(e: KeyboardEvent) {
     this.handleTabNav(e, 'input[name="name"]', (row) => {
       LogHandler.log(this.currentBTTime, "TabAddParticipant");
-      UndoHandler.StartActions();
       this.addParticipant();
       const index = row.getAttribute("data-indexnr");
       this.indexToSelect = index !== null ? 1 + Number(index) : -1;
@@ -5401,9 +5325,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * model.
    */
   onParticipantRolledTotalChanged(p: IParticipant, value: number) {
-    // One undo step per edit: the clamp plus the resulting Score delta are a
-    // single reversible change.
-    UndoHandler.StartActions();
+    // The clamp and the resulting Score delta are applied together, in one
+    // assignment to `diceIni`.
     const clamped = this.clampInitiativeRoll(value, p);
     if (clamped !== p.diceIni) {
       p.diceIni = clamped;
@@ -5600,7 +5523,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     willpower = DEFAULT_GRUNT_ATTRIBUTE,
     selectNewGrunt = true
   ): DetachedGruntParticipant {
-    UndoHandler.StartActions();
     const grunt = createStandaloneGrunt(name ?? this.nextStandaloneGruntName(), body, willpower);
     this.combatManager.addParticipant(grunt);
     this.participantClaimable.set(grunt, false);
@@ -5685,9 +5607,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * Which standalone grunts the GM has ticked for a merge.
    *
    * Transient view state, like `expandedRowPanels`: it holds nothing that
-   * survives the merge, and the merge itself is fully undoable. Kept as a `Set`
-   * of participants so a mis-tap is one tap to correct and nothing is committed
-   * until the Merge button is pressed.
+   * survives the merge. Kept as a `Set` of participants so a mis-tap is one tap
+   * to correct and nothing is committed until the Merge button is pressed.
    */
   readonly gruntsSelectedForMerge = new Set<IParticipant>();
 
@@ -5711,8 +5632,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * if it were describing whatever the GM is doing now. Every write goes through
    * here so there is exactly one place that can leave a stale one on screen.
    *
-   * Not undoable and deliberately so - it is a toast, not tracker state; undoing
-   * the merge itself puts the grunts back regardless.
+   * Not tracker state - it is a toast, cleared on its own timeout regardless
+   * of what happens to the merge.
    */
   private setMergeMessage(text: string): void {
     this.clearMergeMessageDismiss();
@@ -5801,14 +5722,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       // GM-only. A refusal names an NPC and says why it could not be grouped -
       // pure GM bookkeeping about NPCs the players may not even have met, and
       // "Ganger A already rolled Initiative" is table information nobody
-      // in-fiction has. `StartActions` is here only so the log write opens its
-      // own undo chapter instead of appending to whatever chapter happened to be
-      // left open; nothing else on this path mutates tracker state.
-      UndoHandler.StartActions();
+      // in-fiction has. Nothing else on this path mutates tracker state.
       this.logGmOnlyRowEvent(MERGED_GRUNT_ROW_NAME, `merge refused - ${result.reason}`);
       return result;
     }
-    UndoHandler.StartActions();
     const row = result.row;
     const first = selected[0];
     // The row is a brand-new participant, not a joiner: if it is created after
@@ -5833,8 +5750,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     for (const grunt of selected) {
       this.forgetParticipant(grunt);
       this.combatManager.removeParticipant(grunt);
-      // Undoable, like every other side-map drop here: undoing the merge has to
-      // give the GM back the same ticked selection, not an empty one.
       this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
     }
     this.selectActor(row);
@@ -5846,8 +5761,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   // ── Linked NPC rows (grunt groups) ──────────────────────────────────────
   //
   // All of the rules live in `src/Grunts/`; everything here is plumbing: side
-  // maps, undo batching, logging and panel state. See
-  // briefs/npc-group-initiative.md.
+  // maps, logging and panel state. See briefs/npc-group-initiative.md.
 
   /**
    * Write a row event to both logs: the GM's own local log and, if a session is
@@ -5966,7 +5880,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * same rule applies however Body is written - GM field, detach, or merge.
    */
   onGruntBodyChanged(p: DetachedGruntParticipant, value: number): void {
-    UndoHandler.StartActions();
     p.gruntBody = Math.max(0, Number(value || 0));
     this.syncSharedState();
   }
@@ -5978,7 +5891,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * count the formula gives it.
    */
   onGruntWillpowerChanged(p: DetachedGruntParticipant, value: number): void {
-    UndoHandler.StartActions();
     p.gruntWillpower = Math.max(0, Number(value || 0));
     this.syncSharedState();
   }
@@ -6030,7 +5942,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * control.
    */
   applyGruntDamage(p: DetachedGruntParticipant, boxes: number, type: GruntDamageType) {
-    UndoHandler.StartActions();
     const result = p.applyDamage(boxes, type);
     this.onParticipantDamageChanged();
     return result;
@@ -6042,7 +5953,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * read so correcting a mis-keyed hit needs no retyping.
    */
   healGrunt(p: DetachedGruntParticipant, boxes = this.getGruntDamageValue(p)) {
-    UndoHandler.StartActions();
     const healed = p.healDamage(boxes);
     this.onParticipantDamageChanged();
     return healed;
@@ -6071,7 +5981,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * manual (criterion 11 / Decision 6).
    */
   addNpcRow(selectNewRow = true): NpcRowParticipant {
-    UndoHandler.StartActions();
     const row = new NpcRowParticipant();
     // Numbered and distinct rather than the old literal `"NPC Row"`: that
     // string was reused as the log-actor fallback *and* as the prefix of every
@@ -6143,7 +6052,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * (criterion 15 / Decision 7, scenario S7).
    */
   addNpcToRow(row: NpcRowParticipant, name?: string, body = 3, willpower = 3): GruntMember {
-    UndoHandler.StartActions();
     const member = new GruntMember(name ?? this.nextRowMemberName(row), body, willpower);
     row.addMember(member);
     // Joining is Score-neutral even for an NPC who arrives already hurt: the
@@ -6187,7 +6095,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     boxes: number,
     type: GruntDamageType
   ) {
-    UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
     const result = row.applyDamageToMember(member, boxes, type);
     if (result.applied > 0) {
@@ -6331,10 +6238,10 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * gone this pass, without opening the Act modal and without writing a log
    * line.
    *
-   * Kept as a toggle, and kept undoable and unlogged for the same reason it
-   * always was: a mis-tap at the table has to cost one tap to correct, not an
-   * Undo, and a row of six must not write six bookkeeping lines a pass into a
-   * log whose job is to record what happened in the fiction. Since Decision
+   * Kept as a toggle, and kept unlogged for the same reason it always was: a
+   * mis-tap at the table has to cost one tap to correct, and a row of six must
+   * not write six bookkeeping lines a pass into a log whose job is to record
+   * what happened in the fiction. Since Decision
    * 23 the template only reaches this method for the *un-mark* direction -
    * the mark-as-acted direction now goes through `btnRowMemberAct_Click` so
    * it is a real, logged action declaration - but the method itself is left
@@ -6344,7 +6251,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * (`NpcRowParticipant.softReset`) either way.
    */
   toggleRowMemberActed(member: GruntMember): void {
-    UndoHandler.StartActions();
     member.hasActed = !member.hasActed;
     this.syncSharedState();
   }
@@ -6402,7 +6308,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   /**
-   * Undo a mis-keyed hit / heal an NPC, re-syncing the row's shared score.
+   * Correct a mis-keyed hit / heal an NPC, re-syncing the row's shared score.
    *
    * The house rule runs in both directions (Decision 1), so a heal that takes
    * the NPC back below a Wound Modifier threshold gives the *whole row* its
@@ -6414,8 +6320,8 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * `RULINGS.md` 2026-08-07, reversing the 2026-08-02 refusal): out-of-action
    * is derived live from the box count, so taking boxes off puts the NPC back
    * on its feet, restores it to `activeMembers`, and un-flags the row if it was
-   * the last one standing. This is now the correction path for a mis-keyed
-   * killing blow, in place of global Undo.
+   * the last one standing. This is the correction path for a mis-keyed
+   * killing blow (`RULINGS.md` 2026-08-07).
    *
    * Log privacy as in `applyRowMemberDamage`: the GM sees the running damage
    * total, players see only that healing happened (Decision 17). The Condition
@@ -6427,7 +6333,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * GM having to retype it.
    */
   healRowMember(row: NpcRowParticipant, member: GruntMember, boxes = this.getRowMemberDamageValue(member)) {
-    UndoHandler.StartActions();
     const actor = this.rowLogActor(row);
     // Read before the call so the "back on its feet" line can be written from
     // the transition rather than inferred from the post-heal state alone.
@@ -6493,7 +6398,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     member: GruntMember,
     factory: () => Participant = () => new DetachedGruntParticipant()
   ): Participant | null {
-    UndoHandler.StartActions();
     const detached = row.detachMember(member, factory);
     if (!detached) {
       return null;
@@ -6530,16 +6434,14 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    * wording: "this is for all participant rows, it should prompt and offer to
    * delete." Same `confirmationDialog.simpleConfirm` pattern `btnDelete_Click`
    * uses. When the NPC being removed is the row's **last**, the same prompt
-   * also offers to delete the now-empty row: a single "Yes" does both, in one
-   * undo chapter, rather than leaving a corpse-free empty row behind for a
-   * second tap the GM has to remember to make. Declining leaves everything
-   * untouched.
+   * also offers to delete the now-empty row: a single "Yes" does both in one
+   * tap, rather than leaving a corpse-free empty row behind for a second tap
+   * the GM has to remember to make. Declining leaves everything untouched.
    *
-   * Deleting the row this way runs the exact same undoable side-map cleanup
+   * Deleting the row this way runs the exact same side-map cleanup
    * `btnDelete_Click` does (`forgetParticipant`), including
    * `forgetMapEntry(this.rowMemberDamageValues, member)` for the member's own
-   * queued Damage Value - otherwise undo would restore the row with a fresh,
-   * defaulted set of GM-local bookkeeping (ARCHITECTURE.md §7/§8).
+   * queued Damage Value (ARCHITECTURE.md §7/§8).
    *
    * Never raises `spentFlagged` or `ooc` (Decision 21): a row emptied this way
    * is not "wiped out", so `flagSpentNpcRows()` - which still has to run so a
@@ -6561,14 +6463,13 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
       return;
     }
     LogHandler.log(this.currentBTTime, (member.name || "NPC") + " RemoveRowMember_Confirm");
-    UndoHandler.StartActions();
     row.removeMember(member);
     this.forgetMapEntry(this.rowMemberDamageValues, member);
     this.logRowEvent(this.rowLogActor(row), `${member.name} removed from the row`);
     if (isLastMember) {
       // The row is now a plain empty row (Decision 21) - the prompt already
-      // offered to delete it, so finish the job in the same undo chapter
-      // rather than leaving the GM a second tap to remember.
+      // offered to delete it, so finish the job now rather than leaving the
+      // GM a second tap to remember.
       this.forgetParticipant(row);
       this.combatManager.removeParticipant(row);
       this.clearGmRollAttributionIfNamed(row.name || "");
@@ -6603,36 +6504,24 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     this.forgetSetEntry(this.expandedAstralPanels, p);
     this.forgetSetEntry(this.expandedStatEditors, p);
     if (this.selectedActor === p) {
-      const previous = this.selectedActor;
-      UndoHandler.DoAction(
-        () => { this.selectedActor = null; },
-        () => { this.selectedActor = previous; }
-      );
+      this.selectedActor = null;
     }
   }
 
   /**
-   * Delete one side-map entry **undoably**.
+   * Delete one side-map entry.
    *
    * The side maps are keyed by object identity and hold state the domain model
    * does not (`participantIds`, the ERIC tie-break inputs, ownership, panel
-   * state — ARCHITECTURE.md §7/§8). Dropping them outside an undo closure makes
-   * the removal only half-undoable: the participant comes back from the undo
-   * stack, but with a brand-new id, a defaulted Reaction/Intuition, a fresh
-   * random coin-toss tie-breaker, and it broadcasts to players as if it were
-   * somebody new. Routed through `UndoHandler.DoAction` (the non-property
-   * mutation primitive, §4) so they land in the same chapter as the list
-   * removal that triggered them.
+   * state — ARCHITECTURE.md §7/§8). Anything that removes a participant has to
+   * clean these up too, or the side-map entry outlives the participant it was
+   * keyed on.
    */
   private forgetMapEntry<K, V>(map: Map<K, V>, key: K): void {
     if (!map.has(key)) {
       return;
     }
-    const value = map.get(key) as V;
-    UndoHandler.DoAction(
-      () => { map.delete(key); },
-      () => { map.set(key, value); }
-    );
+    map.delete(key);
   }
 
   /** `forgetMapEntry` for the panel-expansion `Set`s. */
@@ -6640,10 +6529,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
     if (!set.has(key)) {
       return;
     }
-    UndoHandler.DoAction(
-      () => { set.delete(key); },
-      () => { set.add(key); }
-    );
+    set.delete(key);
   }
 
   isDeckPanelExpanded(p: IParticipant): boolean {
@@ -6659,7 +6545,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   enableDeck(p: IParticipant) {
-    UndoHandler.StartActions();
     const mp = this.promoteToMatrixParticipant(p);
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.participantIntuitions.get(mp) ?? 0;
@@ -6671,7 +6556,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   removeDeck(p: IParticipant) {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     this.pendingVrModes.delete(p);
     this.demoteToParticipant(p as MatrixParticipant);
     this.syncSharedState();
@@ -6704,7 +6588,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   enableAstral(p: IParticipant): void {
-    UndoHandler.StartActions();
     // Name captured before the promote: that swaps the participant instance.
     const astralName = p.name || "";
     // Logged before the promote: `promoteToAstralParticipant` ->
@@ -6725,7 +6608,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   disableAstral(p: IParticipant): void {
     if (!this.isAstral(p)) return;
-    UndoHandler.StartActions();
     this.expandedAstralPanels.delete(p);
     // Name captured before the demote: that swaps the participant instance.
     const astralName = p.name || "";
@@ -6764,7 +6646,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   toggleAstralProjecting(p: IParticipant): void {
     if (!this.isAstral(p)) return;
-    UndoHandler.StartActions();
     const ap = p as AstralParticipant;
     ap.astralProjecting = !ap.astralProjecting;
     ap.blocksPhysicalActions = ap.astralProjecting;
@@ -6804,7 +6685,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   gmJackIn(p: IParticipant): void {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
     // Same distinction the configure_deck branch makes: this button is both
     // "Jack In" and "Switch Mode", and only the previous state says which.
@@ -6830,7 +6710,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   gmJackOut(p: IParticipant): void {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     const mp = p as MatrixParticipant;
     // Jack Out: clear VR mode, restore physical initiative.
     mp.vrMode = VRMode.None;
@@ -6851,7 +6730,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   onDeckStatChanged(p: IParticipant, field: 'attack' | 'sleaze' | 'firewall' | 'deviceRating', value: number): void {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     (p as MatrixParticipant)[field] = Math.max(0, Number(value || 0));
     this.syncSharedState();
   }
@@ -7103,7 +6981,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
 
   onMatrixDPChanged(p: IParticipant, value: number): void {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     p.dataProcessing = Math.max(1, Number(value || 1));
     p.baseIni = this.getParticipantBaseInitiative(p);
     this.syncSharedState();
@@ -7127,7 +7004,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
    */
   onVRModeChange(p: IParticipant, mode: VRMode): void {
     if (!this.isMatrix(p)) return;
-    UndoHandler.StartActions();
     this.applyVRMode(p as MatrixParticipant, mode);
     this.syncSharedState();
   }
@@ -7232,7 +7108,7 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
         continue;
       }
       actor.status = StatusEnum.Waiting;
-      this.combatManager.currentActors.remove(actor, false);
+      this.combatManager.currentActors.remove(actor);
     }
     this.combatManager.currentInitiative = keep.getCurrentInitiative();
   }
@@ -7291,7 +7167,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   private rollOutstandingInitiative(includePlayers: boolean) {
-    UndoHandler.StartActions();
     let rolledPlayer = false;
     const targets = this.combatManager.participants.items.filter(participant => {
       if (participant.ooc || participant.diceIni > 0) {
@@ -7369,7 +7244,6 @@ export class BattleTrackerComponent extends Undoable implements OnInit, OnDestro
   }
 
   private beginCombatTurn() {
-    UndoHandler.StartActions();
     this.initiativePrepActive = false;
     // Turn number and "is this a new combat" are captured before
     // `startRound()` runs, and all three start lines are emitted ahead of

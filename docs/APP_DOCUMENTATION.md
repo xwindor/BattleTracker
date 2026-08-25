@@ -507,22 +507,7 @@ Formatting highlights:
 
 Log list auto-scrolls to newest entries and flashes new entries briefly.
 
-## 7. Undo/Redo Model
-
-Files:
-
-- `src/Common/UndoHandler.ts`
-- `src/Common/Undoable.ts`
-
-Property mutations and command actions are recorded in chapters.
-
-- `UndoHandler.StartActions()` begins a chapter.
-- property setters call `Undoable.Set(...)`.
-- `Undo` and `Redo` replay/rollback chapters.
-
-GM UI exposes undo/redo controls in toolbar.
-
-## 8. Deployment Notes
+## 7. Deployment Notes
 
 ### Infrastructure
 
@@ -743,7 +728,7 @@ This avoids CSP conflicts with stylesheet `onload` patterns and prevents “unst
 
 - `GET /health` returns `{ “ok”: true }`
 
-## 9. Security and Limitations
+## 8. Security and Limitations
 
 Current limitations:
 
@@ -784,8 +769,8 @@ Current limitations:
   That snapshot has never carried damage/health, out-of-combat participants, or
   action history, so a GM resuming a room re-enters those by hand; the GM is
   told this at restore time.
-- GM-local hidden log entries and undo/redo history never leave the browser and
-  are never persisted.
+- GM-local hidden log entries and this tab's own transient panel/selection
+  state never leave the browser and are never persisted.
 - Player identity is per-tab token, not account-based.
 
 Before larger public use, consider:
@@ -795,7 +780,7 @@ Before larger public use, consider:
 - role authorization on server commands,
 - rate limits.
 
-## 10. Where To Edit Things Quickly
+## 9. Where To Edit Things Quickly
 
 ### Add/rename declared actions and descriptions
 
@@ -831,7 +816,7 @@ Before larger public use, consider:
 - `src/app/player-view/player-view.component.ts`
 - `src/app/player-view/player-view.component.html`
 
-## 11. Suggested Next Improvements
+## 10. Suggested Next Improvements
 
 - Persist rooms and participants to a datastore.
 - Add reconnect-friendly player identity or authenticated login.

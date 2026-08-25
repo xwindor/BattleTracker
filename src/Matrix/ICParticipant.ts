@@ -18,15 +18,15 @@ export class ICParticipant extends MatrixParticipant {
 
   private _icType: ICType;
   get icType(): ICType { return this._icType; }
-  set icType(val: ICType) { this.Set("icType", val); }
+  set icType(val: ICType) { this._icType = val; }
 
   private _hostRating: number;
   get hostRating(): number { return this._hostRating; }
-  set hostRating(val: number) { this.Set("hostRating", val); }
+  set hostRating(val: number) { this._hostRating = val; }
 
   private _linkedTargetId: string;
   get linkedTargetId(): string { return this._linkedTargetId; }
-  set linkedTargetId(val: string) { this.Set("linkedTargetId", val); }
+  set linkedTargetId(val: string) { this._linkedTargetId = val; }
 
   constructor(icType: ICType = ICType.Patrol, hostRating = 1, linkedTargetId = "") {
     super();

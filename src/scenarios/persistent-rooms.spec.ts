@@ -15,7 +15,6 @@ import { Participant } from 'Combat/Participants/Participant';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
 import { AstralParticipant } from 'Magic';
-import { UndoHandler } from 'Common';
 import {
   SessionSyncService, SessionCommand, SharedCombatState, SharedLogEntry, SharedParticipantState
 } from 'app/services/session-sync.service';
@@ -38,8 +37,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DATA_DIR = '/var/data/rooms';
 
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -1344,19 +1343,19 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     decker.blocksPhysicalActions = true;
     decker.setDicesWithoutRoll(4);
     decker.baseIni = 12;
-    CombatManager.participants.insert(decker, false);
+    CombatManager.participants.insert(decker);
     decker.diceIni = 14;              // Score 26
 
     const street = new Participant();
     street.name = 'Ganger';
     street.baseIni = 8;
-    CombatManager.participants.insert(street, false);
+    CombatManager.participants.insert(street);
     street.diceIni = 3;
 
     const downed = new Participant();
     downed.name = 'Downed NPC';
     downed.baseIni = 8;
-    CombatManager.participants.insert(downed, false);
+    CombatManager.participants.insert(downed);
     downed.physicalHealth = 10;
     downed.physicalDamage = 10;      // OOC: never appears in a broadcast at all
 
@@ -1678,7 +1677,8 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
 
       expect(component.restoreWarning).toContain('damage');
       expect(component.restoreWarning).toContain('out of action');
-      expect(component.restoreWarning).toContain('undo history');
+      expect(component.restoreWarning).toContain('committed interrupt actions');
+      expect(component.restoreWarning).not.toContain('undo');
       const warning = fixture.nativeElement.querySelector('[data-testid="restore-warning"]');
       expect(warning).not.toBeNull();
     });
@@ -1700,7 +1700,7 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     function addOoc(name: string, opts: { claimable?: boolean; owner?: string } = {}): Participant {
       const p = new Participant();
       p.name = name;
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       p.physicalHealth = 10;
       p.physicalDamage = 10; // OOC
       if (opts.claimable) {
@@ -1912,17 +1912,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(sent.filter(c => c.type === 'claim_denied').length).toBe(0);
     });
 
-    it('a mis-tapped release is one Ctrl+Z', () => {
-      const wombat = CombatManager.participants.items[0];
-
-      component.btnReleaseClaim_Click(wombat);
-      expect(component.isParticipantClaimed(wombat)).toBeFalse();
-
-      UndoHandler.Undo();
-
-      expect(component['participantOwners'].get(wombat)).toBe(STALE_TOKEN);
-    });
-
     it('shows the release control only while a claim exists', () => {
       fixture.detectChanges();
       expect(fixture.nativeElement.querySelector('[data-testid="release-claim-btn"]')).not.toBeNull();
@@ -1931,57 +1920,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('[data-testid="release-claim-btn"]')).toBeNull();
-    });
-  });
-
-  // ── S3: undo across a restore ────────────────────────────────────────────
-  describe('S3 - undo across a restore', () => {
-    function restored() {
-      component['restoreFromSharedState']({
-        round: 1, pass: 1, started: true, passEnded: false, currentInitiative: 11,
-        participants: [{
-          id: 'p-1', name: 'Wombat', order: 1, active: false, initiativeScore: 11,
-          playerControlled: false, initiativeDice: 1, pendingRoll: false,
-          rolledInitiativeTotal: 5, reaction: 3, intuition: 3
-        }]
-      });
-      return CombatManager.participants.items[0];
-    }
-
-    it('the first undo reverses the GM\'s edit; the second does nothing', () => {
-      const p = restored();
-      expect(p.name).toBe('Wombat');
-
-      UndoHandler.StartActions();
-      p.name = 'Wombat (wounded)';
-      expect(p.name).toBe('Wombat (wounded)');
-
-      UndoHandler.Undo();
-      expect(p.name).toBe('Wombat');
-
-      UndoHandler.Undo();      // nothing left, and nothing pre-restore to reach
-      expect(p.name).toBe('Wombat');
-      expect(CombatManager.participants.items.length).toBe(1);
-      expect(p.getCurrentInitiative()).toBe(11);
-    });
-
-    it('leaves no undo history from the restore itself', () => {
-      restored();
-      expect(UndoHandler.hasPast()).toBeFalse();
-      expect(UndoHandler.hasFuture()).toBeFalse();
-    });
-
-    it('does not let a pre-restore chapter absorb the restore\'s writes', () => {
-      const stale = new Participant();
-      stale.name = 'Left over from before the join';
-      CombatManager.participants.insert(stale, false);
-      stale.baseIni = 9;      // opens an auto-chapter that is never closed
-
-      const p = restored();
-
-      UndoHandler.Undo();     // must not resurrect the pre-restore participant
-      expect(CombatManager.participants.items.length).toBe(1);
-      expect(CombatManager.participants.items[0]).toBe(p);
     });
   });
 
@@ -2164,22 +2102,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(component.shareInfo).toContain('nothing was replaced');
     });
 
-    it('undo history survives the round trip (Initialize() is never reached)', async () => {
-      buildLiveEncounter();
-      component['liveEncounterRoomCode'] = 'ABC123';
-      UndoHandler.StartActions();
-      CombatManager.participants.items[1].name = 'Ganger (bleeding)';
-      expect(UndoHandler.hasPast()).toBeTrue();
-      await closeRoom();
-      spyOn(sync, 'joinAsGm').and.resolveTo({ state: lossySnapshot(), log: [] });
-
-      await component.btnJoinShareSession_Click();
-
-      expect(UndoHandler.hasPast()).toBeTrue();
-      UndoHandler.Undo();
-      expect(CombatManager.participants.items[1].name).toBe('Ganger');
-    });
-
     it('a fresh tab with no local state still pulls', async () => {
       component.shareJoinCode = 'ABC123';           // no liveEncounterRoomCode
       spyOn(sync, 'joinAsGm').and.resolveTo({ state: lossySnapshot(), log: [] });
@@ -2222,8 +2144,8 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
   // Push-not-pull already protects the tab rejoining *its own* room. The gap it
   // left: a tab holding an encounter that the server does not have - a different
   // room's, or one built before any session existed - still pulled silently,
-  // and `restoreFromSharedState()` clears both participant lists, all eight
-  // side-maps and the undo history with no way back.
+  // and `restoreFromSharedState()` clears both participant lists and all
+  // eight side-maps with no way back.
   describe('AC 15 - Join asks before it overwrites local GM state', () => {
     function serverSnapshot(): SharedCombatState {
       return {
@@ -2247,7 +2169,7 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       const [ message, title ] = confirmSpy.calls.mostRecent().args;
       expect(message).toContain('3 participants');
       expect(message).toContain('damage');
-      expect(message).toContain('undo history');
+      expect(message).not.toContain('undo history');
       expect(message).toContain('cannot be undone');
       expect(title).toContain('ZZZ999');
       // Confirmed, so the pull went ahead.
@@ -2304,7 +2226,7 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     it('AC 15: says "1 participant", not "1 participants"', async () => {
       const lone = new Participant();
       lone.name = 'Wombat';
-      CombatManager.participants.insert(lone, false);
+      CombatManager.participants.insert(lone);
       component.shareJoinCode = 'ZZZ999';
       const confirmSpy = spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(false);
 
@@ -2638,70 +2560,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
     });
   });
 
-  // ── Review defect 3a (round 2): undo of a player-visible mutation ─────────
-  describe('undo re-broadcasts, so players never disagree with the GM (review defect 3, round 2)', () => {
-    const OWNER = 'pl-owner';
-
-    function claimedParticipant() {
-      // Clears the constructor's placeholder first (test hygiene, durable-rooms
-      // review round 6, Part 3) so `p` is the only, and therefore the 0th,
-      // participant on the wire - this test indexes `participants[0]`.
-      resetCombat();
-      const p = new Participant();
-      p.name = 'Wombat';
-      CombatManager.participants.insert(p, false);
-      component['participantClaimable'].set(p, true);
-      component['participantOwners'].set(p, OWNER);
-      component.shareRoomCode = 'ABC123';
-      return p;
-    }
-
-    it('undoing a claim release puts the owner back on the wire, not just locally', () => {
-      const wombat = claimedParticipant();
-      component.btnReleaseClaim_Click(wombat);
-      expect(broadcasts[broadcasts.length - 1].participants[0].ownerName).toBeUndefined();
-      const broadcastsAfterRelease = broadcasts.length;
-
-      component.btnUndo_Click();
-
-      expect(component['participantOwners'].get(wombat)).toBe(OWNER);
-      expect(broadcasts.length).toBe(broadcastsAfterRelease + 1);
-      expect(broadcasts[broadcasts.length - 1].participants[0].ownerName).toBe(OWNER);
-    });
-
-    it('redo re-broadcasts too, so the pair stay symmetrical', () => {
-      const wombat = claimedParticipant();
-      component.btnReleaseClaim_Click(wombat);
-      component.btnUndo_Click();
-
-      component.btnRedo_Click();
-
-      expect(component['participantOwners'].get(wombat)).toBeUndefined();
-      expect(broadcasts[broadcasts.length - 1].participants[0].ownerName).toBeUndefined();
-    });
-
-    it('undo does not destroy the redo stack it just created', () => {
-      const wombat = claimedParticipant();
-      component.btnReleaseClaim_Click(wombat);
-
-      component.btnUndo_Click();
-
-      expect(UndoHandler.hasFuture()).toBeTrue();
-      expect(component.isRedoDisabled()).toBeFalse();
-    });
-
-    it('is silent when no session is open', () => {
-      const wombat = claimedParticipant();
-      component.btnReleaseClaim_Click(wombat);
-      component.shareRoomCode = '';
-      const before = broadcasts.length;
-
-      component.btnUndo_Click();
-
-      expect(broadcasts.length).toBe(before);
-    });
-  });
-
   // ── Round-3 fix 5: an all-OOC room is not an empty room ───────────────────
   // `getSharedParticipants()` filters OOC participants out of the broadcast, so
   // a real encounter where everyone has been dropped serialises as
@@ -2938,21 +2796,6 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       expect(component.shareInfo).toContain('NEW999');
     });
 
-    it('fix 6: undo history survives the mis-tap and the recovery', async () => {
-      await misTapCreate();
-      UndoHandler.StartActions();
-      CombatManager.participants.items[1].name = 'Ganger (bleeding)';
-      expect(UndoHandler.hasPast()).toBeTrue();
-      spyOn(sync, 'joinAsGm').and.resolveTo({ state: lossySnapshot(), log: [] });
-      component.shareJoinCode = 'ABC123';
-
-      await component.btnJoinShareSession_Click();
-
-      expect(UndoHandler.hasPast()).toBeTrue();
-      UndoHandler.Undo();
-      expect(CombatManager.participants.items[1].name).toBe('Ganger');
-    });
-
     it('fix 6: ending one of the two rooms only forgets that one', async () => {
       await misTapCreate();
       spyOn(sync, 'endSession').and.resolveTo();
@@ -3018,11 +2861,11 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       const mage = new Participant();
       mage.name = 'Mage';
       mage.baseIni = 9;
-      CombatManager.participants.insert(mage, false);
+      CombatManager.participants.insert(mage);
       const rigger = new Participant();
       rigger.name = 'Rigger';
       rigger.baseIni = 7;
-      CombatManager.participants.insert(rigger, false);
+      CombatManager.participants.insert(rigger);
       component['participantClaimable'].set(decker, true);
       component['participantClaimable'].set(street, true);
       component['participantClaimable'].set(mage, true);
@@ -3433,7 +3276,7 @@ describe('Durable rooms - player client (AC 6, S4; Open Decision 7)', () => {
   });
 
   // ── Review defect 3b (round 2): a released claim is explained ─────────────
-  // The mirror of `claim_denied`. When the GM releases a claim (or undoes one),
+  // The mirror of `claim_denied`. When the GM releases a claim,
   // `ownerName` simply disappears from the state and the player's whole
   // character panel used to vanish with no message at all.
   describe('S4 - a released claim is explained to the player (review defect 3, round 2)', () => {
@@ -4105,7 +3948,7 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
 
   it('D5: promoting a participant to MatrixParticipant disqualifies it (it is not the constructor\'s placeholder)', () => {
     const p = new MatrixParticipant();
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     expect(component['isUnusedPlaceholder'](p)).toBeFalse();
   });
 
@@ -4125,7 +3968,7 @@ describe('Round 4 - D5: isUnusedPlaceholder matches only an untouched placeholde
     placeholder();
     const named = new Participant();
     named.name = 'Wombat';
-    CombatManager.participants.insert(named, false);
+    CombatManager.participants.insert(named);
     const confirmSpy = spyOn(component['confirmationDialog'], 'confirm').and.resolveTo(false);
 
     await component['confirmDestructiveJoin']('ZZZ999', '');
@@ -4171,7 +4014,7 @@ describe('Round 4 - D6: a stale live-encounter association cannot silently overw
   function addNamed(name: string): Participant {
     const p = new Participant();
     p.name = name;
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     return p;
   }
 
@@ -4434,7 +4277,7 @@ describe('Round 5 - Part 1: the GM tab / room authority model (Symptoms A, B, C)
   function addNamed(name: string): Participant {
     const p = new Participant();
     p.name = name;
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     return p;
   }
 
@@ -4668,7 +4511,7 @@ describe('Round 6 - review defect D1: the OOC-only abandonment path (durable-roo
   function addNamed(name: string): Participant {
     const p = new Participant();
     p.name = name;
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     return p;
   }
 
@@ -4799,7 +4642,7 @@ describe('Round 6 - review defect D2: ownership reconciliation covers OOC partic
   function addNamed(name: string): Participant {
     const p = new Participant();
     p.name = name;
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     return p;
   }
 
@@ -4946,7 +4789,7 @@ describe('Round 6 - review defect D8: Create Player Session does not inherit own
   function addNamed(name: string): Participant {
     const p = new Participant();
     p.name = name;
-    CombatManager.participants.insert(p, false);
+    CombatManager.participants.insert(p);
     return p;
   }
 

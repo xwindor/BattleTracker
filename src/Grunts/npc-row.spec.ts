@@ -17,7 +17,6 @@ import { LogHandler } from 'Logging';
 import { CombatManager, StatusEnum } from 'Combat';
 import { Participant, INITIATIVE_PASS_DECAY } from 'Combat/Participants/Participant';
 import { AstralParticipant } from 'Magic';
-import { UndoHandler } from 'Common';
 import { interruptTable } from 'InterruptTable';
 import {
   DetachedGruntParticipant,
@@ -39,8 +38,8 @@ const PARRY = interruptTable.find(a => a.key === 'parry')!;
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -69,7 +68,7 @@ function makeRolledRow(
   for (const memberName of memberNames) {
     row.addMember(new GruntMember(memberName, body, willpower));
   }
-  CombatManager.participants.insert(row, false);
+  CombatManager.participants.insert(row);
   row.diceIni = roll;
   return row;
 }
@@ -79,7 +78,7 @@ function makeRolledParticipant(name: string, attribute: number, dice: number, ro
   p.name = name;
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
@@ -249,13 +248,15 @@ describe('NPC group initiative - acceptance criteria', () => {
       expect(row.getCurrentInitiative()).toBe(15);
     });
 
-    it('is a single undo step and gives the score back on undo', () => {
+    it('gives the score back when the wound is healed off, not just undamaged', () => {
+      // Decision 1: the row's shared wound accumulator moves on the damage
+      // *event*, so the correction path is healing the member back down, not
+      // an undo control - there is none.
       const row = makeRolledRow('Gangers', 7, 2, 8, ['G1']);
-      UndoHandler.StartActions();
       row.applyDamageToMember(row.members[0], 6, 'physical');
       expect(row.getCurrentInitiative()).toBe(13);
 
-      UndoHandler.Undo();
+      row.healMember(row.members[0], 6);
 
       expect(row.members[0].damage).toBe(0);
       expect(row.getCurrentInitiative()).toBe(15);
@@ -841,8 +842,8 @@ describe('NPC group initiative - acceptance criteria', () => {
 // ── GM-workflow plumbing (component side) ─────────────────────────────────
 //
 // The rules all live in the classes above; these cover the GM-component half -
-// spent-row cleanup, undo coverage of the side maps, the shared-state payload
-// and the panel's damage controls.
+// spent-row cleanup of the side maps, the shared-state payload and the
+// panel's damage controls.
 describe('NPC group initiative - GM workflow', () => {
   let component: BattleTrackerComponent;
   let fixture: ComponentFixture<BattleTrackerComponent>;
@@ -888,7 +889,7 @@ describe('NPC group initiative - GM workflow', () => {
     expect(CombatManager.participants.contains(row)).toBeTrue();
     expect(row.ooc).toBeTrue();
     // Somebody is acting and the pass is still open: the GM has an Act button
-    // to press, rather than only Undo and End Combat.
+    // to press, rather than only End Combat.
     expect(CombatManager.currentActors.items).toEqual([pete]);
     expect(CombatManager.passEnded).toBeFalse();
   });
@@ -1050,29 +1051,6 @@ describe('NPC group initiative - GM workflow', () => {
     expect(rebroadcast?.canInterrupt).toBeFalse();
   });
 
-  it('forgets a deleted row\'s per-member damage values, undoably (D5)', async () => {
-    const row = gmRow('Gangers', 7, 8, ['G 1', 'G 2']);
-    const [g1, g2] = [row.members[0], row.members[1]];
-    component.setRowMemberDamageValue(g1, 6);
-    component.setRowMemberDamageValue(g2, 9);
-    const values = component['rowMemberDamageValues'];
-    expect(values.has(g1)).toBeTrue();
-    spyOn(component['confirmationDialog'], 'simpleConfirm').and.resolveTo(true);
-
-    await component.btnDelete_Click(row);
-
-    expect(values.has(g1)).toBeFalse();
-    expect(values.has(g2)).toBeFalse();
-
-    UndoHandler.Undo();
-
-    // Half-undoable was the bug: the row came back with its NPCs' queued Damage
-    // Values silently reset to the one-box default.
-    expect(CombatManager.participants.contains(row)).toBeTrue();
-    expect(component.getRowMemberDamageValue(g1)).toBe(6);
-    expect(component.getRowMemberDamageValue(g2)).toBe(9);
-  });
-
   it('keeps a spent row\'s per-member damage values, since the row stays (D5/D14)', () => {
     // Under Decision 8 the row was deleted here and its side-map entries had to
     // be dropped with it. Decision 14 keeps the row, so the queued Damage
@@ -1181,34 +1159,6 @@ describe('NPC group initiative - GM workflow', () => {
     expect(fresh.spentFlagged).toBeFalse();
     expect(fresh.ooc).toBeFalse();
     expect(CombatManager.participants.contains(other)).toBeFalse();
-  });
-
-  it('keeps a spent row\'s side maps intact, and undoes the flag with the hit', () => {
-    const row = gmRow('Gangers', 7, 8, ['G1']);
-    const id = component['participantIds'].get(row);
-    const reaction = component['participantReactions'].get(row);
-    const intuition = component['participantIntuitions'].get(row);
-    const tieBreaker = component['participantTieBreakers'].get(row);
-    expect(id).toBeTruthy();
-
-    component.applyRowMemberDamage(row, row.members[0], row.members[0].conditionMonitorBoxes, 'physical');
-    // Decision 14: the row is still in the encounter, so nothing keyed by it is
-    // dropped in the first place.
-    expect(component['participantIds'].has(row)).toBeTrue();
-    expect(row.spentFlagged).toBeTrue();
-
-    UndoHandler.Undo();
-
-    // The killing blow and the flag it raised come back off together, and the
-    // row is still the SAME participant with the same tie-break inputs.
-    expect(CombatManager.participants.contains(row)).toBeTrue();
-    expect(row.spentFlagged).toBeFalse();
-    expect(component['participantIds'].get(row)).toBe(id);
-    expect(component['participantReactions'].get(row)).toBe(reaction);
-    expect(component['participantIntuitions'].get(row)).toBe(intuition);
-    expect(component['participantTieBreakers'].get(row)).toBe(tieBreaker);
-    expect(component['participantEdgeRatings'].get(row)).toBe(0);
-    expect(row.members[0].damage).toBe(0);
   });
 
   it('never offers a row an Interrupt Action in the shared state (criterion 17)', () => {
@@ -1378,15 +1328,6 @@ describe('NPC group initiative - addendum Decisions 9-12', () => {
       expect(new Set(names).size).withContext(names.join(', ')).toBe(3);
     });
 
-    it('is one undo step', () => {
-      UndoHandler.StartActions();
-      const grunt = component.addGrunt('Lone Ganger');
-      expect(CombatManager.participants.contains(grunt)).toBeTrue();
-
-      UndoHandler.Undo();
-
-      expect(CombatManager.participants.contains(grunt)).toBeFalse();
-    });
   });
 
   // ── Decision 10 ──────────────────────────────────────────────────────────
@@ -1480,24 +1421,6 @@ describe('NPC group initiative - addendum Decisions 9-12', () => {
       expect(component.isMergeableGruntCandidate(grunt)).toBeTrue();
       expect(component.isMergeableGruntCandidate(row)).toBeFalse();
       expect(component.isMergeableGruntCandidate(pc)).toBeFalse();
-    });
-
-    it('undoes a merge completely - grunts back, row gone, selection restored', () => {
-      const [ a, b ] = twoStandaloneGrunts();
-      component.toggleMergeSelection(a);
-      component.toggleMergeSelection(b);
-      UndoHandler.StartActions();
-
-      const row = component.mergeSelectedGrunts().row!;
-      expect(component.isSelectedForMerge(a)).toBeFalse();
-
-      UndoHandler.Undo();
-
-      expect(CombatManager.participants.contains(row)).toBeFalse();
-      expect(CombatManager.participants.contains(a)).toBeTrue();
-      expect(CombatManager.participants.contains(b)).toBeTrue();
-      expect(component.isSelectedForMerge(a)).toBeTrue();
-      expect(component.isSelectedForMerge(b)).toBeTrue();
     });
 
     it('takes the merged group\'s stat block off the first grunt (p. 378)', () => {
@@ -1775,18 +1698,6 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
       expect(copy.physicalHealth).toBe(grunt.physicalHealth);
     });
 
-    it('makes a Body edit one undo step', () => {
-      const grunt = component.addGrunt('Ganger A');
-      const before = grunt.physicalHealth;
-
-      component.onGruntBodyChanged(grunt, 9);
-      expect(grunt.physicalHealth).not.toBe(before);
-
-      UndoHandler.Undo();
-
-      expect(grunt.gruntBody).toBe(3);
-      expect(grunt.physicalHealth).toBe(before);
-    });
   });
 
   // ── D2 / Decision 15 ──────────────────────────────────────────────────────
@@ -1824,7 +1735,7 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
       // still works exactly as before.
       const plain = new Participant();
       plain.name = 'Wombat';
-      CombatManager.participants.insert(plain, false);
+      CombatManager.participants.insert(plain);
 
       plain.ooc = true;
       expect(plain.ooc).toBeTrue();
@@ -1958,22 +1869,6 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
       expect(line).not.toContain('hidden from players');
     });
 
-    it('opens its own undo chapter for the refusal instead of joining an open one', () => {
-      const a = component.addGrunt('Ganger A');
-      const b = component.addGrunt('Ganger B');
-      a.diceIni = 9;
-      component.toggleMergeSelection(a);
-      component.toggleMergeSelection(b);
-      // An unrelated edit whose chapter is still open when the refusal lands.
-      UndoHandler.StartActions();
-      b.name = 'Ganger B renamed';
-
-      component.mergeSelectedGrunts();
-      UndoHandler.Undo();
-
-      // Undo takes back the refusal's chapter, not the rename's.
-      expect(b.name).toBe('Ganger B renamed');
-    });
   });
 
   // ── D7 ────────────────────────────────────────────────────────────────────
@@ -2244,7 +2139,7 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
 
     it('keeps Participant.ooc working for a plain participant', () => {
       const plain = new Participant();
-      CombatManager.participants.insert(plain, false);
+      CombatManager.participants.insert(plain);
 
       plain.ooc = true;
       expect(plain.ooc).toBeTrue();
@@ -2347,7 +2242,7 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
 
     it('does not gate anything before combat starts', () => {
       const p = new Participant();
-      CombatManager.participants.insert(p, false);
+      CombatManager.participants.insert(p);
       CombatManager.started = false;
 
       expect(component.hasLiveActionPhase(p)).toBeTrue();
@@ -2474,16 +2369,6 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
       component.toggleRowMemberActed(row.members[0]);
 
       row.softReset();
-
-      expect(row.members[0].hasActed).toBeFalse();
-    });
-
-    it('is one undo step, like every other row mutation', () => {
-      const row = gmRow('Gangers', 7, 8, ['G 1']);
-      component.toggleRowMemberActed(row.members[0]);
-      expect(row.members[0].hasActed).toBeTrue();
-
-      UndoHandler.Undo();
 
       expect(row.members[0].hasActed).toBeFalse();
     });
@@ -2706,7 +2591,7 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       await component.removeRowMember(row, row.members[0]);
 
       // The row is gone (last member removed, Decision 21 deletes it), and
-      // the pass keeps moving - Pete is up, not stuck with only Undo.
+      // the pass keeps moving - Pete is up, nobody is stuck.
       expect(CombatManager.participants.contains(row)).toBeFalse();
       expect(CombatManager.currentActors.items).toEqual([pete]);
       expect(CombatManager.passEnded).toBeFalse();

@@ -22,8 +22,8 @@ const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -36,7 +36,7 @@ function makeRolledParticipant(name: string, attribute: number, dice: number, ro
   p.name = name;
   p.baseIni = attribute;
   p.setDicesWithoutRoll(dice);
-  CombatManager.participants.insert(p, false);
+  CombatManager.participants.insert(p);
   p.diceIni = roll;
   return p;
 }
@@ -59,7 +59,7 @@ function makeRolledRow(
   for (const memberName of memberNames) {
     row.addMember(new GruntMember(memberName, 3, 3));
   }
-  CombatManager.participants.insert(row, false);
+  CombatManager.participants.insert(row);
   row.diceIni = roll;
   return row;
 }

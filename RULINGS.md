@@ -244,7 +244,9 @@ Monitor panel, `createStandaloneGrunt`, and `NpcRowParticipant.detachMember`.
 `toMemberSnapshot()` hands both stored attributes straight to `GruntMember`, so
 a merge cannot change a monitor's size. Excess damage is taken off Physical
 first and then Stun, matching the combined-bar edit path, which also writes
-Physical. All of it is undoable in one step, so a mis-typed Body is one Undo.
+Physical. A mis-typed Body or Willpower is corrected by re-editing the field -
+there is no undo control (Undo was removed from the tracker; see brief
+"Remove the undo/redo system").
 
 **Known limit, deliberately not fixed:** raising Body or Willpower on a grunt
 whose track is *already full* gives it room again and it stands back up. That is
@@ -400,9 +402,8 @@ This reverses the 2026-08-02 ruling above.
 
 **Why:** The 2026-08-02 ruling's correction path for a mis-keyed killing blow
 was "use global Undo, which restores the exact pre-hit state." That stopped
-being workable once Xavier committed to removing the Undo mechanic from the
-app entirely (see project memory / working notes — not itself a rules
-question). With no other correction path, refusing to let a heal revive a
+being workable once Undo was removed from the app entirely (brief "Remove the
+undo/redo system" — not itself a rules question). With no other correction path, refusing to let a heal revive a
 grunt left a mis-keyed killing blow permanently uncorrectable at the table.
 "Out of action" is already a live-derived value in the grow direction (the
 2026-08-04 entry above accepts that raising Body/Willpower on a full grunt

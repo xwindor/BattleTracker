@@ -5,15 +5,14 @@
 // Log pass this one follows in style/convention): declared-action/interrupt
 // sentence wording and attribution, NPC-group text, the house-rule badge, and
 // the VR-mode dead-code removal. Not in scope here (per the brief): initiative
-// math, damage application mechanics, the undo model itself, and every log
-// line not named in the brief's "Affected paths" tables.
+// math, damage application mechanics, and every log line not named in the
+// brief's "Affected paths" tables.
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BattleTrackerComponent } from 'app/battle-tracker/battle-tracker.component';
 import { appConfig } from 'app/app.config';
 import { CombatManager, StatusEnum } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
-import { UndoHandler } from 'Common';
 import { GruntMember, NpcRowParticipant } from 'Grunts';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
@@ -38,8 +37,8 @@ const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 const PLAYER_TOKEN = 'pl-8f2a91bc';
 
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -114,7 +113,7 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     mp.dataProcessing = 6;
     mp.setDicesWithoutRoll(1);
     mp.baseIni = 10;
-    CombatManager.participants.insert(mp, false);
+    CombatManager.participants.insert(mp);
     component['participantReactions'].set(mp, 5);
     component['participantIntuitions'].set(mp, 5);
     return mp;
@@ -820,7 +819,7 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   });
 
   describe('S3 - a mis-keyed killing blow, corrected by heal rather than undo', () => {
-    it('reverts cleanly on Undo with no log line, and reads with the new wording throughout', () => {
+    it('reverts cleanly by healing the same boxes back off, and reads with the new wording throughout', () => {
       const row = gmRow('Gangers');
       const g2 = component.addNpcToRow(row, 'G 2'); // Body 3 -> 10-box track
       sent.length = 0;
@@ -844,14 +843,13 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       expect(wound!.hiddenFromPlayers).toBeTrue();
       expect(wound!.houseRule).toBeTrue();
 
-      const entryCountBeforeUndo = component.sharedLogEntries.length;
-      UndoHandler.Undo();
+      // Correction path: heal the same boxes back off (RULINGS.md 2026-08-07)
+      // rather than reaching for an undo control - there is none.
+      component.healRowMember(row, g2, 10);
 
       // The damage, shared score and out-of-action state all revert...
       expect(g2.outOfAction).toBeFalse();
-      // ...and undo emits no log line of its own (existing behaviour, unchanged
-      // by this spec): the entries above are still exactly what is there.
-      expect(component.sharedLogEntries.length).toBe(entryCountBeforeUndo);
+      expect(g2.damage).toBe(0);
     });
 
     it('the heal correction path reads "healed", "back in action" and "group recovery"', () => {

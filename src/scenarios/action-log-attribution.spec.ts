@@ -33,8 +33,8 @@ const PLAYER_TOKEN = 'pl-8f2a91bc';
 const OTHER_PLAYER_TOKEN = 'pl-k3f9a2b1';
 
 function resetCombat() {
-  CombatManager.participants.clear(false);
-  CombatManager.currentActors.clear(false);
+  CombatManager.participants.clear();
+  CombatManager.currentActors.clear();
   CombatManager.nextSortOrder = 0;
   CombatManager.initiativePass = 1;
   CombatManager.combatTurn = 1;
@@ -643,22 +643,6 @@ describe('Action Log attribution, wording and coverage', () => {
       expect(sent.length).toBe(0);
     });
 
-    // S3: undo restores the state but emits no log line. `btnUndo_Click` now
-    // also re-broadcasts the resulting state (a claim release undone locally but
-    // not on the wire left the GM and the players disagreeing - see
-    // `src/scenarios/persistent-rooms.spec.ts`), but a broadcast is not a log
-    // entry: no line is written. Stated here so a future change is deliberate.
-    it('S3 - undoing a mis-clicked Leave Combat emits no log line', () => {
-      const p = addCombatant('Ganger Alpha');
-      sent.length = 0;
-      component.btnLeaveCombat_Click(p);
-      expect(sent.length).toBe(1);
-
-      component.btnUndo_Click();
-
-      expect(p.ooc).toBe(false);
-      expect(sent.length).toBe(1);
-    });
   });
 
   // ── AC10, AC11 - batch roll markers ────────────────────────────────────
