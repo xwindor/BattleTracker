@@ -312,9 +312,16 @@ Player opens player mode and:
 
 1. Enters room code (or uses prefilled query param).
 2. Joins room.
-3. If they do not own a character:
-  - claim an unclaimed claimable character, or
-  - create a new character.
+3. If they do not own a character, they see a "Get A Character" chooser with
+   two buttons and nothing else — Claim a Character / Create a New Character
+   (briefs/player-join-claim-or-create-spec.md). Tapping one reveals only that
+   branch (the claim dropdown, or the eight-field create form), each with a
+   Back control. The Claim button is disabled with an explanatory line when
+   there is nothing claimable yet, and re-enables itself on the next broadcast
+   with no player action. The chooser reappears — reset to the two-button
+   state — whenever the player stops owning a character (a GM release, or the
+   character leaving the encounter), but not on every unrelated state
+   broadcast while a branch is open.
 
 Player identity is a generated token for the browser tab session:
 

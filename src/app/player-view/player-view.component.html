@@ -29,72 +29,111 @@
   @if (connected && state) {
   @if (ownParticipants.length === 0) {
   <div class="card mb-3">
-    <div class="card-header">Claim Or Create Character</div>
+    <div class="card-header">Get A Character</div>
     <div class="card-body">
-      @if (unclaimedParticipants.length > 0) {
-      <div class="mb-2 cli-claim-panel">
-        <label class="form-label">Claim existing unclaimed character</label>
-        <div class="d-flex gap-2 cli-claim-row">
-          <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
-            <option value="">Select character</option>
-            @for (participant of unclaimedParticipants; track participant.id) {
-            <!-- `<option>` cannot hold a child badge element, so a downed
-                 character's claim entry says so in the option text itself -
-                 the closest match to the badge convention this element
-                 allows (brief requirement 6: nobody should claim one
-                 thinking it is up). -->
-            <option [value]="participant.id">#{{ participant.order }} {{ participant.name }}{{ participant.ooc ? ' (Out of Action)' : '' }}</option>
-            }
-          </select>
-          <button type="button" class="btn btn-outline-primary" (click)="claimSelectedCharacter()">
-            Claim
-          </button>
-        </div>
-      </div>
-      }
-      <div class="cli-create-grid mb-2">
-        <div class="row g-0 mb-0 cli-create-row">
-          <div class="col-12 col-sm-6 col-md-3 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-character">Character</label>
-            <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
-          </div>
-          <div class="col-6 col-sm-3 col-md-1 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
-            <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
-          </div>
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-edge">Edge</label>
-            <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
-          </div>
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
-            <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
-          </div>
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
-            <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
-          </div>
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-overflow">Overflow</label>
-            <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
-          </div>
-        </div>
-        <div class="row g-0 mb-0 cli-create-row">
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-physical">Physical</label>
-            <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
-          </div>
-          <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-            <label class="form-label cli-field-label cli-label-stun">Stun</label>
-            <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
-          </div>
-        </div>
-      </div>
-      <div>
-        <button type="button" class="btn btn-primary" (click)="createCharacter()">
-          Create New Character
+      @if (joinChoice === 'none') {
+      <div class="d-flex gap-2 flex-wrap" data-testid="player-join-choice">
+        <button type="button" class="btn btn-primary" data-testid="player-choose-claim"
+          [disabled]="!canClaimAnything" (click)="chooseClaim()">
+          Claim a Character
+        </button>
+        <button type="button" class="btn btn-outline-primary" data-testid="player-choose-create"
+          (click)="chooseCreate()">
+          Create a New Character
         </button>
       </div>
+      @if (!canClaimAnything) {
+      <div class="text-muted small mt-2" data-testid="player-claim-unavailable-choice">
+        {{ claimUnavailableMessage }}
+      </div>
+      }
+      }
+      @if (joinChoice === 'claim') {
+      <div data-testid="player-claim-panel">
+        <div class="mb-2 cli-claim-panel">
+          <label class="form-label">Claim existing unclaimed character</label>
+          <div class="d-flex gap-2 cli-claim-row">
+            <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
+              <option value="">Select character</option>
+              @for (participant of unclaimedParticipants; track participant.id) {
+              <!-- `<option>` cannot hold a child badge element, so a downed
+                   character's claim entry says so in the option text itself -
+                   the closest match to the badge convention this element
+                   allows (brief requirement 6: nobody should claim one
+                   thinking it is up). -->
+              <option [value]="participant.id">#{{ participant.order }} {{ participant.name }}{{ participant.ooc ? ' (Out of Action)' : '' }}</option>
+              }
+            </select>
+            <button type="button" class="btn btn-outline-primary" [disabled]="!canClaimAnything" (click)="claimSelectedCharacter()">
+              Claim
+            </button>
+          </div>
+        </div>
+        @if (!canClaimAnything) {
+        <div class="text-muted small mb-2" data-testid="player-claim-unavailable-panel">
+          {{ claimUnavailableMessage }}
+        </div>
+        }
+        <button type="button" class="btn btn-link p-0" data-testid="player-join-choice-back" (click)="backToJoinChoice()">
+          Back
+        </button>
+      </div>
+      }
+      @if (joinChoice === 'create') {
+      <div data-testid="player-create-panel">
+        <div class="cli-create-grid mb-2">
+          <div class="row g-0 mb-0 cli-create-row">
+            <div class="col-12 col-sm-6 col-md-3 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-character">Character</label>
+              <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
+            </div>
+            <div class="col-6 col-sm-3 col-md-1 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
+              <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
+            </div>
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-overflow">Overflow</label>
+              <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
+            </div>
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
+              <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
+            </div>
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
+              <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
+            </div>
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-edge">Edge</label>
+              <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
+            </div>
+          </div>
+          <div class="row g-0 mb-0 cli-create-row">
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-physical">Physical CM</label>
+              <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
+            </div>
+            <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
+              <label class="form-label cli-field-label cli-label-stun">Stun CM</label>
+              <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
+            </div>
+          </div>
+        </div>
+        <div>
+          <button type="button" class="btn btn-primary" (click)="createCharacter()">
+            Create New Character
+          </button>
+        </div>
+        <button type="button" class="btn btn-link p-0 mt-2" data-testid="player-join-choice-back" (click)="backToJoinChoice()">
+          Back
+        </button>
+      </div>
+      }
+      @if (!gmConnected) {
+      <div class="text-warning small mt-2" data-testid="player-gm-absent-notice">
+        The GM is not connected right now, so a claim or create request will not take effect until they are back.
+      </div>
+      }
     </div>
   </div>
   }

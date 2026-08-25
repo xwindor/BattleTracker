@@ -57,6 +57,43 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   notifyMuted = false;
   info = "";
   selectedClaimParticipantId = "";
+  /**
+   * Which branch of the "Get A Character" chooser is open. Public so tests can
+   * set it directly (briefs/player-join-claim-or-create-spec.md, "Component
+   * state"). Reset is edge-triggered, never level-triggered - see
+   * `applyIncomingState` - so a broadcast mid-form does not close it under the
+   * player's fingers.
+   */
+  joinChoice: "none" | "claim" | "create" = "none";
+  /** Edge-detector for the `joinChoice` reset rule in `applyIncomingState`. */
+  private hadOwnCharacter = false;
+  /**
+   * Fix round Item A: a claim/create is fire-and-forget with no ack
+   * (`server.js` broadcasts `session:command` with no reply), so the only
+   * thing that used to clear the "...request sent" line was a *refused*
+   * claim (`claim_denied`). On success nothing ever cleared it, so it sat on
+   * screen forever even after the character showed up. This flag tracks
+   * "there is a pending-request message on screen" distinctly from `info`
+   * itself, which several unrelated messages also use (Reconnected, the
+   * released-character notice, "Select a character to claim.") - so the
+   * success path can clear *this* message specifically, at the
+   * no-character -> has-a-character edge, without risking a different `info`
+   * message that happens to be showing at the same moment. Set in
+   * `createCharacter()`/`claimSelectedCharacter()`'s success branch; cleared
+   * on that ownership edge in `applyIncomingState` and on `claim_denied`.
+   */
+  private pendingRequestMessage = false;
+  /**
+   * Fix round Item B: distinguishes "the claim pool has never had anything
+   * in it" from "the player had a character selected and it was claimed (or
+   * un-claimabled) by someone else while they were still deciding" - the
+   * generic "no characters are available" line reads as if there never was
+   * one, which is misleading in the second case. Set in `applyIncomingState`
+   * when a stale selection is cleared and the pool is now genuinely empty;
+   * self-heals the moment anything becomes claimable again (see
+   * `claimUnavailableMessage`).
+   */
+  selectionClaimedAway = false;
   actModalParticipant: SharedParticipantState | null = null;
   actModalRef: NgbModalRef | null = null;
   expandedDeclaredActionCategory: DeclaredActionCategoryId | null = "free";
@@ -168,6 +205,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.session.connect();
       const { state, log, gmConnected } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
       this.connected = true;
+      this.joinChoice = "none";
       this.gmConnected = gmConnected;
       this.applyIncomingState(state);
       this.log = log || [];
@@ -202,6 +240,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
           const reason = String(command.payload?.["reason"] || "the GM refused it");
           const name = String(command.payload?.["characterName"] || "That character");
           this.info = "";
+          this.pendingRequestMessage = false;
           this.error = `Could not claim ${name}: ${reason}. Ask the GM to clear the claim, then try again.`;
         } else if (command.type === "dice_roll") {
           if (command.player === this.playerToken) return; // skip echo of our own roll
@@ -241,7 +280,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         this.clearLogDecodeAnimations();
       });
       if (this.ownParticipants.length === 0) {
-        this.info = "Claim a character from the list or create a new one.";
+        this.info = "Choose whether to claim a character the GM has set up, or create a new one.";
       }
     } catch (err) {
       this.error = err instanceof Error ? err.message : "Unable to join room.";
@@ -285,7 +324,15 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         isMatrix: false
       }
     });
-    this.info = "Create character request sent.";
+    // A create/claim request is broadcast with no ack and only the GM tab
+    // applies it (spec Open Decision 5); with no GM socket in the room it
+    // silently goes nowhere, so the message must not read as confirmed.
+    this.info = this.gmConnected
+      ? "Create character request sent."
+      : "Create character request sent - it will not take effect until the GM is back.";
+    // Item A: mark this as the pending-request message so the success edge
+    // in `applyIncomingState` knows it is safe to clear.
+    this.pendingRequestMessage = true;
   }
 
   openDeckPanel() {
@@ -541,7 +588,12 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
         participantId: this.selectedClaimParticipantId
       }
     });
-    this.info = "Claim request sent.";
+    // Same no-ack, GM-absent caveat as `createCharacter()` above.
+    this.info = this.gmConnected
+      ? "Claim request sent."
+      : "Claim request sent - it will not take effect until the GM is back.";
+    // Item A: same pending-request marker as `createCharacter()`.
+    this.pendingRequestMessage = true;
   }
 
   submitManualRoll() {
@@ -736,6 +788,44 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
 
   get primaryCharacter(): SharedParticipantState | null {
     return this.ownParticipants.length > 0 ? this.ownParticipants[0] : null;
+  }
+
+  /** Whether there is anything the "Claim a Character" button can offer. */
+  get canClaimAnything(): boolean {
+    return this.unclaimedParticipants.length > 0;
+  }
+
+  /**
+   * Item B (fix round): the line shown wherever the claim pool is empty -
+   * under the disabled chooser button and inside the claim panel itself.
+   * Distinguishes "nothing has ever been claimable" from "the one you had
+   * picked was just claimed by someone else" so a player is not told there
+   * was never anything there when in fact their pick was taken out from
+   * under them.
+   */
+  get claimUnavailableMessage(): string {
+    return this.selectionClaimedAway
+      ? "The character you selected was just claimed by someone else - ask the GM if another one opens up."
+      : "No characters are available to claim yet - ask the GM to make one claimable.";
+  }
+
+  chooseClaim(): void {
+    this.joinChoice = "claim";
+    this.error = "";
+    this.info = "";
+  }
+
+  chooseCreate(): void {
+    this.joinChoice = "create";
+    this.error = "";
+    this.info = "";
+  }
+
+  backToJoinChoice(): void {
+    this.joinChoice = "none";
+    this.selectedClaimParticipantId = "";
+    this.info = "";
+    this.error = "";
   }
 
   canControl(actor: SharedParticipantState): boolean {
@@ -993,8 +1083,8 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
    * Characters this player owned in the *previous* state that are still in the
    * encounter but no longer owned by anybody.
    *
-   * The GM can clear a claim (`btnReleaseClaim_Click`, and its undo/redo), and
-   * the server clears one when a player's socket drops. Until now the only
+   * The GM can clear a claim (`btnReleaseClaim_Click`), and the server clears
+   * one when a player's socket drops. Until now the only
    * symptom on the player's screen was their whole character panel vanishing
    * with no explanation - the same silence `claim_denied` fixed for a refused
    * claim. A participant that has *left* the encounter is deliberately not
@@ -1040,7 +1130,52 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
       this.error = "";
       const names = releasedNames.join(", ");
       this.info = `The GM released ${names} - ${releasedNames.length === 1 ? "it is" : "they are"} `
-        + "free again. Claim from the list to take control back.";
+        + "free again. Tap Claim a Character to take control back.";
+    }
+    // Edge-triggered, never level-triggered (spec "Reset rules"): only reset
+    // the chooser on the owned -> unowned transition, or a mid-form player
+    // would lose their branch on every unrelated broadcast (the GM sorting
+    // the order, damage changing, etc. - `applyIncomingState` runs on every
+    // one of those).
+    const ownsNow = this.ownParticipants.length > 0;
+    if (this.hadOwnCharacter && !ownsNow) {
+      this.joinChoice = "none";
+      this.selectedClaimParticipantId = "";
+    }
+    // Item A (fix round): the opposite edge from the one above - no character
+    // -> now holding one. This is exactly when a claim/create the player sent
+    // has landed, so the "...request sent" line is stale and must go. Gated
+    // on `pendingRequestMessage`, not cleared unconditionally, so an
+    // unrelated `info` message showing at the same moment (there is none
+    // that can share this edge today, but the flag is what makes that safe
+    // rather than coincidental) is never at risk.
+    if (!this.hadOwnCharacter && ownsNow && this.pendingRequestMessage) {
+      this.info = "";
+      this.pendingRequestMessage = false;
+    }
+    this.hadOwnCharacter = ownsNow;
+    // A selected-but-not-yet-submitted claim can go stale mid-branch - another
+    // player claims it first, or the GM un-marks it claimable - between two
+    // broadcasts. Left alone, the dropdown collapses to "Select character" but
+    // the id stays selected, so a stale tap on Claim would still fire a real
+    // `claim_character` the GM can only answer with `claim_denied` (defect D2,
+    // briefs/player-join-claim-or-create-spec.md fix round). Clearing it here
+    // does not bounce the player off the claim branch - `canClaimAnything`
+    // gating the Claim button covers the rest.
+    if (this.selectedClaimParticipantId
+      && !this.unclaimedParticipants.some(p => p.id === this.selectedClaimParticipantId)) {
+      // Item B (fix round): only worth recording as "taken from under you"
+      // when the pool is now genuinely empty - if other unclaimed characters
+      // remain, the dropdown just falls back to "Select character" and the
+      // unavailable line never renders at all, so there is nothing to
+      // distinguish.
+      this.selectionClaimedAway = this.unclaimedParticipants.length === 0;
+      this.selectedClaimParticipantId = "";
+    }
+    // Self-heals the moment anything is claimable again, the same way the
+    // Claim button itself re-enables with no player interaction (AC 9).
+    if (this.unclaimedParticipants.length > 0) {
+      this.selectionClaimedAway = false;
     }
     this.lastKnownCombatStarted = started;
     // Restore deck fields from server state (survives reconnect/claim).

@@ -3451,6 +3451,10 @@ describe('Durable rooms - player client (AC 6, S4; Open Decision 7)', () => {
     it('badges a downed character on its own claim-list entry, so nobody claims one thinking it is up', () => {
       component.connected = true;
       component['applyIncomingState'](stateWith({ claimable: true, ownerName: undefined }));
+      // The dropdown is behind the claim branch of the "Get A Character"
+      // chooser now (briefs/player-join-claim-or-create-spec.md) - open it
+      // before looking for the `<option>` elements.
+      component.chooseClaim();
       fixture.detectChanges();
 
       const options: HTMLOptionElement[] = Array.from(fixture.nativeElement.querySelectorAll('option'));

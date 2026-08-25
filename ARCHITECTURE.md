@@ -2018,7 +2018,7 @@ compiled or run, confirmed by testing several explicit `--include` glob
 variants against such a location, all of which matched zero tests. Anything
 meant to run under `npm test` must live under `src/`.
 
-**19 spec files** exist in the tree, in three groups.
+**20 spec files** exist in the tree, in three groups.
 
 *Domain / engine:*
 
@@ -2056,6 +2056,8 @@ brief reads as a standalone regression suite:
   undo/redo system")
 - `src/scenarios/grunt-heal-dv-input.spec.ts` (brief "Grunt heal uses DV
   input")
+- `src/scenarios/player-join-claim-or-create.spec.ts` (S1-S6, brief "the
+  player view opens on a claim-or-create chooser")
 
 Tie-breaking (`initiativeTieBreakComparator`) and `DeclaredActionEngine` have
 no dedicated spec files as of this writing; the session-sync
