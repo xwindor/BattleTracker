@@ -203,7 +203,13 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.info = "";
     try {
       this.session.connect();
-      const { state, log, gmConnected } = await this.session.joinAsPlayer(this.room.trim().toUpperCase(), this.playerToken);
+      const normalizedRoom = this.room.trim().toUpperCase();
+      const { state, log, gmConnected } = await this.session.joinAsPlayer(normalizedRoom, this.playerToken);
+      // Decision 6 (briefs/player-room-box-collapse-spec.md): show the
+      // player the room code they actually joined, not whatever case/
+      // whitespace they typed. Assigned only after the await resolves, so a
+      // failed join leaves their typing intact to correct.
+      this.room = normalizedRoom;
       this.connected = true;
       this.joinChoice = "none";
       this.gmConnected = gmConnected;

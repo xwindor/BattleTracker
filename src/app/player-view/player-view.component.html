@@ -1,29 +1,40 @@
 <div class="player-view container py-3">
-  <div class="card mb-3">
+  @if (!connected) {
+  <div class="card mb-3" data-testid="player-room-join-card">
     <div class="card-body">
       <div class="row g-2">
         <div class="col-12 col-sm-6 col-md-3">
           <label class="form-label">Room</label>
-          <input type="text" class="form-control" [(ngModel)]="room" [disabled]="connected" placeholder="Room code">
+          <input type="text" class="form-control" [(ngModel)]="room" placeholder="Room code">
         </div>
         <div class="col-12 col-sm-6 col-md-3 d-flex align-items-end">
-          <button type="button" class="btn btn-primary w-100" (click)="join()" [disabled]="connected || !room">
+          <button type="button" class="btn btn-primary w-100" (click)="join()" [disabled]="!room">
             Join Session
           </button>
         </div>
       </div>
-      @if (error) {
-      <div class="text-danger mt-2">{{ error }}</div>
-      }
-      @if (info) {
-      <div class="text-info mt-2">{{ info }}</div>
-      }
-      @if (connected && !gmConnected) {
-      <div class="text-warning mt-2" data-testid="gm-not-connected">
-        GM not connected. This is the room's last saved state; it will update when the GM rejoins.
-      </div>
-      }
     </div>
+  </div>
+  }
+
+  @if (connected && room) {
+  <div class="small text-muted mb-2" data-testid="player-room-bar">
+    Room <span data-testid="player-room-code">{{ room }}</span>
+  </div>
+  }
+
+  <div data-testid="player-message-strip" aria-live="polite">
+    @if (error) {
+    <div class="text-danger mt-2 mb-2">{{ error }}</div>
+    }
+    @if (info) {
+    <div class="text-info mt-2 mb-2">{{ info }}</div>
+    }
+    @if (connected && !gmConnected) {
+    <div class="text-warning mt-2 mb-2" data-testid="gm-not-connected">
+      GM not connected. This is the room's last saved state; it will update when the GM rejoins.
+    </div>
+    }
   </div>
 
   @if (connected && state) {

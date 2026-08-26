@@ -2018,7 +2018,7 @@ compiled or run, confirmed by testing several explicit `--include` glob
 variants against such a location, all of which matched zero tests. Anything
 meant to run under `npm test` must live under `src/`.
 
-**20 spec files** exist in the tree, in three groups.
+**21 spec files** exist in the tree, in three groups.
 
 *Domain / engine:*
 
@@ -2058,6 +2058,8 @@ brief reads as a standalone regression suite:
   input")
 - `src/scenarios/player-join-claim-or-create.spec.ts` (S1-S6, brief "the
   player view opens on a claim-or-create chooser")
+- `src/scenarios/player-room-box-collapse.spec.ts` (S1-S6, brief "collapse
+  the player view's Room card after a successful join")
 
 Tie-breaking (`initiativeTieBreakComparator`) and `DeclaredActionEngine` have
 no dedicated spec files as of this writing; the session-sync

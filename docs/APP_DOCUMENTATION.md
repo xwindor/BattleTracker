@@ -310,8 +310,19 @@ File: `src/app/player-view/player-view.component.ts` + `.html` + `.css`
 
 Player opens player mode and:
 
-1. Enters room code (or uses prefilled query param).
-2. Joins room.
+1. Enters room code (or uses prefilled query param), in a room-join card that
+   is only on screen before a successful join (`@if (!connected)`,
+   `data-testid="player-room-join-card"`). Once joined, the card is replaced by
+   a compact `data-testid="player-room-bar"` line showing the normalized room
+   code (briefs/player-room-box-collapse-spec.md) — the same shape as the GM
+   view's own `Room {{ shareRoomCode }}` line. `error`/`info`/`gm-not-connected`
+   render in an always-present `data-testid="player-message-strip"`, outside
+   both gates, so nothing that used to be said to a player stops being said
+   once the card is gone.
+2. Joins room. `join()` normalizes the typed code (trim + uppercase) before
+   sending it, and — after the join resolves — writes that normalized code
+   back into `room`, so the collapsed line and a spoken-aloud room code always
+   match what the server actually has, even if the player typed lower case.
 3. If they do not own a character, they see a "Get A Character" chooser with
    two buttons and nothing else — Claim a Character / Create a New Character
    (briefs/player-join-claim-or-create-spec.md). Tapping one reveals only that
