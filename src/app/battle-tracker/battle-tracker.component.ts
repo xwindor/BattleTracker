@@ -3085,13 +3085,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         mp.baseIni = reaction + intuition;
         if (jackOut) {
           // Jack-out dice loss is always handled GM-side: roll the lost dice,
-          // subtract the total (brief F5 / criterion 8, p. 160).
-          this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
-        } else {
-          // Initial deck creation is character setup, not a mid-turn dice
-          // change - the player sends a full roll_submission afterwards.
-          mp.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
+          // subtract the total (brief F5 / criterion 8, p. 160). Restores the
+          // decker's own physical dice, not a hard-coded 1D6.
+          this.restorePhysicalDiceCount(mp);
         }
+        // Initial deck creation deliberately leaves the dice count alone.
+        // Creating a deck does not change how fast the character's body is:
+        // they are in AR, using their normal Initiative Dice (p. 229), which
+        // is whatever the row already holds. Writing 1D6 here truncated an
+        // augmented character the moment the GM handed them a cyberdeck.
       }
       // No `else`: a bare stat-edit payload (no create/jackIn/jackOut) writes
       // the stats above and nothing else. It is not reachable from the player
@@ -6176,7 +6178,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   getParticipantBaseInitiative(p: IParticipant): number {
     const intuition = this.getParticipantIntuition(p);
-    if (this.isMatrix(p) && p.jackedIn && p.vrMode !== VRMode.AR && p.vrMode !== VRMode.None) {
+    if (this.isMatrix(p) && p.jackedIn && MatrixParticipant.isVRMode(p.vrMode)) {
+      // Only the VR modes use the Matrix Initiative attribute (Data
+      // Processing + Intuition, pp. 229-230). **AR does not**: "When in AR,
+      // you use your normal Initiative and Initiative Dice" (p. 229), and the
+      // Initiative Attribute Chart lists Matrix AR as Reaction + Intuition
+      // (p. 159). An AR decker therefore falls through to the ordinary
+      // Reaction + Intuition return at the bottom, so their row behaves
+      // exactly like any other participant.
       if (p.dataProcessing <= DATA_PROCESSING_UNSET) {
         return DATA_PROCESSING_UNSET;
       }
@@ -7745,7 +7754,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Mid-combat jack out — base stat delta automatic via baseIni; the dice
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
     // 8, p. 160). Outside a running combat the funnel just writes the count.
-    this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
+    // Restores the decker's *own* physical dice, not a hard-coded 1D6.
+    this.restorePhysicalDiceCount(mp);
     this.appendParticipantEventLog(p.name || "", PLAYER_COMMAND_LOG_TEXT.jackedOut);
     this.syncSharedState();
     this.sort();
@@ -8130,15 +8140,43 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       mp.baseIni = reaction + intuition;
       mp.jackedIn = false;
       mp.blocksPhysicalActions = false;
-      return this.changeParticipantDiceCount(
-        mp, MatrixParticipant.initiativeDiceForMode(VRMode.AR), options
-      );
+      return this.restorePhysicalDiceCount(mp, options);
+    }
+    // Entering VR overwrites the dice count with an absolute 3D6/4D6, so
+    // remember what it was first or an augmented decker loses those dice
+    // permanently on the way back (RULINGS.md 2026-08-29). Guarded on null so
+    // a Cold -> Hot switch does not overwrite the *original* physical count
+    // with the cold-sim 3.
+    if (mp.preVrDiceCount === null) {
+      mp.preVrDiceCount = mp.dices;
     }
     let result: DiceCountChangeResult = NO_DICE_COUNT_CHANGE;
     mp.applyJackInMode(mode, intuition, target => {
       result = this.changeParticipantDiceCount(mp, target, options);
     });
     return result;
+  }
+
+  /**
+   * Put back the Initiative Dice count a decker had before they jacked in, and
+   * forget it.
+   *
+   * Falls back to `PHYSICAL_INITIATIVE_DICE` only when nothing was recorded -
+   * a participant who was never in VR, or one restored from an older session
+   * snapshot. Falling back to 1 unconditionally is the bug this replaces: it
+   * truncated any augmented decker to 1D6 the first time they jacked out.
+   *
+   * Routed through `changeParticipantDiceCount` like every other dice change,
+   * so a mid-combat restore rolls the regained dice and moves the running
+   * Score (p. 160), while a restore outside combat just writes the count.
+   */
+  private restorePhysicalDiceCount(
+    mp: MatrixParticipant,
+    options: DiceCountChangeOptions = {}
+  ): DiceCountChangeResult {
+    const restored = mp.preVrDiceCount ?? PHYSICAL_INITIATIVE_DICE;
+    mp.preVrDiceCount = null;
+    return this.changeParticipantDiceCount(mp, restored, options);
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {

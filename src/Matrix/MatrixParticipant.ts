@@ -2,11 +2,23 @@ import { Participant, PARTICIPANT_BASE_BACKING_FIELDS } from "Combat/Participant
 import { IParticipant } from "Combat/Participants/IParticipant";
 import { VRMode } from "./VRMode";
 
-// Initiative Dice per Matrix interface mode (brief "Precise Definitions",
-// printed p. 159).
+// Initiative Dice for the two VR interface modes: 3D6 cold-sim (printed
+// p. 229), 4D6 hot-sim (printed p. 230).
+//
+// These are **absolute**, not additive: meat-side Initiative Dice
+// augmentations do not stack onto the VR base (RULINGS.md, 2026-08-29 "VR
+// Initiative Dice are absolute"). Deliberately unlike astral projection, which
+// uses a *relative* delta (`ASTRAL_PROJECTION_DICE_DELTA`) so augmented dice
+// survive. Do not refactor the two into one shared path.
+//
+// There is deliberately no AR constant. In AR the character uses their
+// **normal physical** Initiative Dice, whatever those happen to be
+// (pp. 159, 229, 231) - a decker with Wired Reflexes 2 rolls 3D6 in AR. The
+// count is therefore a property of the character, not of the mode, and the
+// old `AR_INITIATIVE_DICE = 1` silently truncated augmented deckers to 1D6 on
+// every jack-out. `preVrDiceCount` below is what restores it instead.
 const HOT_SIM_INITIATIVE_DICE = 4;
 const COLD_SIM_INITIATIVE_DICE = 3;
-const AR_INITIATIVE_DICE = 1;
 
 /**
  * Sentinel stored value for "Data Processing has not been entered yet".
@@ -85,6 +97,25 @@ export class MatrixParticipant extends Participant {
   set marksPlaced(val: Map<string, number>) { this._marksPlaced = val; }
 
   /**
+   * The Initiative Dice count this participant had immediately before entering
+   * a VR mode, or null when not in VR.
+   *
+   * Needed because the VR dice count is **absolute** (3D6/4D6, RULINGS.md
+   * 2026-08-29) while the count it replaces is whatever the character actually
+   * has. The app has no augmentation model - the GM types the character's
+   * *total* Initiative Dice into `dices` directly - so an augmented decker's
+   * row may legitimately read 3D6 before ever jacking in, and returning to AR
+   * must put that number back rather than assume the 1D6 unaugmented base.
+   *
+   * Analogous in purpose to `AstralParticipant.projectionDiceGain`, but stores
+   * an **absolute count to restore** rather than a realized delta to subtract,
+   * because VR overwrites the count instead of adjusting it.
+   */
+  private _preVrDiceCount: number | null;
+  get preVrDiceCount(): number | null { return this._preVrDiceCount; }
+  set preVrDiceCount(val: number | null) { this._preVrDiceCount = val; }
+
+  /**
    * Computed Overwatch alert level used by components for CSS styling.
    *  - 'none'        : OS  < 20
    *  - 'ic-alert'    : OS >= 20
@@ -108,19 +139,31 @@ export class MatrixParticipant extends Participant {
     this._jackedIn = false;
     this._blocksPhysicalActions = false;
     this._marksPlaced = new Map<string, number>();
+    this._preVrDiceCount = null;
   }
 
   /**
-   * Initiative Dice for a Matrix interface mode (brief "Precise Definitions",
-   * printed p. 159): 1D6 Matrix AR, 3D6 cold-sim, 4D6 hot-sim.
+   * Initiative Dice for a **VR** interface mode: 3D6 cold-sim (p. 229), 4D6
+   * hot-sim (p. 230).
+   *
+   * Returns `null` for AR and None, which is not a failure case: in AR the
+   * character keeps their own physical Initiative Dice (pp. 159, 229, 231), so
+   * there is no mode-derived answer to give. The null return is deliberate -
+   * it makes a caller handle the AR case explicitly rather than silently
+   * receive `1` and clobber an augmented decker's dice, which is what the
+   * previous signature did.
    */
-  static initiativeDiceForMode(mode: VRMode): number {
+  static initiativeDiceForMode(mode: VRMode): number | null {
     switch (mode) {
       case VRMode.HotSim:  return HOT_SIM_INITIATIVE_DICE;
       case VRMode.ColdSim: return COLD_SIM_INITIATIVE_DICE;
-      case VRMode.AR:
-      default:             return AR_INITIATIVE_DICE;
+      default:             return null;
     }
+  }
+
+  /** True when this participant is in a VR mode (cold-sim or hot-sim). */
+  static isVRMode(mode: VRMode): boolean {
+    return mode === VRMode.ColdSim || mode === VRMode.HotSim;
   }
 
   /**
@@ -145,15 +188,25 @@ export class MatrixParticipant extends Participant {
    * `getParticipantBaseInitiative()` produces for the same case.
    */
   applyJackInMode(mode: VRMode, intuition: number, applyDiceCount: (targetDiceCount: number) => void): void {
+    const vrDice = MatrixParticipant.initiativeDiceForMode(mode);
+    if (vrDice === null) {
+      // AR (or None) is not a jack-in: its Initiative attribute is REA + INT
+      // and its dice are the character's own, neither of which this method can
+      // compute - it has no Reaction and no memory of the prior dice count.
+      // The caller (`applyVRMode`) handles AR before reaching here; bailing
+      // rather than falling through stops a future caller from silently
+      // getting DP + INT and 1D6 for an AR decker.
+      return;
+    }
     this.vrMode = mode;
     this.baseIni = this.dataProcessing > DATA_PROCESSING_UNSET
       ? this.dataProcessing + intuition
       : DATA_PROCESSING_UNSET;
     this.jackedIn = true;
-    this.blocksPhysicalActions = (mode !== VRMode.AR);
+    this.blocksPhysicalActions = true;
     // Applied last so a caller that logs the resulting Score sees both halves
     // of the change (attribute delta + rolled dice delta) already folded in.
-    applyDiceCount(MatrixParticipant.initiativeDiceForMode(mode));
+    applyDiceCount(vrDice);
   }
 
   /**
@@ -194,6 +247,7 @@ export class MatrixParticipant extends Participant {
     clone._jackedIn = this._jackedIn;
     clone._blocksPhysicalActions = this._blocksPhysicalActions;
     clone._marksPlaced = new Map(this._marksPlaced);
+    clone._preVrDiceCount = this._preVrDiceCount;
 
     return clone;
   }

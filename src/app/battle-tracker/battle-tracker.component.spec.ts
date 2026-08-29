@@ -556,6 +556,163 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
+  // Step 1 rules corrections (docs/MATRIX_MODULE_PLAN.md; verified in
+  // briefs/matrix-rules-verification.md). Two claims the module was previously
+  // built on turned out to be wrong:
+  //   - AR was treated as a Matrix mode using DP + INT at a fixed 1D6. It is
+  //     not: "When in AR, you use your normal Initiative and Initiative Dice"
+  //     (p. 229), and the Initiative Attribute Chart lists Matrix AR as
+  //     Reaction + Intuition (p. 159).
+  //   - VR dice were applied as though 1D6 were always the count to return to,
+  //     which silently truncated any augmented decker.
+  describe('AR uses ordinary physical initiative (pp. 159, 229, 231)', () => {
+    /**
+     * A decker who is NOT jacked in. Reaction 4 + Intuition 5 = 9 physical,
+     * against Data Processing 7 + Intuition 5 = 12 if the Matrix formula were
+     * (wrongly) applied. The two differ so the assertions cannot both pass.
+     */
+    function arDeckerWithDistinctStats(): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.AR;
+      mp.jackedIn = false;
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('computes an AR decker base as REA + INT, not DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      expect(component.getParticipantBaseInitiative(mp)).toBe(9);
+    });
+
+    it('computes a cold-sim decker base as DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.vrMode = VRMode.ColdSim;
+      expect(component.getParticipantBaseInitiative(mp)).toBe(12);
+    });
+
+    it('computes a hot-sim decker base as DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.vrMode = VRMode.HotSim;
+      expect(component.getParticipantBaseInitiative(mp)).toBe(12);
+    });
+
+    // The bug this closes: `getParticipantBaseInitiative` returned DP + INT for
+    // every MatrixParticipant regardless of mode, while `applyVRMode`'s AR
+    // branch wrote REA + INT. They only disagreed once something recomputed the
+    // base - so editing a stat on an AR decker jumped their Initiative.
+    it('keeps an AR decker on physical initiative when Intuition is edited', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.baseIni = component.getParticipantBaseInitiative(mp);
+      expect(mp.baseIni).toBe(9);
+
+      component.onParticipantIntuitionChanged(mp, 6);
+
+      expect(mp.baseIni).toBe(10);  // REA 4 + INT 6, not DP 7 + INT 6 = 13
+    });
+  });
+
+  describe('VR dice are absolute, and AR restores the decker\'s own dice', () => {
+    /**
+     * An *augmented* decker in AR: their row already reads 3D6 (the GM types
+     * the character's total Initiative Dice directly - the app has no
+     * augmentation model). This is the case the old hard-coded 1D6 destroyed.
+     */
+    function augmentedArDecker(): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Wired Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.AR;
+      mp.setDicesWithoutRoll(3);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('sets hot-sim to exactly 4D6 regardless of augmented dice', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.HotSim);
+
+      // Absolute, not 3 + 4: meat augmentations do not stack onto the VR base
+      // (RULINGS.md 2026-08-29).
+      expect(mp.dices).toBe(4);
+    });
+
+    it('restores 3D6 - not 1D6 - when an augmented decker returns to AR', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.HotSim);
+      expect(mp.dices).toBe(4);
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(3);
+      expect(mp.preVrDiceCount).toBeNull();
+    });
+
+    // A Cold -> Hot switch must not overwrite the remembered *physical* count
+    // with the cold-sim 3, or the round trip lands on 3D6 by coincidence for a
+    // 3D6 decker and on the wrong number for everyone else.
+    it('remembers the pre-VR count across a cold-sim to hot-sim switch', () => {
+      const mp = augmentedArDecker();
+      mp.setDicesWithoutRoll(2);
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.ColdSim);
+      expect(mp.dices).toBe(3);
+      component.onVRModeChange(mp, VRMode.HotSim);
+      expect(mp.dices).toBe(4);
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(2);
+    });
+
+    it('falls back to 1D6 when no pre-VR count was ever recorded', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Restored Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.HotSim;
+      mp.setDicesWithoutRoll(4);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(1);
+    });
+
+    it('carries preVrDiceCount through clone()', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+      component.onVRModeChange(mp, VRMode.HotSim);
+
+      const clone = mp.clone() as MatrixParticipant;
+
+      expect(clone.preVrDiceCount).toBe(3);
+    });
+
+    it('gmJackOut restores the decker\'s own dice', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+      expect(mp.dices).toBe(4);
+
+      component.gmJackOut(mp);
+
+      expect(mp.dices).toBe(3);
+      expect(mp.vrMode).toBe(VRMode.None);
+    });
+  });
+
   // Broken site 3: demoteFromAstralParticipant set `dices = 1` directly with no
   // roll and no Score delta - the same defect its Matrix twin
   // (demoteToParticipant) had already had fixed.

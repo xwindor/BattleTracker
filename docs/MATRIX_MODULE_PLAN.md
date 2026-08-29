@@ -45,6 +45,39 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
+## Step 1 — Decker in the initiative tracker ✅ DONE (2026-08-29)
+
+> **What this step actually turned out to be.** The plan assumed Step 1 was a
+> build. It was not — `gmJackIn`, `gmJackOut`, `applyVRMode`,
+> `promoteToMatrixParticipant`, `onDeckStatChanged`, `pendingVrModes` and a
+> Matrix branch in `getParticipantBaseInitiative` were **already on `main`**.
+> (The old "Phase 1 does NOT include a way for the GM to create a
+> MatrixParticipant" note was wrong; `promoteToMatrixParticipant` does exactly
+> that.) Step 1 was therefore a **correctness fix** to existing code, which is
+> where the four wrong rules claims had already done damage:
+>
+> 1. `getParticipantBaseInitiative` returned **DP + INT for every
+>    MatrixParticipant regardless of mode**, so an AR decker used the Matrix
+>    formula. It also disagreed with `applyVRMode`'s own AR branch (REA + INT),
+>    so the two only diverged once something recomputed the base — editing
+>    Reaction or Intuition on an AR decker jumped their Initiative.
+> 2. `AR_INITIATIVE_DICE = 1` in `MatrixParticipant` meant returning to AR
+>    **truncated any augmented decker to 1D6**, permanently.
+> 3. `gmJackOut` and the player `configure_deck` jack-out path both wrote a
+>    hard-coded `PHYSICAL_INITIATIVE_DICE`, same truncation.
+> 4. Initial deck creation wrote `setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE)`
+>    — so simply handing an augmented character a cyberdeck cut their dice.
+>
+> **Fixed:** mode-aware base initiative; `initiativeDiceForMode` now returns
+> `number | null` (null for AR/None) so no caller can silently receive 1D6; new
+> `MatrixParticipant.preVrDiceCount` remembers the pre-VR count, restored via
+> `restorePhysicalDiceCount` through the normal dice funnel; deck creation
+> leaves dice alone. **10 regression tests added; suite 954 → 964, all green.**
+>
+> Deferred to Step 2 as planned: `overwatchAlert` in `MatrixParticipant` still
+> carries the fictional OS-20 `'ic-alert'` tier, matching the same defect in
+> `os-tracking.service.ts`.
+
 ## Step 2 — OS counter inline editor
 
 **Goal:** Clicking the OS chip in the badge opens ± controls inline. Threshold alerts fire at OS 20 (amber banner) and OS 40 (red modal). Reset on jack-out. `[UNVERIFIED: docs/UNVERIFIED-RULES.md #3]`
