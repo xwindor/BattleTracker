@@ -104,10 +104,14 @@
          panel is actually open. With nothing selected it used to waste 25% of
          a wide desktop permanently. -->
     <div class="col-12" [class.col-lg-9]="selectedActor !== null && selectedActor !== undefined">
-      @for (msg of icAlertMessages; track $index) {
-      <div class="ic-alert-strip" role="alert">
-        <span class="ic-alert-text"><strong>&#9888; IC Alert</strong> — {{ msg }}</span>
-        <button type="button" class="ic-alert-dismiss" (click)="dismissIcAlert($index)" aria-label="Dismiss">&#215;</button>
+      <!-- Overwatch reminders. OS rises by the DEFENDER's hits on any Attack
+           or Sleaze action (p. 232), which this app does not roll - so the GM
+           is reminded to apply it. Not an alert threshold: SR5 has no
+           Overwatch threshold below convergence at 40. -->
+      @for (msg of osReminders; track $index) {
+      <div class="os-reminder-strip" role="alert">
+        <span class="os-reminder-text"><strong>&#9888; Overwatch owed</strong> — {{ msg }}</span>
+        <button type="button" class="os-reminder-dismiss" (click)="dismissOsReminder($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
       <!-- Header cells must line up with the participant-row cells beneath them
@@ -1418,7 +1422,7 @@
     }
   </div>
   <div class="modal-footer flex-column align-items-stretch gap-2">
-    @if (actModalSuggestedOsDelta > 0) {
+    @if (actModalOwesOverwatch) {
     <div class="os-reminder w-100">
       &#9888; Illegal action — add OS after resolving defense
     </div>

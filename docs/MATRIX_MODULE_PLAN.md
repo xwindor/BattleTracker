@@ -100,6 +100,34 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
+## Step 2 — Overwatch Score counter (manual) ✅ DONE (2026-08-29)
+
+> **Ruled and applied:** **C1** — banding below 40 is display-only, no
+> mechanical effect. **C6** — reboot/jack-out resets OS to zero and erases that
+> decker's marks, with no cooldown (the reset itself is printed, pp. 240, 242;
+> the ruling settles that no friction is added on top).
+>
+> The OS-20 fiction reached further than the plan assumed — it was in **six**
+> places, several of them live UI: `OsAlertLevel`, `getOSAlert` and the
+> fabricated "Section 9.2 / Table 25" comment in `os-tracking.service.ts`;
+> `MatrixParticipant.overwatchAlert`; the badge's `osTier`; a subscriber branch
+> in `ngOnInit`; an "⚠ IC Alert" strip in the GM template with its CSS; and the
+> wire-field comment in `session-sync.service.ts`. All corrected.
+>
+> Two things were **kept** rather than deleted, because they are rules-correct:
+> the reminder strip (renamed `icAlertMessages` → `osReminders`, relabelled
+> "Overwatch owed") legitimately tells the GM that OS is owed once defense
+> resolves, which is exactly the printed rule (p. 232); and the act-modal
+> reminder. What was wrong there was the framing, not the mechanism.
+>
+> `ILLEGAL_OS_ACTIONS` became a `ReadonlySet<string>`: it was a
+> `Record<string, number>` whose per-action costs (Hack on the Fly 1, Brute
+> Force 2) implied a fixed OS price that does not exist — OS equals the
+> defender's hits, which this app never rolls. Nothing read those values except
+> a `> 0` test.
+>
+> **7 regression tests added; suite 964 → 972, all green.**
+
 ## Step 3 — IC as initiative participants
 
 **Goal:** GM can spawn IC from a host rating. IC enters the tracker as a full participant (rolls initiative, takes turns). No host/target model needed yet — IC is standalone.

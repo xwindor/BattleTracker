@@ -106,7 +106,7 @@ export interface SharedParticipantState {
   isMatrix?: boolean;
   vrMode?: string;          // 'AR' | 'cold-sim' | 'hot-sim'
   overwatch?: number;
-  overwatchAlert?: string;  // 'none' | 'ic-alert' | 'convergence'
+  overwatchAlert?: string;  // 'none' | 'convergence' (SR5's only OS threshold is 40, p. 232)
   jackedIn?: boolean;
   isVRCatatonic?: boolean;  // mirrors blocksPhysicalActions for the player view
   dataProcessing?: number;

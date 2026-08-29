@@ -1149,7 +1149,18 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
   /** The "name before add" dialog template (brief U1/U12). */
   @ViewChild("addDraftModalTpl") private addDraftModalTpl!: TemplateRef<unknown>;
-  icAlertMessages: string[] = [];
+
+  /**
+   * Transient "you owe Overwatch Score" reminders shown to the GM.
+   *
+   * These are rules-correct and stay: for any Attack or Sleaze action, "your OS
+   * increases by the number of hits the target gets on its defense test"
+   * (p. 232), which this app never rolls — so the GM is reminded to apply it
+   * once defense is resolved. Formerly named `icAlertMessages` and labelled
+   * "IC Alert", which wrongly implied an OS-driven alert threshold; SR5 has no
+   * Overwatch threshold below convergence at 40.
+   */
+  osReminders: string[] = [];
   convergenceAlertDecker: string | null = null;
   convergenceAlertOs = 0;
   private convergenceModalRef: NgbModalRef | null = null;
@@ -1232,8 +1243,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.changeDetector.detectChanges();
   }
 
-  dismissIcAlert(index: number): void {
-    this.icAlertMessages.splice(index, 1);
+  dismissOsReminder(index: number): void {
+    this.osReminders.splice(index, 1);
   }
 
   dismissConvergenceAlert(): void {
@@ -1244,20 +1255,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.convergenceAlertDecker = null;
   }
 
-  // -- Act modal OS accumulation prompt --
+  // -- Act modal Overwatch reminder --
 
-  /** Illegal OS-generating actions in the current modal selection, with their deltas. */
-  get actModalIllegalOsActions(): Array<{ name: string; delta: number }> {
+  /**
+   * Attack/Sleaze actions in the current modal selection, which will owe
+   * Overwatch Score once defense is resolved (p. 232).
+   *
+   * Names only, no amounts: OS equals the defender's hits, which this app does
+   * not roll. The former `delta` on each entry came from a per-action cost
+   * table that is not a rule (see `ILLEGAL_OS_ACTIONS`).
+   */
+  get actModalIllegalOsActions(): string[] {
     if (!this.actModalParticipant || !this.isMatrix(this.actModalParticipant)) return [];
     const sel = this.getDeclaredActionSelection(this.actModalParticipant);
     const all = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
-    return all
-      .filter(name => name in ILLEGAL_OS_ACTIONS)
-      .map(name => ({ name, delta: ILLEGAL_OS_ACTIONS[name] }));
+    return all.filter(name => ILLEGAL_OS_ACTIONS.has(name));
   }
 
-  get actModalSuggestedOsDelta(): number {
-    return this.actModalIllegalOsActions.reduce((sum, a) => sum + a.delta, 0);
+  /** True when the current selection owes Overwatch Score after defense. */
+  get actModalOwesOverwatch(): boolean {
+    return this.actModalIllegalOsActions.length > 0;
   }
 
   drop(event: CdkDragDrop<string[]>) {
@@ -1271,11 +1288,11 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   async ngOnInit() {
     this.observedLocalLogCount = this.logHandler.logbook.length;
+    // Convergence (OS 40, p. 232) is the only Overwatch event there is. The
+    // former `ic-alert` branch here fired at OS 20 on a rule that does not
+    // exist in SR5 — see `briefs/matrix-rules-verification.md` item 3b.
     this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
-      if (event.alert === "ic-alert") {
-        this.icAlertMessages.push(`${event.decker.name} — OS: ${event.decker.overwatch}`);
-        this.changeDetector.detectChanges();
-      } else if (event.alert === "convergence") {
+      if (event.alert === "convergence") {
         this.convergenceAlertDecker = event.decker.name;
         this.convergenceAlertOs = event.decker.overwatch;
         this.convergenceModalRef = this.modalService.open(this.convergenceModalTpl, { backdrop: "static", centered: true });
@@ -3276,7 +3293,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
       this.performAct(target, declaredAction, target.name || "Player");
       if (illegalActions.length > 0) {
-        this.icAlertMessages.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
+        this.osReminders.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
       }
       return;
     }
@@ -5235,8 +5252,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.performAct(actor, this.buildDeclaredActionLog(actor));
     }
     if (illegalActions.length > 0) {
-      const names = illegalActions.map(a => a.name).join(", ");
-      this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
+      const names = illegalActions.join(", ");
+      this.osReminders.push(`${actor.name}: ${names} — add OS after resolving defense`);
     }
     this.clearDeclaredActionSelection(actor);
     if (this.actModalRef) {
@@ -7751,6 +7768,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const intuition = this.getParticipantIntuition(mp);
     mp.baseIni = reaction + intuition;
     this.pendingVrModes.set(p, VRMode.AR);
+    // Jacking out reboots the device you are using (p. 240), and a reboot
+    // "resets your OS to zero and all of your marks ... are erased" (p. 242).
+    // No cooldown and no residual OS (RULINGS.md, 2026-08-29).
+    this.osTracking.resetOS(mp);
     // Mid-combat jack out — base stat delta automatic via baseIni; the dice
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
     // 8, p. 160). Outside a running combat the funnel just writes the count.

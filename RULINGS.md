@@ -777,3 +777,58 @@ does not know, and fill it in.
   uses for a mid-turn Reaction edit — no second, Matrix-only convention.
 - **A stored 0 means "unset", never a rated 0.** A live persona's floor is 1:
   Diffusion cannot reduce a Matrix attribute below 1 (p. 252).
+
+## 2026-08-29 — Overwatch Score banding below 40 is display-only
+
+**Ruling:** The tracker may colour a decker's Overwatch Score into bands for
+readability, but **no band below 40 carries any mechanical effect**. Crossing a
+band raises no alert, launches no IC, and changes no state. Convergence at OS
+40 remains the only threshold with consequences.
+
+**Why:** SR5 defines exactly one Overwatch threshold — 40 (p. 232). It has no
+"alert level", no "security tier", and nothing at OS 20; a search of all 32
+occurrences of "Overwatch" in the CRB and its Master Index entry (which cites
+only "SR5 231, 232") turns up no second threshold. Hosts launch IC when they
+*spot* unauthorized activity (p. 247) or when the intruder *fails* a Sleaze
+action (pp. 231, 236) — both event-driven, neither a function of OS. The
+previous implementation invented an `'ic-alert'` tier at OS 20 and attributed
+it to "Section 9.2 / Table 25", a citation format SR5 does not use. Colour
+banding keeps the tension curve visible at the table — a decker should be able
+to feel the clock running — without inventing a rule to do it.
+
+**How to apply:** Bands are a CSS concern only. `OsAlertLevel` collapses to
+`'none' | 'convergence'`; nothing between 0 and 39 is an alert. Any banding
+thresholds chosen for colour are arbitrary presentation values and must be
+commented as such, so no later reader mistakes them for printed rules. The
+Master Index points at Data Trails p. 111 for expanded Overwatch rules; if that
+book is ever added to `rules/`, revisit this before house-ruling further.
+
+## 2026-08-29 — Reboot and jack-out reset Overwatch Score to zero, with no cooldown
+
+**Ruling:** Rebooting the device a persona is running on, or jacking out, resets
+that decker's Overwatch Score to **zero** and erases all their marks. There is
+**no cooldown, no minimum offline duration, and no residual OS** — a decker may
+reboot at OS 39 and return at OS 0.
+
+**Why:** The reset itself is printed, not a gap: "When you reboot the device
+your persona is on, your OS is reset to zero and all of your marks, as well as
+the ones others may have put on your icon, are erased" (p. 242), and "When you
+start using the Matrix after a fresh boot, you're as pure and innocent as the
+driven snow" (p. 232). Jack Out "jacks you out of the Matrix and **reboots the
+device you are using**" (p. 240), so it inherits the same reset. The genuinely
+open question was whether to add friction to the resulting loop — RAW, a
+Complex Action plus roughly two Combat Turns offline buys a clean slate and a
+fresh fifteen-minute timer, which reads as though it defuses the only pressure
+mechanic in the chapter. This table takes the printed rules as they stand: the
+book explicitly endorses the tactic ("Hackers, by contrast, reboot regularly to
+avoid detection by GOD and the demiGODs", p. 236), and losing **every mark**
+mid-infiltration is a real cost — the decker has to re-hack everything they had
+access to.
+
+**How to apply:** Jack-out and reboot both zero the OS counter and clear that
+decker's marks. Marks are per-persona, so this touches only the rebooting
+decker; a teammate's marks on the same icon are unaffected. The device returns
+"at the end of the following Combat Turn" (p. 242) — the tracker does not
+enforce that timing, since it does not resolve actions, but the GM prompt
+should mention it. Do **not** add a cooldown, a suspicion carry-over, or a
+minimum offline timer without a new ruling here.

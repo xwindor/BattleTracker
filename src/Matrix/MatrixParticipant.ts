@@ -116,15 +116,21 @@ export class MatrixParticipant extends Participant {
   set preVrDiceCount(val: number | null) { this._preVrDiceCount = val; }
 
   /**
-   * Computed Overwatch alert level used by components for CSS styling.
-   *  - 'none'        : OS  < 20
-   *  - 'ic-alert'    : OS >= 20
-   *  - 'convergence' : OS >= 40
+   * Computed Overwatch alert level.
+   *
+   * Two states only, because SR5 defines exactly one Overwatch threshold: 40
+   * (p. 232). This getter previously reported an `'ic-alert'` tier at OS 20,
+   * which is not a rule in the CRB — hosts launch IC on *spotting*
+   * unauthorized activity (p. 247) or on a *failed Sleaze action*
+   * (pp. 231, 236), never off an OS value. See
+   * `briefs/matrix-rules-verification.md` item 3b.
+   *
+   * For the presentational colour band below 40, use
+   * `OsTrackingService.getOSBand()` — those cut points are arbitrary and carry
+   * no mechanical effect (RULINGS.md, 2026-08-29).
    */
-  get overwatchAlert(): "none" | "ic-alert" | "convergence" {
-    if (this._overwatch >= 40) return "convergence";
-    if (this._overwatch >= 20) return "ic-alert";
-    return "none";
+  get overwatchAlert(): "none" | "convergence" {
+    return this._overwatch >= 40 ? "convergence" : "none";
   }
 
   constructor() {

@@ -857,7 +857,7 @@
 }
 
 /* IC Alert compact strip ------------------------------------------ */
-.ic-alert-strip {
+.os-reminder-strip {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -872,13 +872,13 @@
   line-height: 1.3;
 }
 
-.ic-alert-text {
+.os-reminder-text {
   flex: 1 1 auto;
 }
 
 /* Not a .btn, and deliberately keeps its own colour — but it takes its
    GEOMETRY from the shared chip-tier tokens like every other control (AC 7). */
-.ic-alert-dismiss {
+.os-reminder-dismiss {
   flex-shrink: 0;
   width: var(--ui-icon-btn-w-xs);
   height: var(--ui-control-h-xs);
@@ -896,7 +896,7 @@
   transition: background 0.1s;
 }
 
-.ic-alert-dismiss:hover {
+.os-reminder-dismiss:hover {
   background: rgba(120, 53, 15, 0.12);
   color: #78350f;
 }

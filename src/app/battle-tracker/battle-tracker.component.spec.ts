@@ -713,6 +713,112 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
+  // Step 2. SR5 has exactly one Overwatch threshold: 40 (p. 232). The module
+  // previously carried an 'ic-alert' tier at OS 20 attributed to "Section 9.2 /
+  // Table 25" - a citation format SR5 does not use, for a rule that does not
+  // exist (briefs/matrix-rules-verification.md, item 3b).
+  describe('Overwatch Score: convergence is the only threshold', () => {
+    function decker(os = 0): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.HotSim;
+      mp.overwatch = os;
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('reports no alert at OS 20', () => {
+      const mp = decker(20);
+      expect(component.osTracking.getOSAlert(mp)).toBe('none');
+      expect(mp.overwatchAlert).toBe('none');
+    });
+
+    it('reports no alert at OS 39', () => {
+      const mp = decker(39);
+      expect(component.osTracking.getOSAlert(mp)).toBe('none');
+      expect(mp.overwatchAlert).toBe('none');
+    });
+
+    it('reports convergence at OS 40', () => {
+      const mp = decker(40);
+      expect(component.osTracking.getOSAlert(mp)).toBe('convergence');
+      expect(mp.overwatchAlert).toBe('convergence');
+    });
+
+    it('emits no threshold event crossing 20', () => {
+      const mp = decker(19);
+      const events: string[] = [];
+      const sub = component.osTracking.threshold$.subscribe(e => events.push(e.alert));
+
+      component.osTracking.addOS(mp, 5, 'test');   // 19 -> 24
+
+      expect(mp.overwatch).toBe(24);
+      expect(events).toEqual([]);
+      sub.unsubscribe();
+    });
+
+    it('emits convergence exactly once when crossing 40', () => {
+      const mp = decker(38);
+      const events: string[] = [];
+      const sub = component.osTracking.threshold$.subscribe(e => events.push(e.alert));
+
+      component.osTracking.addOS(mp, 5, 'test');   // 38 -> 43, crosses
+      component.osTracking.addOS(mp, 5, 'test');   // 43 -> 48, already there
+
+      expect(events).toEqual(['convergence']);
+      sub.unsubscribe();
+    });
+
+    // Display bands are presentation only (RULINGS.md, 2026-08-29). Asserted so
+    // the cut points cannot silently acquire meaning.
+    it('bands the score for display without any mechanical effect', () => {
+      expect(component.osTracking.getOSBand(decker(0))).toBe('low');
+      expect(component.osTracking.getOSBand(decker(14))).toBe('low');
+      expect(component.osTracking.getOSBand(decker(15))).toBe('building');
+      expect(component.osTracking.getOSBand(decker(30))).toBe('high');
+      expect(component.osTracking.getOSBand(decker(40))).toBe('convergence');
+      // A band change is not an alert.
+      expect(component.osTracking.getOSAlert(decker(30))).toBe('none');
+    });
+  });
+
+  describe('Overwatch Score resets on jack-out (pp. 240, 242)', () => {
+    it('zeroes OS and erases the decker\'s marks when jacking out', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+      component.osTracking.addOS(mp, 22, 'test');
+      mp.marksPlaced.set('camera-1', 2);
+      expect(mp.overwatch).toBe(22);
+
+      component.gmJackOut(mp);
+
+      expect(mp.overwatch).toBe(0);
+      expect(mp.marksPlaced.size).toBe(0);
+    });
+
+    it('resetOS clears marks as well as the score', () => {
+      const mp = new MatrixParticipant();
+      mp.overwatch = 31;
+      mp.marksPlaced.set('host-a', 3);
+
+      component.osTracking.resetOS(mp);
+
+      expect(mp.overwatch).toBe(0);
+      expect(mp.marksPlaced.size).toBe(0);
+    });
+  });
+
   // Broken site 3: demoteFromAstralParticipant set `dices = 1` directly with no
   // roll and no Score delta - the same defect its Matrix twin
   // (demoteToParticipant) had already had fixed.

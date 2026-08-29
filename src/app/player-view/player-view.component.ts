@@ -711,7 +711,7 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     }
     const sel = this.declaredActionSelection;
     const allSelected = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
-    const illegalActions = allSelected.filter(name => name in ILLEGAL_OS_ACTIONS);
+    const illegalActions = allSelected.filter(name => ILLEGAL_OS_ACTIONS.has(name));
     this.session.sendCommand({
       type: "act",
       player: this.playerToken,
