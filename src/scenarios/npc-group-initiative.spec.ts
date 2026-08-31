@@ -305,7 +305,7 @@ describe('S4 - two initiative tracks at once: the street witch projects', () => 
     CombatManager.addParticipant(projected);
     projected.astralProjecting = true;
     projected.baseIni = 10;                                    // INT 5 x 2 (p. 159)
-    projected.setDicesWithoutRoll(ASTRAL_INITIATIVE_DICE);      // 2D6 astral (p. 159)
+    projected.setDicesWithoutRoll(ASTRAL_INITIATIVE_DICE);      // 3D6 astral (p. 314; RULINGS 2026-08-30)
     projected.diceIni = 7;
 
     expect(projected.getCurrentInitiative()).toBe(17);

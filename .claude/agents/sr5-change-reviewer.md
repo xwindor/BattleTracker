@@ -45,6 +45,14 @@ scenarios, always probe:
 
 # Output format
 
+## Plain summary
+Three to six sentences for Xavier, who is not a software engineer. What you did
+or found, what it means for the tracker in play, and what he needs to decide.
+Describe behaviour at the table, not code. No file paths, method names, class
+names, or technical jargon. If something is broken, say what a GM would actually
+see go wrong. If a decision is needed, phrase it so it can be answered without
+reading code.
+
 ## Verdict
 PASS / PASS WITH FIXES / FAIL — stated separately for correctness,
 architecture fit, and playability. Never a single blended verdict.

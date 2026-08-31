@@ -25,14 +25,16 @@ import {
 } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
-import { MatrixParticipant, VRMode } from "Matrix";
+import { MatrixParticipant, VRMode, DATA_PROCESSING_UNSET } from "Matrix";
 import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
 import {
   DetachedGruntParticipant, GruntMember, NpcRowParticipant,
   hasGruntConditionMonitor, isNpcRow, createStandaloneGrunt, mergeGruntsIntoRow,
-  DEFAULT_GRUNT_ATTRIBUTE, MIN_MERGEABLE_GRUNTS
+  DEFAULT_GRUNT_ATTRIBUTE, MIN_MERGEABLE_GRUNTS,
+  ALL_GRUNT_STATBLOCKS, getStatblockById,
+  instantiateStandaloneFromStatblock, instantiateRowFromStatblock
 } from "Grunts";
-import type { GruntDamageType, GruntMergeResult } from "Grunts";
+import type { GruntDamageType, GruntMergeResult, GruntStatblock } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
@@ -148,6 +150,115 @@ const DEFAULT_ROW_NAME_PATTERN = new RegExp(`^${MERGED_GRUNT_ROW_NAME}(?: (\\d+)
 const DEFAULT_ROW_MEMBER_NAME_PREFIX = "NPC";
 
 /**
+ * Default name prefix for a plain (non-grunt) participant left unnamed at
+ * commit (defect D2, validator round). The "+" Add Participant button used to
+ * create a genuinely nameless participant with **zero** log lines ever - the
+ * dialog's own placeholder promised "Leave blank to use the default name" but
+ * no such default existed for `kind === "participant"`.
+ *
+ * Its own namespace, distinct from every other default-name prefix in this
+ * file (`STANDALONE_GRUNT_NAME_PREFIX` "Grunt", `MERGED_GRUNT_ROW_NAME`
+ * "Grunt Group", `DEFAULT_ROW_MEMBER_NAME_PREFIX` "NPC") so a hand-added
+ * participant can never answer to the same name as a grunt, a row or a row
+ * member (brief acceptance criterion 4). Also deliberately not "Participant"
+ * - `buildSharedParticipant()` already uses `"Participant <n>"` as a
+ * *wire-only, never-written-back* rendering fallback for a still-blank
+ * participant (implementation appendix, "the fourth, wire-only namespace");
+ * reusing that word here could put a real, permanently-named participant next
+ * to another participant's blank-name placeholder text that happens to render
+ * identically.
+ */
+const STANDALONE_PARTICIPANT_NAME_PREFIX = "Combatant";
+
+/**
+ * Kinds of participant the single "name before add" dialog can build (brief
+ * "Grunt naming and statblocks", implementation appendix "The choke point").
+ * `"merge"` is not a *creation* in the same sense as the other three - it
+ * folds already-existing standalone grunts into a new row - but it goes
+ * through the same dialog because it shares the same defect the others do
+ * (`mergeSelectedGrunts` picks a name before the GM has any say, brief IA1).
+ */
+type AddDraftKind = "participant" | "grunt" | "row" | "rowMember" | "merge";
+
+/**
+ * The one draft object the "name before add" dialog edits (brief U1/U12, D2).
+ * Nothing here is committed to `combatManager.participants` until
+ * `commitAddDraft()` runs; `cancelAddDraft()` just discards it.
+ */
+interface AddDraft {
+  kind: AddDraftKind;
+  /** Proposed name, pre-filled from the same generator the button used to seed instantly. */
+  name: string;
+  /** Row member count (kind === "row" only). */
+  count: number;
+  body: number;
+  willpower: number;
+  /** Selected template id (`GruntStatblock.id`), or `null` for a hand-built grunt/row (D3). */
+  statblockId: string | null;
+  /** U4: load the template's augmented (bracketed) values rather than its base ones. */
+  loadAugmented: boolean;
+  /** kind === "rowMember" only: which existing row the NPC joins. */
+  targetRow: NpcRowParticipant | null;
+  /**
+   * kind === "grunt" only, and only meaningful when the selected template is
+   * a lieutenant (U7): the row this lieutenant beats on an Initiative tie
+   * with his own team (p. 381). Never auto-filled - a lieutenant is never
+   * auto-linked to a group (brief acceptance criterion 16 / U6).
+   */
+  lieutenantTeamRow: NpcRowParticipant | null;
+}
+
+/**
+ * Shared-log wording for a plain participant or an empty row added through
+ * the dialog (brief Decision D2). `addGrunt`/`addNpcToRow`/`mergeSelectedGrunts`
+ * already have their own wording and keep it unchanged - `commitAddDraft()`
+ * does not queue this text for those kinds at all (see that method).
+ *
+ * None of these fire at commit any more (RULINGS.md 2026-08-30): every use
+ * is queued through `queueJoinAnnouncement()` and only actually written to
+ * the log the first time the participant it names has a rolled Initiative
+ * Score.
+ */
+const PARTICIPANT_JOINED_LOG_TEXT = "joined the fight.";
+const ROW_FORMED_LOG_TEXT = "formed.";
+/** Shared-log wording for a standalone grunt (`addGrunt`/`commitTemplateGrunt`). */
+const GRUNT_ADDED_LOG_TEXT = "added.";
+
+/**
+ * One deferred join-log line, resolved lazily by `announceJoinIfPending()`
+ * against whichever `IParticipant` instance the queue entry is currently
+ * keyed on - not a closure over the object that created it, so a queued
+ * announcement keeps resolving correctly after a duplicate or a
+ * promote/demote type swap moves it to a different object (see
+ * `pendingJoinAnnouncement`'s own doc comment). Every resolver here always
+ * produces a line; there is no "not ready yet" case left to encode, because
+ * every add path either supplies a name up front or (Tab-to-add only) picks
+ * a default name at the moment it actually fires.
+ */
+type JoinAnnouncementResolver = (p: IParticipant) =>
+  { actor: string; text: string; playerText?: string };
+
+/**
+ * One queued entry in a participant's join-announcement queue: the resolver
+ * plus, for a row-member entry only, the specific `GruntMember` it was
+ * queued for. `addNpcToRow` queues one entry per NPC added, all keyed on the
+ * *row* (not the member), so a row waiting to roll can be carrying several
+ * members' entries at once. Tagging each entry with its member lets a later
+ * removal or relocation of that one member (`removeRowMember`,
+ * `detachRowMember`) prune just its own entry out of the row's queue without
+ * touching any other still-pending member's line (RULINGS.md 2026-08-30, "A
+ * combatant created and deleted before initiative is rolled is never
+ * announced, which is the point"). Entries queued for anything other than a
+ * row member (a plain participant, a standalone grunt, a whole new row)
+ * leave `member` undefined - there is nothing else in their queue to prune
+ * around.
+ */
+interface QueuedJoinAnnouncement {
+  resolve: JoinAnnouncementResolver;
+  member?: GruntMember;
+}
+
+/**
  * Lowest Initiative Score that still buys an Action Phase.
  *
  * A participant needs a Score **above** this to take a Simple or Complex
@@ -189,6 +300,23 @@ const DEFAULT_ROW_MEMBER_DAMAGE_VALUE = 1;
  * entry (a stray extra digit) reaching the log and the alive/dead comparison.
  */
 const MAX_ROW_MEMBER_DAMAGE_VALUE = 99;
+
+/**
+ * Floor on a Grunt Group's member count (defect D8, validator round): the
+ * "Number of NPCs" box was unvalidated, and a typed `0` created an empty row
+ * that still logged "formed.", still occupied an initiative slot, and
+ * represented a squad that did not exist. Not a rule citation - a
+ * keyboard-typo guard, the same class of thing as `MAX_ROW_MEMBER_DAMAGE_VALUE`.
+ */
+const MIN_ROW_MEMBER_COUNT = 1;
+
+/**
+ * Upper guard on a Grunt Group's member count (defect D8, validator round): a
+ * typed `250` created 250 members with no warning. Not a rule citation - a
+ * keyboard-typo guard (a stray extra digit), generous enough for the largest
+ * sample squad any GM is realistically running at one table.
+ */
+const MAX_ROW_MEMBER_COUNT = 50;
 
 /**
  * Marker appended to every GM-local log line the players never received.
@@ -382,6 +510,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   actModalRowMember: GruntMember | null = null;
   readonly declaredActions = DECLARED_ACTIONS;
+
+  // ── "Name before add" dialog (brief "Grunt naming and statblocks") ───────
+  private addDraftModalRef: NgbModalRef | null = null;
+  /** The in-progress draft, or `null` when no add dialog is open. Public: the template binds to it directly. */
+  pendingAddDraft: AddDraft | null = null;
+  readonly allGruntStatblocks: readonly GruntStatblock[] = ALL_GRUNT_STATBLOCKS;
 
   get physicalActionCategories() {
     return this.declaredActions.filter(c => !c.id.startsWith("matrix"));
@@ -929,11 +1063,92 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private readonly participantIntuitions = new Map<IParticipant, number>();
   private readonly participantTieBreakers = new Map<IParticipant, number>();
   private readonly lastKnownDamage = new Map<string, { physical: number; stun: number }>();
+  /**
+   * GM-only imprint of which statblock a templated grunt/row was instantiated
+   * from, and whether it was loaded with augmented (bracketed) values (brief
+   * "Grunt naming and statblocks" U2/D-X4). Rides `SharedGmParticipantState`
+   * only - `professionalRating` is capability information of the same class
+   * as a Condition Monitor maximum (RULINGS 2026-08-13), so it never reaches
+   * `SharedParticipantState`. Obligations: cleared in `restoreFromSharedState`,
+   * dropped in `forgetParticipant`, copied in `btnDuplicate_Click`, deleted in
+   * `upsertPlayerParticipant`'s type-mismatch branch, and (defect 4, fix round
+   * 2) carried across every promote/demote in-place type swap
+   * (`promoteToMatrixParticipant`/`demoteToParticipant`/
+   * `promoteToAstralParticipant`/`demoteFromAstralParticipant`) exactly like
+   * `participantEdgeRatings`/`participantReactions`/`participantIntuitions`.
+   */
+  private readonly participantStatblocks = new Map<IParticipant, { id: string; augmented: boolean }>();
+  /**
+   * U7 (brief p. 381): which row a lieutenant beats on an Initiative tie with
+   * his own team, keyed by `getParticipantId(row)` rather than an object
+   * reference - object identity does not survive `restoreFromSharedState`,
+   * which rebuilds every participant (see `initiativeTieBreakComparator`).
+   * Same obligations as `participantStatblocks` (including the promote/demote
+   * type-swap carry-over added by defect 4, fix round 2) **except**
+   * duplication (defect D7, validator round): `btnDuplicate_Click`
+   * deliberately does **not** copy this entry to the clone, or a duplicated
+   * lieutenant and its source would both be linked to the same row - both
+   * beating it on a tie, and tying with each other, with no comparator rule
+   * to order the two of them (this map has nothing to say about a
+   * lieutenant-vs-lieutenant tie). A duplicated lieutenant is created
+   * unlinked; the GM re-links it by hand (D3's retroactive control) if that
+   * is genuinely wanted.
+   */
+  private readonly participantLieutenantTeamRowId = new Map<IParticipant, string>();
+  /**
+   * Deferred "joined the fight" log lines, one queue per participant
+   * (RULINGS.md 2026-08-30, "A combatant is announced when they enter the
+   * initiative order, not when a name box loses focus" — this replaces the
+   * blur/Enter-triggered design entirely; there is no `onParticipantNameCommitted`
+   * any more).
+   *
+   * Every GM-side add path (the plus button, Tab-to-add, Add Grunt, Grunt
+   * Group, Add NPC, merge, and the add dialog's Confirm) calls
+   * `queueJoinAnnouncement()` instead of writing its join line directly.
+   * `announceJoinIfPending()` is the single choke point that actually writes
+   * a queued line, the first time the participant it is keyed on has a
+   * rolled Initiative Score (`diceIni > 0`) - called from every place that
+   * writes a real Initiative Test result (`rollAndLogInitiative`, the player
+   * `roll_submission` command, and the manual rolled-total box), and from
+   * `queueJoinAnnouncement` itself so a reinforcement joining an
+   * already-rolled row (`addNpcToRow`) announces immediately rather than
+   * waiting for a roll that will never happen for it individually.
+   *
+   * A combatant created and deleted before initiative is ever rolled never
+   * reaches `diceIni > 0` and is therefore never announced - the entire
+   * point of the ruling above, and the reason three earlier fix rounds
+   * failed: the old trigger was a *focus* event, and a confirmation pop-up
+   * (there are eleven `confirmationDialog` call sites in this file, and
+   * every one steals focus) blurred the name box an instant before a
+   * combatant was deleted, writing a join line for someone who never
+   * entered the fight.
+   *
+   * Each resolver is a function of the *current* `IParticipant` instance it
+   * is fired against, not a closure over the object that created it - so a
+   * queue entry keeps resolving correctly after `btnDuplicate_Click` copies
+   * it to a clone, or a promote/demote type swap
+   * (`promoteToMatrixParticipant`/`demoteToParticipant`/
+   * `promoteToAstralParticipant`/`demoteFromAstralParticipant`) moves it to
+   * a different object entirely (round 2 defect 8 - the entry used to be
+   * silently dropped on every one of those four swaps).
+   *
+   * Same four obligations as every other GM-local side map
+   * (ARCHITECTURE.md §8): cleared in `restoreFromSharedState` (a bulk
+   * rebuild - nothing here survives a rejoin, and nothing should: a
+   * restored participant already has whatever name and roll state it was
+   * broadcast with), dropped in `forgetParticipant`, copied in
+   * `btnDuplicate_Click`, deleted in `upsertPlayerParticipant`'s
+   * type-mismatch branch, and now also carried across every promote/demote
+   * type swap.
+   */
+  private readonly pendingJoinAnnouncement = new Map<IParticipant, QueuedJoinAnnouncement[]>();
   private damageLogFlushTimeout: number | null = null;
   private readonly damageLogDebounceMs = 500;
 
   // -- OS threshold alert state --
   @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
+  /** The "name before add" dialog template (brief U1/U12). */
+  @ViewChild("addDraftModalTpl") private addDraftModalTpl!: TemplateRef<unknown>;
   icAlertMessages: string[] = [];
   convergenceAlertDecker: string | null = null;
   convergenceAlertOs = 0;
@@ -1116,6 +1331,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     else {
       this.combatManager.participants.sortByInitiative();
       this.combatManager.participants.items.sort((a, b) => this.initiativeTieBreakComparator(a, b));
+      // Defect D4 fix (validator round): the p. 381 lieutenant-beats-his-own-
+      // tied-team rule is a post-sort adjustment, not part of the comparator
+      // above - see `applyLieutenantPrecedence`'s doc comment.
+      this.applyLieutenantPrecedence(this.combatManager.participants.items);
       this.enforceSingleCurrentActor();
     }
     this.syncSharedState();
@@ -2842,7 +3061,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         target = this.promoteToMatrixParticipant(target);
       }
       const mp = target as MatrixParticipant;
-      mp.dataProcessing = Math.max(1, Number(payload["dataProcessing"] || 1));
+      // Floor 0, not 1 (RULINGS 2026-08-30): a stored 0 - an absent or
+      // explicitly-cleared payload field - means "unset", and must not be
+      // coerced up into a plausible-looking rated 1.
+      mp.dataProcessing = Math.max(DATA_PROCESSING_UNSET, Number(payload["dataProcessing"] || DATA_PROCESSING_UNSET));
       mp.attack = Math.max(0, Number(payload["attack"] || 0));
       mp.sleaze = Math.max(0, Number(payload["sleaze"] || 0));
       mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
@@ -3011,13 +3233,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
+      // Same choke point `rollAndLogInitiative` uses (RULINGS.md
+      // 2026-08-30): a player rolling for a claimed GM-added NPC still owes
+      // that NPC's own join line, not just the player-connect line.
+      this.announceJoinIfPending(target);
       const total = target.getCurrentInitiative();
       const intuition = this.getParticipantIntuition(target);
       let baseLabel: string;
       if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
         baseLabel = `INT×2(${intuition * 2})`;
       } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
-        baseLabel = `DP(${this.asMatrix(target).dataProcessing}) + INT(${intuition})`;
+        baseLabel = `DP(${this.formatDataProcessing(this.asMatrix(target).dataProcessing)}) + INT(${intuition})`;
       } else {
         baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
       }
@@ -3406,6 +3632,31 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       // `rowMemberHasActed`'s doc comment for why this rides the GM-only
       // channel rather than `rowMembers[].hasActed` itself.
       gm.rowMemberHasActed = p.toRowSnapshot().members.map(m => m.hasActed === true);
+    }
+    // Item 7 fix (fix round 3): `projectionDiceGain` is "how this Score got
+    // here", not something a restore can re-derive from `astralProjecting`
+    // alone - see `SharedGmParticipantState.astralProjectionDiceGain`'s own
+    // doc comment for the stranded-dice defect this closes. Only set while
+    // actually projecting; 0 restores to 0 the same as an absent field would.
+    if (this.isAstral(p) && p.astralProjecting) {
+      gm.astralProjectionDiceGain = p.projectionDiceGain;
+    }
+    // Statblock imprint - GM-only (brief U2/D-X4). Carried by id only:
+    // `label`/`professionalRating` are re-derived from
+    // `getStatblockById(imprint.id)` on demand (`getParticipantStatblockLabel()`)
+    // rather than sent here at all (item 8 fix, fix round 3 - the two fields
+    // used to be written three lines below this comment despite the comment
+    // already claiming they weren't, and had no reader anywhere in `src/` on
+    // either side of the wire; `statblockId` is the single source of truth).
+    const imprint = this.participantStatblocks.get(p);
+    if (imprint) {
+      gm.statblockId = imprint.id;
+      gm.statblockAugmented = imprint.augmented;
+    }
+    // U7: GM-only, id-based (see `participantLieutenantTeamRowId`'s doc comment).
+    const teamRowId = this.participantLieutenantTeamRowId.get(p);
+    if (teamRowId) {
+      gm.lieutenantTeamRowId = teamRowId;
     }
     return gm;
   }
@@ -3859,6 +4110,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.participantReactions.delete(target);
       this.participantIntuitions.delete(target);
       this.participantTieBreakers.delete(target);
+      this.participantStatblocks.delete(target);
+      this.participantLieutenantTeamRowId.delete(target);
+      this.pendingJoinAnnouncement.delete(target);
       this.combatManager.removeParticipant(target);
       target = undefined;
     }
@@ -3886,7 +4140,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
     if (isMatrix && target instanceof MatrixParticipant) {
       const decker: MatrixParticipant = target;
-      const safeDP = Math.max(1, Number(dataProcessing || 1));
+      // Floor 0, not 1 (RULINGS 2026-08-30): same reasoning as the
+      // configure_deck handler above - an absent/cleared value is unset, not
+      // a rated 1.
+      const safeDP = Math.max(DATA_PROCESSING_UNSET, Number(dataProcessing || DATA_PROCESSING_UNSET));
       const mode = vrModeStr === "hot-sim" ? VRMode.HotSim
                  : vrModeStr === "cold-sim" ? VRMode.ColdSim
                  : VRMode.AR;
@@ -4056,6 +4313,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const ap = new AstralParticipant();
       ap.astralProjecting = shared.isAstralProjecting === true;
       ap.blocksPhysicalActions = shared.isAstralProjecting === true;
+      // Item 7 fix (fix round 3): without this, `projectionDiceGain` reset to
+      // 0 on every GM reconnect, and "Return to Body" computed
+      // `countBefore - 0`, requesting no change - a mage reconnected into
+      // mid-projection kept the extra dice and the inflated Score
+      // permanently. GM-only (`gm?.astralProjectionDiceGain`), same as the
+      // rest of this rehydration; absent with no `gm` (legacy/deploy skew)
+      // defaults to 0, same as never having projected.
+      if (ap.astralProjecting) {
+        ap.projectionDiceGain = Math.max(0, Number(gm?.astralProjectionDiceGain ?? 0));
+      }
       return ap;
     }
     // A standalone/detached grunt has no flag on the player-facing wire that
@@ -4190,6 +4457,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantReactions.clear();
     this.participantIntuitions.clear();
     this.participantTieBreakers.clear();
+    this.participantStatblocks.clear();
+    this.participantLieutenantTeamRowId.clear();
+    this.pendingJoinAnnouncement.clear();
     this.lastKnownDamage.clear();
 
     this.combatManager.participants.clear();
@@ -4439,6 +4709,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       if (isNpcRow(participant) && gm?.rowSpentFlagged) {
         participant.spentFlagged = true;
       }
+
+      // Statblock imprint (brief "Grunt naming and statblocks" acceptance
+      // criterion 20): GM-only, carried by id only - `label`/
+      // `professionalRating` are re-derived from `getStatblockById` on
+      // demand rather than sent on the wire (`GM_STATE_MAX_PAYLOAD_BYTES`,
+      // `server/gm-state-channel.js`). D-X2 struck gear/skills/etc. from
+      // `GruntStatblock`, so there is no reference text to re-hydrate.
+      if (gm?.statblockId) {
+        this.participantStatblocks.set(participant, {
+          id: gm.statblockId,
+          augmented: gm.statblockAugmented === true
+        });
+      }
+      // U7: which row this lieutenant beats on an Initiative tie with his own
+      // team. Restored verbatim as an id - resolved back to a live
+      // participant lazily by the tie-break comparator, since object
+      // identity does not survive this rebuild.
+      if (gm?.lieutenantTeamRowId) {
+        this.participantLieutenantTeamRowId.set(participant, gm.lieutenantTeamRowId);
+      }
     }
 
     this.combatManager.participants.sortBySortOrder();
@@ -4506,19 +4796,342 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /// Button Handler
+  /**
+   * Opens the "name before add" dialog (brief U1/U12). Creates **nothing**
+   * until `commitAddDraft()` runs - `addParticipant()` itself is only called
+   * from inside that method now.
+   *
+   * Deliberately writes **no** `LogHandler` entry here (defect D9, validator
+   * round): opening the dialog is not a commit, so a raw internal handler
+   * name (`"AddParticipant_Click"`, etc.) used to land in the GM's local
+   * Action Log even when the GM went on to press Cancel, leaving a trace of
+   * an add that never happened and that nobody could read as English. The
+   * actual creation still reaches the local Action Log - `logRowEvent()`
+   * always writes both the shared line and the local one - it just no longer
+   * writes a *second*, diagnostic-only line at open time.
+   */
   btnAddParticipant_Click() {
-    LogHandler.log(this.currentBTTime, "AddParticipant_Click");
-    this.addParticipant()
+    this.openAddDialog("participant");
   }
 
   /**
-   * "Add Grunt" (brief addendum Decision 9). Same one-tap shape as
-   * `btnAddParticipant_Click`; the grunt lands unrolled and takes its own
-   * Initiative Test from the roll button next to it.
+   * "Add Grunt" (brief addendum Decision 9), now routed through the same
+   * dialog (brief U12: naming on add applies uniformly, not just to grunts).
+   * The dialog also offers the fourteen sample grunt/lieutenant templates
+   * (brief "Grunt naming and statblocks" Phase 2). See
+   * `btnAddParticipant_Click`'s doc comment for why this does not log at open.
    */
   btnAddGrunt_Click() {
-    LogHandler.log(this.currentBTTime, "AddGrunt_Click");
-    this.addGrunt();
+    this.openAddDialog("grunt");
+  }
+
+  /**
+   * "Grunt Group" - a brand-new linked NPC row, optionally from a template.
+   * See `btnAddParticipant_Click`'s doc comment for why this does not log at
+   * open (defect D9).
+   */
+  btnAddNpcRow_Click() {
+    this.openAddDialog("row");
+  }
+
+  /**
+   * "Add NPC" on an existing row's panel - the mid-combat reinforcement case.
+   * See `btnAddParticipant_Click`'s doc comment for why this does not log at
+   * open (defect D9).
+   */
+  btnAddNpcToRow_Click(row: NpcRowParticipant) {
+    this.openAddDialog("rowMember", row);
+  }
+
+  /**
+   * "Merge N into a Grunt Group" - naming happens before the merge commits
+   * (brief IA1). See `btnAddParticipant_Click`'s doc comment for why this
+   * does not log at open (defect D9).
+   */
+  btnMergeSelectedGrunts_Click() {
+    this.openAddDialog("merge");
+  }
+
+  /**
+   * Seed a fresh `AddDraft` for `kind` and open the dialog. Creates nothing:
+   * the draft is local component state until `commitAddDraft()` runs (brief
+   * acceptance criterion IA1/IA2). The proposed default name comes from the
+   * same generator the button used to seed instantly before this change, so
+   * leaving it untouched and pressing Confirm reproduces the old one-tap
+   * behaviour exactly.
+   */
+  private openAddDialog(kind: AddDraftKind, targetRow: NpcRowParticipant | null = null): void {
+    const defaultName =
+      kind === "grunt" ? this.nextStandaloneGruntName() :
+      kind === "row" ? this.nextMergedGruntRowName() :
+      kind === "merge" ? this.nextMergedGruntRowName() :
+      kind === "rowMember" && targetRow ? this.nextRowMemberName(targetRow) :
+      "";
+    this.pendingAddDraft = {
+      kind,
+      name: defaultName,
+      count: 1,
+      body: DEFAULT_GRUNT_ATTRIBUTE,
+      willpower: DEFAULT_GRUNT_ATTRIBUTE,
+      statblockId: null,
+      loadAugmented: true,
+      targetRow,
+      lieutenantTeamRow: null
+    };
+    this.addDraftModalRef = this.modalService.open(this.addDraftModalTpl, { size: "lg", centered: true });
+    this.addDraftModalRef.result.finally(() => {
+      this.addDraftModalRef = null;
+    });
+  }
+
+  /**
+   * Which statblock the draft currently has selected, or `null` for a
+   * hand-built grunt/row (brief D3). Template convenience so the dialog can
+   * branch on `kind`/augmented-availability without repeating the lookup.
+   */
+  selectedDraftStatblock(): GruntStatblock | null {
+    if (!this.pendingAddDraft?.statblockId) {
+      return null;
+    }
+    return getStatblockById(this.pendingAddDraft.statblockId) ?? null;
+  }
+
+  /**
+   * Templates offered by the picker, filtered by what `pendingAddDraft.kind`
+   * can legally become (defect D6, validator round). A Grunt Group's members
+   * share **one** rolled Initiative Score (brief acceptance criterion 12,
+   * p. 379); a lieutenant template carries his **own** Score and must be a
+   * separate participant (criterion 16, p. 380/381). Offering a lieutenant
+   * template on a *row* draft used to build a row of two or three lieutenants
+   * sharing a single Score - stacking several lieutenants side by side is
+   * explicitly licensed (p. 381), but sharing an Initiative Score between
+   * them is not what that licenses. A lieutenant template is therefore only
+   * ever offered for `kind === "grunt"`, which always creates one standalone
+   * participant with its own roll.
+   */
+  statblockOptionsForDraft(): readonly GruntStatblock[] {
+    if (this.pendingAddDraft?.kind === "row") {
+      return this.allGruntStatblocks.filter(sb => sb.kind !== "lieutenant");
+    }
+    return this.allGruntStatblocks;
+  }
+
+  /** Every existing linked NPC row, for the lieutenant team-row picker (U7). */
+  existingNpcRows(): NpcRowParticipant[] {
+    return this.combatManager.participants.items.filter(isNpcRow);
+  }
+
+  /** Cancel the open add dialog. Creates and changes nothing (brief IA2). */
+  cancelAddDraft(): void {
+    this.pendingAddDraft = null;
+    if (this.addDraftModalRef) {
+      this.addDraftModalRef.dismiss();
+      this.addDraftModalRef = null;
+    }
+  }
+
+  /**
+   * The single commit point for every "name before add" flow (brief U1/U12,
+   * amended by RULINGS.md 2026-08-30: the join line is written once
+   * initiative is actually rolled, not here - see `queueJoinAnnouncement`).
+   *
+   * Does not queue a join line itself for `kind === "grunt" | "rowMember" |
+   * "merge"`: `addGrunt`/`commitTemplateGrunt`/`addNpcToRow`/
+   * `mergeSelectedGrunts` already queue their own wording. Queuing here too
+   * would double-queue those paths.
+   */
+  commitAddDraft(): void {
+    const draft = this.pendingAddDraft;
+    if (!draft) {
+      return;
+    }
+    const name = draft.name.trim();
+    switch (draft.kind) {
+      case "participant": {
+        // D2 fix: a blank name is not left blank (that produced a
+        // permanently nameless, permanently unannounced participant) - it
+        // gets the same "default name, unique in the encounter" treatment
+        // every other add path already has (brief acceptance criterion 3).
+        // The join line is queued, not written, here (RULINGS.md
+        // 2026-08-30) - see `queueJoinAnnouncement`.
+        const finalName = name || this.nextStandaloneParticipantName();
+        const p = this.addParticipant(false);
+        p.name = finalName;
+        this.queueJoinAnnouncement(p, (participant) => ({
+          actor: participant.name || finalName,
+          text: PARTICIPANT_JOINED_LOG_TEXT
+        }));
+        this.selectActor(p);
+        this.syncSharedState();
+        break;
+      }
+      case "grunt": {
+        if (draft.statblockId) {
+          this.commitTemplateGrunt(draft, name);
+        } else {
+          // addGrunt() already queues "added." - see this method's doc comment.
+          this.addGrunt(name || undefined, draft.body, draft.willpower);
+        }
+        break;
+      }
+      case "row": {
+        this.commitRowDraft(draft, name);
+        break;
+      }
+      case "rowMember": {
+        if (draft.targetRow) {
+          // addNpcToRow() already queues "<name> joined the group." - see
+          // this method's doc comment.
+          this.addNpcToRow(draft.targetRow, name || undefined, draft.body, draft.willpower);
+        }
+        break;
+      }
+      case "merge": {
+        // mergeSelectedGrunts() already queues "formed from ..." - see this
+        // method's doc comment.
+        this.mergeSelectedGrunts(name || undefined);
+        break;
+      }
+    }
+    this.pendingAddDraft = null;
+    if (this.addDraftModalRef) {
+      this.addDraftModalRef.close();
+      this.addDraftModalRef = null;
+    }
+  }
+
+  /**
+   * `kind === "grunt"` with a template selected: instantiate from the
+   * statblock rather than from `draft.body`/`draft.willpower` (brief "How
+   * templates feed Body/Willpower").
+   */
+  private commitTemplateGrunt(draft: AddDraft, typedName: string): DetachedGruntParticipant {
+    const sb = getStatblockById(draft.statblockId as string);
+    if (!sb) {
+      // Defensive only - the picker only ever offers ids from
+      // `ALL_GRUNT_STATBLOCKS`, so this cannot happen from the UI.
+      throw new Error(`Unknown grunt statblock id: ${draft.statblockId}`);
+    }
+    const finalName = typedName || this.nextStandaloneGruntName();
+    // `initiativeDice` is already written onto `grunt.dices` by
+    // `instantiateStandaloneFromStatblock` via `setDicesWithoutRoll` -
+    // construction, never `changeDiceCount` (ARCHITECTURE §6).
+    const { grunt, reaction, intuition } =
+      instantiateStandaloneFromStatblock(sb, { augmented: draft.loadAugmented, name: finalName });
+    this.combatManager.addParticipant(grunt);
+    this.participantClaimable.set(grunt, false);
+    // Grunts and lieutenants alike carry no Edge attribute (brief G9) - Edge 0
+    // for ERIC, unconditionally (acceptance criterion 14, RULINGS 2026-08-01,
+    // now unconditional per Decision D-X3 dropping contacts).
+    this.participantEdgeRatings.set(grunt, NPC_ROW_EDGE_RATING);
+    this.participantReactions.set(grunt, reaction);
+    this.participantIntuitions.set(grunt, intuition);
+    grunt.baseIni = this.getParticipantBaseInitiative(grunt);
+    this.participantTieBreakers.set(grunt, Math.random());
+    const id = this.getParticipantId(grunt);
+    this.lastKnownDamage.set(id, {
+      physical: Math.max(0, Number(grunt.physicalDamage || 0)),
+      stun: Math.max(0, Number(grunt.stunDamage || 0))
+    });
+    this.participantStatblocks.set(grunt, { id: sb.id, augmented: draft.loadAugmented === true });
+    if (sb.kind === "lieutenant" && draft.lieutenantTeamRow) {
+      this.setLieutenantTeam(grunt, draft.lieutenantTeamRow);
+    }
+    // Same wording `addGrunt()` uses, box-count-free and Professional-Rating-
+    // free (acceptance criteria 11, 18/19). Queued, not written, until this
+    // grunt has a rolled Initiative Score (RULINGS.md 2026-08-30).
+    this.queueJoinAnnouncement(grunt, (participant) => ({
+      actor: participant.name || STANDALONE_GRUNT_NAME_PREFIX,
+      text: GRUNT_ADDED_LOG_TEXT
+    }));
+    this.selectActor(grunt);
+    this.syncSharedState();
+    this.sort();
+    return grunt;
+  }
+
+  /**
+   * `kind === "row"`: a brand-new linked NPC row, its initial members either
+   * hand-built (`draft.body`/`draft.willpower`) or instantiated from a
+   * template. Built inline rather than via `addNpcRow()` + `addNpcToRow()` per
+   * member: `addNpcToRow()` logs its own "joined the group" line per member,
+   * which would violate acceptance criterion IA5 ("member joins inside the
+   * same commit do not each produce a line") - this method's **one** "formed."
+   * line is the only log entry the whole commit produces.
+   */
+  private commitRowDraft(draft: AddDraft, typedName: string): NpcRowParticipant {
+    // Resolved and validated *before* anything is created (defect D6,
+    // validator round): a lieutenant template must never be instantiated
+    // into a row - see the throw below for why. Checking first means a
+    // rejected draft leaves no half-built, orphaned row behind, the same way
+    // the "Unknown grunt statblock id" defensive check already did.
+    let sb: GruntStatblock | null = null;
+    if (draft.statblockId) {
+      sb = getStatblockById(draft.statblockId) ?? null;
+      if (!sb) {
+        throw new Error(`Unknown grunt statblock id: ${draft.statblockId}`);
+      }
+      if (sb.kind === "lieutenant") {
+        // Defensive only: the picker (`statblockOptionsForDraft`) never
+        // offers a lieutenant template for a row draft, so this cannot
+        // happen from the UI. A lieutenant template must become its own
+        // separate participant with its own Initiative Score (brief
+        // acceptance criterion 16), never a shared row member.
+        throw new Error(`Lieutenant statblock "${sb.id}" cannot be instantiated into a row.`);
+      }
+    }
+
+    const row = new NpcRowParticipant();
+    row.name = typedName || this.nextMergedGruntRowName();
+    this.combatManager.addParticipant(row);
+    this.participantClaimable.set(row, false);
+    this.participantEdgeRatings.set(row, NPC_ROW_EDGE_RATING);
+    this.getParticipantId(row);
+    this.expandedRowPanels.add(row);
+
+    // Defect D8 (validator round): floor of 1 (a `0` used to create an
+    // empty, "formed.", initiative-slot-occupying row for a squad that did
+    // not exist) and an upper guard against a fat-fingered entry.
+    const count = Math.min(
+      MAX_ROW_MEMBER_COUNT,
+      Math.max(MIN_ROW_MEMBER_COUNT, Math.floor(draft.count || 0))
+    );
+    // The row is brand new and empty, so the default member names are exactly
+    // `nextRowMemberName(row)`'s output for an empty row, computed once
+    // rather than re-querying `row.members` after each add.
+    const prefix = this.isDefaultRowName(row.name) ? DEFAULT_ROW_MEMBER_NAME_PREFIX : row.name;
+    const names = Array.from({ length: count }, (_, i) => `${prefix} ${i + 1}`);
+
+    if (sb) {
+      const result = instantiateRowFromStatblock(sb, names, { augmented: draft.loadAugmented });
+      for (const member of result.members) {
+        row.addMember(member);
+      }
+      this.participantReactions.set(row, result.reaction);
+      this.participantIntuitions.set(row, result.intuition);
+      row.setDicesWithoutRoll(result.initiativeDice);
+      this.participantStatblocks.set(row, { id: sb.id, augmented: draft.loadAugmented === true });
+    } else {
+      for (const memberName of names) {
+        row.addMember(new GruntMember(memberName, draft.body, draft.willpower));
+      }
+      this.participantReactions.set(row, 3);
+      this.participantIntuitions.set(row, 3);
+      row.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
+    }
+    row.baseIni = this.getParticipantBaseInitiative(row);
+    this.participantTieBreakers.set(row, Math.random());
+    // Queued, not written, until this row has its own rolled Initiative
+    // Score (RULINGS.md 2026-08-30) - a brand-new row goes in unrolled
+    // (single shared Initiative Test, p. 379).
+    this.queueJoinAnnouncement(row, (participant) => ({
+      actor: participant.name || MERGED_GRUNT_ROW_NAME,
+      text: ROW_FORMED_LOG_TEXT
+    }));
+    this.selectActor(row);
+    this.syncSharedState();
+    this.sort();
+    return row;
   }
 
   btnEdge_Click(sender: IParticipant) {
@@ -5012,6 +5625,27 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.participantIntuitions.set(clone, this.getParticipantIntuitionValue(sender));
       clone.baseIni = this.getParticipantBaseInitiative(clone);
       this.participantTieBreakers.set(clone, Math.random());
+      if (this.participantStatblocks.has(sender)) {
+        this.participantStatblocks.set(clone, this.participantStatblocks.get(sender)!);
+      }
+      // `participantLieutenantTeamRowId` is deliberately NOT copied here
+      // (defect D7, validator round): a duplicated lieutenant linked to the
+      // same row as its source would leave two lieutenants both beating that
+      // row on a tie, and tying with each other with no comparator rule to
+      // order the two of them. A duplicate is created unlinked; the GM
+      // re-links it by hand (the retroactive lieutenant/team-row control,
+      // defect D3) if that is genuinely wanted. (Item 9, fix round 3: this
+      // note used to sit directly above the unrelated `pendingJoinAnnouncement`
+      // copy below and read as describing *that* copy.)
+      //
+      // `pendingJoinAnnouncement` IS copied: a source still owing a join line
+      // (not yet rolled) produces a clone that owes its own, independent join
+      // line too - each resolver reads off whichever participant it is fired
+      // against (see that map's own doc comment), so copying the array is
+      // enough; nothing needs rebinding.
+      if (this.pendingJoinAnnouncement.has(sender)) {
+        this.pendingJoinAnnouncement.set(clone, [ ...this.pendingJoinAnnouncement.get(sender)! ]);
+      }
       const cloneId = this.getParticipantId(clone);
       this.lastKnownDamage.set(cloneId, {
         physical: Math.max(0, Number(clone.physicalDamage || 0)),
@@ -5233,10 +5867,29 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return this.expandedActionKey === action.key;
   }
 
+  /**
+   * Tab-to-add (brief Decision D4): the one fast keyboard entry path left
+   * untouched by the dialog. Still creates a blank, unnamed participant
+   * instantly with no join line - the line is queued (`queueJoinAnnouncement`)
+   * and only actually written the first time this participant has a rolled
+   * Initiative Score (RULINGS.md 2026-08-30). If it is still unnamed at that
+   * moment, it gets the same "default name, unique in the encounter"
+   * treatment the dialog's blank-name commit uses (brief acceptance
+   * criterion 3), rather than sitting in a rolled order under no name at
+   * all.
+   */
   inpName_KeyDown(e: KeyboardEvent) {
     this.handleTabNav(e, 'input[name="name"]', (row) => {
       LogHandler.log(this.currentBTTime, "TabAddParticipant");
-      this.addParticipant();
+      const p = this.addParticipant();
+      this.queueJoinAnnouncement(p, (participant) => {
+        const typed = (participant.name || "").trim();
+        const actor = typed || this.nextStandaloneParticipantName();
+        if (!typed) {
+          participant.name = actor;
+        }
+        return { actor, text: PARTICIPANT_JOINED_LOG_TEXT };
+      });
       const index = row.getAttribute("data-indexnr");
       this.indexToSelect = index !== null ? 1 + Number(index) : -1;
       this.focusPendingRow();
@@ -5330,10 +5983,23 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const clamped = this.clampInitiativeRoll(value, p);
     if (clamped !== p.diceIni) {
       p.diceIni = clamped;
+      // This box is a genuine Initiative Test result (see doc comment
+      // above), so a participant with a still-queued join line may be
+      // entering a rolled order for the first time right here (RULINGS.md
+      // 2026-08-30) - the same choke point `rollAndLogInitiative` and the
+      // player `roll_submission` command use.
+      this.announceJoinIfPending(p);
     }
     this.onParticipantUpdated();
   }
 
+  /**
+   * Runs on every edit to a participant row, including every keystroke of a
+   * name edit. Does not decide any join-line timing: that is entirely owned
+   * by `announceJoinIfPending`, fired only from genuine Initiative Test
+   * results (RULINGS.md 2026-08-30) - there is no longer a "commit" event on
+   * the name box itself for a join line to hang off.
+   */
   onParticipantUpdated() {
     this.enforceParticipantRollBounds();
     this.syncSharedState();
@@ -5417,17 +6083,68 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private rollAndLogInitiative(p: IParticipant, presetHidden?: boolean): void {
     const values = Array.from({ length: p.dices }, () => Math.floor(Math.random() * 6) + 1);
     p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
+    // The choke point (RULINGS.md 2026-08-30): fired before this roll's own
+    // log line, so a still-owed join announcement reads ahead of the roll
+    // that put this participant into the order.
+    this.announceJoinIfPending(p);
     const total = p.getCurrentInitiative();
     const intuition = this.getParticipantIntuition(p);
     const baseLabel = this.isAstral(p) && this.asAstral(p).astralProjecting
       ? `INT×2(${intuition * 2})`
       : this.isMatrix(p) && this.asMatrix(p).jackedIn
           && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
-          ? `DP(${this.asMatrix(p).dataProcessing}) + INT(${intuition})`
+          ? `DP(${this.formatDataProcessing(this.asMatrix(p).dataProcessing)}) + INT(${intuition})`
           : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
     const logText = formatInitiativeRollLogText(baseLabel, values, total);
     // appendParticipantRollLog writes the local line too, tagged if hidden.
     this.appendParticipantRollLog(p, logText, presetHidden);
+  }
+
+  /**
+   * GM-facing label of the statblock this participant was instantiated from
+   * (e.g. "PR 5 - Elite Corporate Security (Grunt)"), or `null` for a
+   * hand-built participant. Defect 7 fix (fix round 2): D-X4 retains
+   * `professionalRating`/`label` as GM-only identification "so the GM can
+   * see what a participant was created from", but nothing ever rendered it -
+   * this is the local (non-wire) lookup the details panel binds to.
+   * Never touches `SharedParticipantState`; the label only ever travels on
+   * `SharedGmParticipantState` (U2, unchanged).
+   */
+  getParticipantStatblockLabel(p: IParticipant): string | null {
+    const imprint = this.participantStatblocks.get(p);
+    if (!imprint) {
+      return null;
+    }
+    return getStatblockById(imprint.id)?.label ?? null;
+  }
+
+  /**
+   * Data Processing to seed onto `p` if/when it is promoted to a Matrix
+   * participant, sourced from the statblock imprint the same way
+   * `getParticipantStatblockLabel` reads it - the established mechanism for
+   * "this participant was instantiated from statblock X, look up X's own
+   * data" (brief "Grunt statblock Data Processing" item 4; RULINGS
+   * 2026-08-30). `undefined` for a hand-built participant, or for a block
+   * that prints no usable Data Processing (`pr5-lieutenant` and the other
+   * twelve) - `promoteToMatrixParticipant` treats that as unset, never as a
+   * default.
+   */
+  private statblockDataProcessing(p: IParticipant): number | undefined {
+    const imprint = this.participantStatblocks.get(p);
+    if (!imprint) {
+      return undefined;
+    }
+    return getStatblockById(imprint.id)?.dataProcessing;
+  }
+
+  /**
+   * Roll-log rendering of a Data Processing value: the number itself, or
+   * `"not set"` for the unset sentinel (RULINGS.md 2026-08-30) - a bare
+   * `DP(0)` would read as a real, if unusually low, rating rather than as
+   * "the GM has not entered one yet".
+   */
+  private formatDataProcessing(dp: number): string {
+    return dp > DATA_PROCESSING_UNSET ? String(dp) : "not set";
   }
 
   getParticipantEdgeRatingValue(p: IParticipant): number {
@@ -5442,9 +6159,27 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return this.getParticipantIntuition(p);
   }
 
+  /**
+   * Only jacked into a VR mode uses Data Processing + Intuition (p. 101,
+   * p. 159, p. 231); AR uses physical Reaction + Intuition like anyone else,
+   * so a Matrix participant currently in AR (or not jacked in at all) falls
+   * through to the same branch a non-Matrix participant does - guarding on
+   * `jackedIn`/`vrMode` here, not merely `isMatrix(p)`, is what makes that
+   * true (a Reaction edit on an AR-mode decker must move Reaction+Intuition,
+   * not silently recompute DP+Intuition instead).
+   *
+   * An unset Data Processing (`DATA_PROCESSING_UNSET`) derives **no** VR
+   * Initiative (RULINGS.md 2026-08-30): rather than the plausible-looking
+   * `0 + intuition`, this returns `DATA_PROCESSING_UNSET` itself, so a GM
+   * reading the number sees an unmistakably-incomplete value instead of one
+   * that could pass for a real attribute.
+   */
   getParticipantBaseInitiative(p: IParticipant): number {
     const intuition = this.getParticipantIntuition(p);
-    if (this.isMatrix(p)) {
+    if (this.isMatrix(p) && p.jackedIn && p.vrMode !== VRMode.AR && p.vrMode !== VRMode.None) {
+      if (p.dataProcessing <= DATA_PROCESSING_UNSET) {
+        return DATA_PROCESSING_UNSET;
+      }
       return Math.max(0, p.dataProcessing + intuition);
     }
     if (this.isAstral(p) && p.astralProjecting) {
@@ -5474,7 +6209,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.syncSharedState();
   }
 
-  addParticipant(selectNewParticipant = true) {
+  addParticipant(selectNewParticipant = true): Participant {
     const p = new Participant();
     this.combatManager.addParticipant(p);
     this.participantClaimable.set(p, false);
@@ -5499,6 +6234,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.selectActor(p);
     }
     this.syncSharedState();
+    return p;
   }
 
   /**
@@ -5541,7 +6277,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // added - GM bookkeeping, and a straight answer to "how many hits until it
     // drops" that nobody at the table had earned. The GM reads the box count off
     // the Condition Monitor panel, where it always was.
-    this.logRowEvent(grunt.name || STANDALONE_GRUNT_NAME_PREFIX, "added.");
+    //
+    // Queued, not written, until this grunt has a rolled Initiative Score
+    // (RULINGS.md 2026-08-30) - a standalone grunt takes its own Initiative
+    // Test like any other new participant, so this is ordinarily a no-op
+    // until the GM (or a batch roll) rolls it.
+    this.queueJoinAnnouncement(grunt, (participant) => ({
+      actor: participant.name || STANDALONE_GRUNT_NAME_PREFIX,
+      text: GRUNT_ADDED_LOG_TEXT
+    }));
     if (selectNewGrunt) {
       this.selectActor(grunt);
     }
@@ -5567,6 +6311,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
     }
     return `${STANDALONE_GRUNT_NAME_PREFIX} ${highest + 1}`;
+  }
+
+  /**
+   * Default name for the next plain participant left unnamed at commit
+   * (defect D2): `"Combatant <n>"`, one past the highest number already in
+   * the encounter. Same scanning shape as `nextStandaloneGruntName`, over its
+   * own namespace (`STANDALONE_PARTICIPANT_NAME_PREFIX`).
+   */
+  private nextStandaloneParticipantName(): string {
+    const pattern = new RegExp(`^${STANDALONE_PARTICIPANT_NAME_PREFIX} (\\d+)$`);
+    let highest = 0;
+    for (const p of this.combatManager.participants.items) {
+      const match = pattern.exec(p.name || "");
+      if (match) {
+        highest = Math.max(highest, Number(match[1]));
+      }
+    }
+    return `${STANDALONE_PARTICIPANT_NAME_PREFIX} ${highest + 1}`;
   }
 
   /**
@@ -5659,6 +6421,22 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return hasGruntConditionMonitor(p);
   }
 
+  /**
+   * Was `p` instantiated from a statblock whose `kind` is `"lieutenant"`
+   * (brief D-X2's `GruntStatblock.kind`)? Used by `mergeSelectedGrunts`
+   * (defect 5, fix round 2) to refuse a merge that would produce a row made
+   * entirely of lieutenants. False for a hand-built grunt (no imprint at
+   * all) and for a grunt-kind template - only an actual lieutenant template
+   * counts.
+   */
+  private isLieutenantImprintedStatblock(p: IParticipant): boolean {
+    const imprint = this.participantStatblocks.get(p);
+    if (!imprint) {
+      return false;
+    }
+    return getStatblockById(imprint.id)?.kind === "lieutenant";
+  }
+
   isSelectedForMerge(p: IParticipant): boolean {
     return this.gruntsSelectedForMerge.has(p);
   }
@@ -5710,9 +6488,59 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * The row's shared wound accumulator starts at 0 - no retroactive penalty for
    * damage the founding members already had (Decision 11, matching Decision 7).
    */
-  mergeSelectedGrunts(): GruntMergeResult {
+  /**
+   * @param name GM-typed row name from the "name before add" dialog (brief
+   * U1/U12, IA1). Falls back to `nextMergedGruntRowName()` exactly as before
+   * when omitted or blank, so every existing direct call site
+   * (`component.mergeSelectedGrunts()`, no argument) is unaffected.
+   */
+  mergeSelectedGrunts(name?: string): GruntMergeResult {
     const selected = this.getGruntsSelectedForMerge();
-    const result = mergeGruntsIntoRow(selected, this.nextMergedGruntRowName());
+    const rowName = (name ?? "").trim() || this.nextMergedGruntRowName();
+    // Defect 5 fix (fix round 2), widened by item 6 (fix round 3): a
+    // lieutenant statblock (e.g. "pr1-lieutenant") can be instantiated as a
+    // standalone grunt (brief G18/D3), so the merge selection can include one
+    // imprinted from a lieutenant template - which the row picker already
+    // refuses at instantiation time (defect D6), but the merge path never
+    // checked. A lieutenant has his own attributes (p. 380) and his own
+    // Initiative Test (p. 381) - verified against `rules/` 2026-08-30
+    // (`rules/pages/p0382.txt` for "own attributes",
+    // `rules/pages/p0383.txt` for "own Initiative Test"). Folding even one
+    // of them into a row's single shared Score and shared
+    // Condition Monitor (p. 379) is the same violation the row picker's
+    // filter exists to prevent, reached from a different door.
+    //
+    // Item 6 fix (fix round 3): the previous guard only refused when the
+    // WHOLE selection was lieutenant-imprinted, so a mixed selection (one
+    // lieutenant plus one ordinary grunt) still went through - folding the
+    // lieutenant into the row's single shared Score and Condition Monitor
+    // anyway. Refused now whenever the selection contains *any*
+    // lieutenant-imprinted grunt, naming the offender(s) so the GM knows
+    // which tick to clear rather than having to guess.
+    //
+    // Also widened to a lieutenant/team-row link (`participantLieutenantTeamRowId`)
+    // on its own, not just a lieutenant-template imprint: `setLieutenantTeam`
+    // is not restricted to lieutenant-imprinted grunts (the "Lieutenant of"
+    // control is offered for any grunt-shaped participant), so a hand-built
+    // grunt the GM has linked to a row is making his own tie-break-relevant
+    // Initiative Test the same way a templated lieutenant does - merging him
+    // away would fold that into a shared Score exactly the same way, and
+    // silently drop the link with no warning (item 6's second half).
+    const lieutenantsInSelection = selected.filter(g =>
+      this.isLieutenantImprintedStatblock(g) || this.participantLieutenantTeamRowId.has(g)
+    );
+    if (lieutenantsInSelection.length > 0) {
+      const names = lieutenantsInSelection.map(g => g.name || "unnamed grunt").join(", ");
+      const reason = `Cannot merge: ${names} ${lieutenantsInSelection.length === 1 ? "was" : "were"} `
+        + "instantiated from a lieutenant statblock or linked as one. A lieutenant has his own "
+        + "attributes (p. 380) and his own Initiative Test (p. 381) and cannot share a group's "
+        + `single Score - untick ${lieutenantsInSelection.length === 1 ? "it" : "them"}, or add `
+        + `${lieutenantsInSelection.length === 1 ? "it" : "them"} individually instead.`;
+      this.setMergeMessage(reason);
+      this.logGmOnlyRowEvent(MERGED_GRUNT_ROW_NAME, `merge refused - ${reason}`);
+      return { ok: false, row: null, merged: [], refused: [ ...selected ], reason };
+    }
+    const result = mergeGruntsIntoRow(selected, rowName);
     this.setMergeMessage(result.reason);
     if (!result.ok || !result.row) {
       // Refusals are logged as well as shown: the GM's next move (re-group
@@ -5740,14 +6568,34 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantTieBreakers.set(row, Math.random());
     this.getParticipantId(row);
     this.expandedRowPanels.add(row);
-    // Logged before the removal loop: `combatManager.removeParticipant(grunt)`
-    // can cascade into `endInitiativePass()`/`endCombatTurn()` if the grunt
-    // being merged away is the current actor, and that boundary line must not
-    // land above this one describing the merge that caused it (brief "Combat
-    // boundary logging" fix round, Defect 1).
-    this.logRowEvent(row.name,
-      `formed from ${selected.map(g => g.name || "unnamed grunt").join(", ")}.`);
+    // D5: when the merged grunts carry different statblock imprints, the
+    // merged row takes the first selected grunt's - mirroring
+    // `mergeGruntsIntoRow` itself, which already takes `baseIni`/`dices` from
+    // `grunts[0]` (`NpcRowParticipant.ts`).
+    if (this.participantStatblocks.has(first)) {
+      this.participantStatblocks.set(row, this.participantStatblocks.get(first)!);
+    }
+    // Queued before the removal loop below, and frozen now rather than
+    // resolved lazily: the source grunts are about to be removed from the
+    // encounter, so their names have to be captured while they still exist.
+    // The line itself is not written until this row has its own rolled
+    // Initiative Score (RULINGS.md 2026-08-30) - "the row goes in unrolled
+    // so the GM makes its single group Initiative Test" (brief Decision 10),
+    // so this ordinarily just queues.
+    const mergedFrom = selected.map(g => g.name || "unnamed grunt").join(", ");
+    this.queueJoinAnnouncement(row, (participant) => ({
+      actor: participant.name || MERGED_GRUNT_ROW_NAME,
+      text: `formed from ${mergedFrom}.`
+    }));
     for (const grunt of selected) {
+      // `forgetParticipant` drops `participantLieutenantTeamRowId` along with
+      // every other side map (ARCHITECTURE.md §8) - silently, with no warning
+      // to the GM. That would be a real loss for a grunt carrying a
+      // lieutenant/team-row link, but the refusal check above (item 6, fix
+      // round 3) now guarantees no such grunt ever reaches this loop: any
+      // `grunt` here is, by construction, neither lieutenant-imprinted nor
+      // linked via `setLieutenantTeam`. Preventing the situation rather than
+      // warning about it after the fact.
       this.forgetParticipant(grunt);
       this.combatManager.removeParticipant(grunt);
       this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
@@ -5773,6 +6621,91 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private logRowEvent(actor: string, text: string, playerText: string = text): void {
     LogHandler.log(this.currentBTTime, `${actor} ${text}`);
     this.appendSharedLog(actor, playerText);
+  }
+
+  /**
+   * Queue a deferred join-log line for `p` (RULINGS.md 2026-08-30). Every
+   * GM-side add path funnels its "this combatant just joined" wording
+   * through here instead of calling `logRowEvent` directly - the plus
+   * button and Tab-to-add (`addParticipant` callers), Add Grunt
+   * (`addGrunt`/`commitTemplateGrunt`), Grunt Group (`commitRowDraft`), Add
+   * NPC (`addNpcToRow`), merge (`mergeSelectedGrunts`), and the add
+   * dialog's Confirm (`commitAddDraft`).
+   *
+   * Immediately attempts to fire the line it just queued
+   * (`announceJoinIfPending`), which is a no-op for the ordinary case of a
+   * brand-new, unrolled participant - `addNpcToRow`'s reinforcement case is
+   * the exception, where the *row* may already be rolled this Combat Turn,
+   * and this immediate attempt is what announces that member right away
+   * instead of waiting for a roll that individual member will never get
+   * (Decision 7: a joiner takes the row's current Score, no Initiative Test
+   * of its own).
+   */
+  private queueJoinAnnouncement(
+    p: IParticipant,
+    resolve: JoinAnnouncementResolver,
+    member?: GruntMember
+  ): void {
+    const queue = this.pendingJoinAnnouncement.get(p) ?? [];
+    queue.push({ resolve, member });
+    this.pendingJoinAnnouncement.set(p, queue);
+    this.announceJoinIfPending(p);
+  }
+
+  /**
+   * The single choke point (RULINGS.md 2026-08-30): writes every join line
+   * still queued for `p`, the first time `p` actually has a rolled
+   * Initiative Score (`diceIni > 0`). Called from every place that writes a
+   * real Initiative Test result to `diceIni` - `rollAndLogInitiative` (the
+   * Roll button and every batch-roll path), the player `roll_submission`
+   * command, and the manual rolled-total box
+   * (`onParticipantRolledTotalChanged`) - and from `queueJoinAnnouncement`
+   * itself. A participant whose queue is empty, or who has not yet rolled,
+   * is left untouched: a combatant created and deleted before initiative is
+   * ever rolled never reaches `diceIni > 0` here and so is never announced,
+   * which is the entire point of the ruling.
+   */
+  private announceJoinIfPending(p: IParticipant): void {
+    if (p.diceIni <= 0) {
+      return;
+    }
+    const queue = this.pendingJoinAnnouncement.get(p);
+    if (!queue || queue.length === 0) {
+      return;
+    }
+    this.pendingJoinAnnouncement.delete(p);
+    for (const entry of queue) {
+      const { actor, text, playerText } = entry.resolve(p);
+      this.logRowEvent(actor, text, playerText ?? text);
+    }
+  }
+
+  /**
+   * Prune one row member's queued-but-unfired join announcement out of its
+   * row's queue, leaving any other member's own entry untouched (RULINGS.md
+   * 2026-08-30). `addNpcToRow` queues one entry per member added, all keyed
+   * on the row rather than the member, so a blanket
+   * `pendingJoinAnnouncement.delete(row)` would silently drop other
+   * still-pending members too.
+   *
+   * Called by every path that removes or relocates a row member before its
+   * row has rolled - `removeRowMember` and `detachRowMember` - so a member
+   * who never made it into a rolled Initiative order never gets a "joined
+   * the group" line written after the line recording their removal or
+   * detachment. A no-op if the member's entry already fired (the row had
+   * already rolled when they joined) or was never queued.
+   */
+  private forgetQueuedRowMemberAnnouncement(row: NpcRowParticipant, member: GruntMember): void {
+    const queue = this.pendingJoinAnnouncement.get(row);
+    if (!queue) {
+      return;
+    }
+    const pruned = queue.filter(entry => entry.member !== member);
+    if (pruned.length === 0) {
+      this.pendingJoinAnnouncement.delete(row);
+    } else {
+      this.pendingJoinAnnouncement.set(row, pruned);
+    }
   }
 
   /**
@@ -5997,6 +6930,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantTieBreakers.set(row, Math.random());
     this.getParticipantId(row);
     this.expandedRowPanels.add(row);
+    // Item 8 fix (fix round 4): not currently wired to any UI control
+    // (`commitRowDraft` builds the Grunt Group button's row inline instead,
+    // see that method's own comment) - but it is public, and a queue-less add
+    // path here would be a latent trap for whichever future button ends up
+    // calling it directly: every other add path funnels its join line
+    // through here (RULINGS.md 2026-08-30), and this one silently would not.
+    this.queueJoinAnnouncement(row, (participant) => ({
+      actor: participant.name || MERGED_GRUNT_ROW_NAME,
+      text: ROW_FORMED_LOG_TEXT
+    }));
     if (selectNewRow) {
       this.selectActor(row);
     }
@@ -6050,6 +6993,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * NPC inherits the row's current shared Initiative Score directly, with no
    * Initiative Test of its own and no -10-per-elapsed-pass late-entry penalty
    * (criterion 15 / Decision 7, scenario S7).
+   *
+   * The join line is queued like every other add path (RULINGS.md
+   * 2026-08-30), but this is the one path where that queue can fire
+   * *immediately*: if the row has already rolled this Combat Turn, this
+   * member has just entered a rolled order by inheriting the row's current
+   * Score directly (Decision 7) - there is no future roll of its own to wait
+   * for. `queueJoinAnnouncement` makes that immediate attempt itself, so the
+   * two cases (row already rolled / row still unrolled) need no branch here.
    */
   addNpcToRow(row: NpcRowParticipant, name?: string, body = 3, willpower = 3): GruntMember {
     const member = new GruntMember(name ?? this.nextRowMemberName(row), body, willpower);
@@ -6059,11 +7010,21 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Decision 7 says a joiner simply takes the row's current Score. Said out
     // loud in the log for a wounded joiner, because that is exactly the case a
     // GM would otherwise expect to see the row slow down.
-    const carriedWounds = member.wm > 0
-      ? `, arrives wounded (-${member.wm})`
-      : "";
-    this.logRowEvent(this.rowLogActor(row),
-      `${member.name} joined the group${carriedWounds}.`);
+    //
+    // `carriedWounds` is read lazily inside the resolver, like `member.name`
+    // is, rather than frozen at queue time: a reinforcement that takes
+    // damage before its own row gets around to rolling (unrolled row, item 8
+    // fix round 4) must report the wounds it actually has at announcement
+    // time, not the wounds it arrived with.
+    this.queueJoinAnnouncement(row, (participant) => {
+      const carriedWounds = member.wm > 0
+        ? `, arrives wounded (-${member.wm})`
+        : "";
+      return {
+        actor: this.rowLogActor(this.asNpcRow(participant)),
+        text: `${member.name} joined the group${carriedWounds}.`
+      };
+    }, member);
     this.syncSharedState();
     this.sort();
     return member;
@@ -6413,6 +7374,31 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       physical: Math.max(0, Number(detached.physicalDamage || 0)),
       stun: Math.max(0, Number(detached.stunDamage || 0))
     });
+    // A member of a templated row carries the row's statblock imprint with it
+    // when it detaches (brief implementation appendix item 33).
+    if (this.participantStatblocks.has(row)) {
+      this.participantStatblocks.set(detached, this.participantStatblocks.get(row)!);
+    }
+    // Item 1 fix (fix round 4): if `member` joined this row while it was
+    // still unrolled, it is owed a queued "joined the group" line that has
+    // not fired yet (`pendingJoinAnnouncement`, RULINGS.md 2026-08-30). That
+    // line is now wrong on two counts - the member is no longer in the
+    // group, and `member.name` inside the resolver would go on resolving
+    // against a `GruntMember` no row will ever roll for again - so it is
+    // dropped here rather than left to fire later.
+    //
+    // Deliberately NOT requeued onto `detached` under new wording. The
+    // `logRowEvent` two lines below - "detached from the row onto their own
+    // initiative" - fires unconditionally, is shown to players like every
+    // other queued join line, and already tells the table this NPC now
+    // exists as its own entry in the order; a detach was never a "leave the
+    // fight" event; the member has been visibly present since it joined the
+    // row, only unannounced. A second "joined the fight" line when the
+    // detached NPC's own Initiative Test resolves would be a duplicate
+    // announcement of the same NPC's presence, which is exactly what the
+    // choke point in `announceJoinIfPending` exists to prevent, not
+    // reintroduce here.
+    this.forgetQueuedRowMemberAnnouncement(row, member);
     this.logRowEvent(this.rowLogActor(row),
       `${member.name} detached from the row onto their own initiative`);
     // Detaching the last NPC empties the row, but that is tidying up, not a
@@ -6465,6 +7451,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     LogHandler.log(this.currentBTTime, (member.name || "NPC") + " RemoveRowMember_Confirm");
     row.removeMember(member);
     this.forgetMapEntry(this.rowMemberDamageValues, member);
+    // Item 1 fix (fix round 4): drop `member`'s own queued "joined the
+    // group" line, if the row hadn't rolled yet when it fired
+    // (`pendingJoinAnnouncement`, RULINGS.md 2026-08-30) - otherwise it
+    // would still be sitting in the row's queue and would fire the next time
+    // the row rolls, writing "joined the group" for an NPC the log already
+    // recorded as removed, for someone no longer in the fight at all. A
+    // no-op if the entry already fired or was never queued. (When `member`
+    // was the row's last member, `forgetParticipant(row)` below also clears
+    // the whole queue for the row being deleted; this call still runs first
+    // so the prune does not depend on that branch.)
+    this.forgetQueuedRowMemberAnnouncement(row, member);
     this.logRowEvent(this.rowLogActor(row), `${member.name} removed from the row`);
     if (isLastMember) {
       // The row is now a plain empty row (Decision 21) - the prompt already
@@ -6490,6 +7487,23 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const id = this.participantIds.get(p);
     if (id) {
       this.forgetMapEntry(this.lastKnownDamage, id);
+      // Item 9 fix (fix round 3): if `p` is a row, drop every OTHER
+      // participant's dangling lieutenant/team-row link that pointed at it
+      // (`participantLieutenantTeamRowId` is keyed by the *lieutenant*, not
+      // the row, so `forgetMapEntry(participantLieutenantTeamRowId, p)`
+      // below cannot reach these - it only ever removes `p`'s own entry, and
+      // `p` here is the row being deleted, not a lieutenant). Harmless today
+      // (ids are random strings and can never re-match a future row), but
+      // leaving it meant a lieutenant could point at an id that no longer
+      // names anything in the encounter with no way for the GM to see or
+      // clear it.
+      if (isNpcRow(p)) {
+        for (const [ lieutenant, teamRowId ] of [ ...this.participantLieutenantTeamRowId ]) {
+          if (teamRowId === id) {
+            this.participantLieutenantTeamRowId.delete(lieutenant);
+          }
+        }
+      }
     }
     this.forgetMapEntry(this.declaredActionSelections, p);
     this.forgetMapEntry(this.participantIds, p);
@@ -6499,6 +7513,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetMapEntry(this.participantReactions, p);
     this.forgetMapEntry(this.participantIntuitions, p);
     this.forgetMapEntry(this.participantTieBreakers, p);
+    this.forgetMapEntry(this.participantStatblocks, p);
+    this.forgetMapEntry(this.participantLieutenantTeamRowId, p);
+    this.forgetMapEntry(this.pendingJoinAnnouncement, p);
     this.forgetSetEntry(this.expandedRowPanels, p);
     this.forgetSetEntry(this.expandedDeckPanels, p);
     this.forgetSetEntry(this.expandedAstralPanels, p);
@@ -6626,11 +7643,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Enter or leave astral space. Both halves of the Initiative change are a
    * delta on the running Score (brief "Astral projection mid-turn", p. 160):
    *  - the attribute half (REA+INT <-> INT x 2) rides the `baseIni` setter;
-   *  - the dice half is a *relative* +1/-1 on the Initiative Dice count
-   *    (Astral base 2D6 vs Physical 1D6, p. 159), pushed through the single
-   *    dice-count funnel so the gained/lost die is actually rolled and applied
-   *    to the running Score - "gains the die (and the change in Initiative)
-   *    for their Astral Initiative during that Combat Turn" (p. 160).
+   *  - the dice half is a *relative* +2/-2 on the Initiative Dice count
+   *    (Astral base 3D6 total vs Physical 1D6, printed p. 314,
+   *    `rules/pages/p0316.txt`; RULINGS 2026-08-30), pushed through the single
+   *    dice-count funnel so the gained/lost dice are actually rolled and
+   *    applied to the running Score - "gains the die (and the change in
+   *    Initiative) for their Astral Initiative during that Combat Turn"
+   *    (p. 160, `rules/pages/p0162.txt` line 53). The book's own example is
+   *    singular because it predates the 3D6 astral-base ruling above;
+   *    RULINGS.md 2026-08-30 supersedes the *count* only, not the mechanic -
+   *    under that ruling a magician projecting mid-turn gains two dice, not
+   *    one.
    *
    * Relative rather than absolute so a magician already carrying bonus
    * Initiative Dice keeps them. Outside a running combat, or before this
@@ -6734,7 +7757,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.syncSharedState();
   }
 
-  private promoteToMatrixParticipant(p: IParticipant, defaultDP = 6): MatrixParticipant {
+  private promoteToMatrixParticipant(p: IParticipant): MatrixParticipant {
     const mp = new MatrixParticipant();
     const src = p as unknown as Record<string, unknown>;
     const dst = mp as unknown as Record<string, unknown>;
@@ -6749,7 +7772,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // reduction happens at the time of the Interrupt Action and is not
     // reversible by a type swap (brief F9, p. 167).
     dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
-    mp.dataProcessing = defaultDP;
+    // No hardcoded default (RULINGS 2026-08-30): the old `defaultDP = 6`
+    // belonged to no character in the book and looked like a real rating.
+    // `statblockDataProcessing` supplies a value only for a block the rules
+    // actually derive one for (today, only `pr4-lieutenant`); every other
+    // promotion - including from a bare "Add Participant" row, and from
+    // `pr5-lieutenant`, whose deck array is deliberately unassigned - leaves
+    // Data Processing unset until the GM enters one.
+    mp.dataProcessing = this.statblockDataProcessing(p) ?? DATA_PROCESSING_UNSET;
     mp.vrMode = VRMode.None;
     const existingId = this.participantIds.get(p);
     if (existingId) this.participantIds.set(mp, existingId);
@@ -6765,6 +7795,22 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (intuition !== undefined) this.participantIntuitions.set(mp, intuition);
     const tb = this.participantTieBreakers.get(p);
     if (tb !== undefined) this.participantTieBreakers.set(mp, tb);
+    // Defect 4 fix (fix round 2): the statblock imprint and the lieutenant/
+    // team-row link previously did not survive an in-place type swap, same
+    // as every other GM-local side map here.
+    const imprint = this.participantStatblocks.get(p);
+    if (imprint) this.participantStatblocks.set(mp, imprint);
+    const teamRowId = this.participantLieutenantTeamRowId.get(p);
+    if (teamRowId !== undefined) this.participantLieutenantTeamRowId.set(mp, teamRowId);
+    // Item 1 fix (fix round 3, closing round 2 defect 8): a still-queued
+    // join line used to be silently dropped by every one of these four
+    // type-swap helpers - a Tab-added participant jacked into the Matrix (or
+    // astrally projected) before ever being named+rolled would enter combat
+    // with no join line and no way to get one. Each resolver reads off
+    // whichever participant it is fired against (see `pendingJoinAnnouncement`'s
+    // own doc comment), so the array can move across the swap unchanged.
+    const pendingJoin = this.pendingJoinAnnouncement.get(p);
+    if (pendingJoin) this.pendingJoinAnnouncement.set(mp, pendingJoin);
     const damage = existingId ? this.lastKnownDamage.get(existingId) : undefined;
     if (damage && existingId) this.lastKnownDamage.set(existingId, damage);
     const das = this.declaredActionSelections.get(p);
@@ -6779,6 +7825,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantReactions.delete(p);
     this.participantIntuitions.delete(p);
     this.participantTieBreakers.delete(p);
+    this.participantStatblocks.delete(p);
+    this.participantLieutenantTeamRowId.delete(p);
+    this.pendingJoinAnnouncement.delete(p);
     if (this.expandedDeckPanels.has(p)) {
       this.expandedDeckPanels.delete(p);
       this.expandedDeckPanels.add(mp);
@@ -6838,6 +7887,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (intuition2 !== undefined) this.participantIntuitions.set(p, intuition2);
     const tb = this.participantTieBreakers.get(mp);
     if (tb !== undefined) this.participantTieBreakers.set(p, tb);
+    // Defect 4 fix (fix round 2): carry the statblock imprint and the
+    // lieutenant/team-row link across the type swap, same as every other
+    // GM-local side map here.
+    const imprint = this.participantStatblocks.get(mp);
+    if (imprint) this.participantStatblocks.set(p, imprint);
+    const teamRowId = this.participantLieutenantTeamRowId.get(mp);
+    if (teamRowId !== undefined) this.participantLieutenantTeamRowId.set(p, teamRowId);
+    // Item 1 fix (fix round 3, closing round 2 defect 8) - see
+    // `promoteToMatrixParticipant`'s matching comment.
+    const pendingJoin = this.pendingJoinAnnouncement.get(mp);
+    if (pendingJoin) this.pendingJoinAnnouncement.set(p, pendingJoin);
     const das = this.declaredActionSelections.get(mp);
     if (das) {
       this.declaredActionSelections.set(p, das);
@@ -6850,6 +7910,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantReactions.delete(mp);
     this.participantIntuitions.delete(mp);
     this.participantTieBreakers.delete(mp);
+    this.participantStatblocks.delete(mp);
+    this.participantLieutenantTeamRowId.delete(mp);
+    this.pendingJoinAnnouncement.delete(mp);
     this.expandedDeckPanels.delete(mp);
     // Same instance-swap carry-over as promoteToMatrixParticipant, in reverse:
     // removing the deck must not also collapse an open stat twirly.
@@ -6896,6 +7959,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (intuition !== undefined) this.participantIntuitions.set(ap, intuition);
     const tb = this.participantTieBreakers.get(p);
     if (tb !== undefined) this.participantTieBreakers.set(ap, tb);
+    // Defect 4 fix (fix round 2): carry the statblock imprint and the
+    // lieutenant/team-row link across the type swap, same as every other
+    // GM-local side map here.
+    const imprint = this.participantStatblocks.get(p);
+    if (imprint) this.participantStatblocks.set(ap, imprint);
+    const teamRowId = this.participantLieutenantTeamRowId.get(p);
+    if (teamRowId !== undefined) this.participantLieutenantTeamRowId.set(ap, teamRowId);
+    // Item 1 fix (fix round 3, closing round 2 defect 8) - see
+    // `promoteToMatrixParticipant`'s matching comment.
+    const pendingJoin = this.pendingJoinAnnouncement.get(p);
+    if (pendingJoin) this.pendingJoinAnnouncement.set(ap, pendingJoin);
     const das = this.declaredActionSelections.get(p);
     if (das) {
       this.declaredActionSelections.set(ap, das);
@@ -6908,6 +7982,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantReactions.delete(p);
     this.participantIntuitions.delete(p);
     this.participantTieBreakers.delete(p);
+    this.participantStatblocks.delete(p);
+    this.participantLieutenantTeamRowId.delete(p);
+    this.pendingJoinAnnouncement.delete(p);
     if (this.selectedActor === p) this.selectedActor = ap;
     if (this.actModalParticipant === p) this.actModalParticipant = ap;
     this.combatManager.removeParticipant(p);
@@ -6956,6 +8033,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (intuition2 !== undefined) this.participantIntuitions.set(p, intuition2);
     const tb = this.participantTieBreakers.get(ap);
     if (tb !== undefined) this.participantTieBreakers.set(p, tb);
+    // Defect 4 fix (fix round 2): carry the statblock imprint and the
+    // lieutenant/team-row link across the type swap, same as every other
+    // GM-local side map here.
+    const imprint = this.participantStatblocks.get(ap);
+    if (imprint) this.participantStatblocks.set(p, imprint);
+    const teamRowId = this.participantLieutenantTeamRowId.get(ap);
+    if (teamRowId !== undefined) this.participantLieutenantTeamRowId.set(p, teamRowId);
+    // Item 1 fix (fix round 3, closing round 2 defect 8) - see
+    // `promoteToMatrixParticipant`'s matching comment.
+    const pendingJoin = this.pendingJoinAnnouncement.get(ap);
+    if (pendingJoin) this.pendingJoinAnnouncement.set(p, pendingJoin);
     const das = this.declaredActionSelections.get(ap);
     if (das) {
       this.declaredActionSelections.set(p, das);
@@ -6968,6 +8056,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantReactions.delete(ap);
     this.participantIntuitions.delete(ap);
     this.participantTieBreakers.delete(ap);
+    this.participantStatblocks.delete(ap);
+    this.participantLieutenantTeamRowId.delete(ap);
+    this.pendingJoinAnnouncement.delete(ap);
     this.expandedAstralPanels.delete(ap);
     if (this.selectedActor === ap) this.selectedActor = p;
     if (this.actModalParticipant === ap) this.actModalParticipant = p;
@@ -6979,9 +8070,23 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return p;
   }
 
+  /**
+   * Value to bind the GM's Data Processing input to: the real rating, or
+   * `null` for the unset sentinel so the field renders empty (with a "not
+   * set" placeholder) rather than showing a literal, plausible-looking `0`
+   * (RULINGS.md 2026-08-30).
+   */
+  getMatrixDataProcessingDisplayValue(p: IParticipant): number | null {
+    if (!this.isMatrix(p)) return null;
+    return p.dataProcessing > DATA_PROCESSING_UNSET ? p.dataProcessing : null;
+  }
+
   onMatrixDPChanged(p: IParticipant, value: number): void {
     if (!this.isMatrix(p)) return;
-    p.dataProcessing = Math.max(1, Number(value || 1));
+    // Floor 0, not 1 (RULINGS 2026-08-30): letting the GM clear this field
+    // back to "unset" has to actually stay 0, not spring back up to a
+    // plausible-looking rated 1.
+    p.dataProcessing = Math.max(DATA_PROCESSING_UNSET, Number(value || DATA_PROCESSING_UNSET));
     p.baseIni = this.getParticipantBaseInitiative(p);
     this.syncSharedState();
   }
@@ -7064,9 +8169,128 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return this.participantTieBreakers.get(p) || 0;
   }
 
+  /**
+   * U7 (brief p. 381): "if they get the same Initiative as their team, they
+   * always go first." A specific override of p. 159's generic ERIC ladder,
+   * scoped to that one lieutenant against that one row - resolved lazily by
+   * id via `participantLieutenantTeamRowId` rather than an object reference,
+   * since object identity does not survive `restoreFromSharedState`.
+   */
+  private isLieutenantOf(candidate: IParticipant, row: IParticipant): boolean {
+    const teamRowId = this.participantLieutenantTeamRowId.get(candidate);
+    return teamRowId !== undefined && teamRowId === this.getParticipantId(row);
+  }
+
+  /**
+   * Record that `lieutenant` beats `row` on an Initiative tie without
+   * consulting ERIC (U7, p. 381). Never called automatically - a lieutenant is
+   * never auto-linked to a group (brief acceptance criterion 16 / U6); the GM
+   * opts a specific lieutenant into a specific row's tie-break explicitly.
+   */
+  setLieutenantTeam(lieutenant: IParticipant, row: NpcRowParticipant): void {
+    this.participantLieutenantTeamRowId.set(lieutenant, this.getParticipantId(row));
+  }
+
+  /**
+   * Clear a lieutenant/team-row link (defect D3, validator round) - the
+   * unlink half of `setLieutenantTeam`.
+   */
+  clearLieutenantTeam(lieutenant: IParticipant): void {
+    this.participantLieutenantTeamRowId.delete(lieutenant);
+  }
+
+  /**
+   * Which row `lieutenant` currently beats on an Initiative tie, or `null` if
+   * none (defect D3, validator round - the retroactive lieutenant/team-row
+   * control). Resolved by id, the same way the comparator does
+   * (`isLieutenantOf`) - `participantLieutenantTeamRowId` never holds an
+   * object reference.
+   */
+  getLieutenantTeamRow(lieutenant: IParticipant): NpcRowParticipant | null {
+    const teamRowId = this.participantLieutenantTeamRowId.get(lieutenant);
+    if (!teamRowId) {
+      return null;
+    }
+    return this.existingNpcRows().find(row => this.getParticipantId(row) === teamRowId) ?? null;
+  }
+
+  /**
+   * GM-facing setter behind the retroactive lieutenant/team-row control
+   * (defect D3, validator round). Before this, the link could only be made
+   * from inside the Add Grunt dialog at the moment a lieutenant *template*
+   * was instantiated - a lieutenant created before his squad, a hand-built
+   * *grunt* with no template at all (Add Grunt with no statblock picked,
+   * later designated a lieutenant here), or a link the GM wants to remove or
+   * retarget, had no way back in short of deleting and re-adding the
+   * participant, which loses the rolled Initiative Score and writes a
+   * spurious second "added." line. Re-sorts immediately so a tie the GM just
+   * linked (or unlinked) reorders on screen without waiting for the next
+   * unrelated mutation.
+   *
+   * Item 9 fix (fix round 3): the sentence above used to say "a hand-built
+   * lieutenant with no template at all", full stop - readable as covering
+   * *any* hand-built participant, including one made with the plain "Add
+   * Participant" button. It does not: the control's own UI gate
+   * (`battle-tracker.component.html`, the "Lieutenant of" dropdown) requires
+   * `hasGruntConditionMonitor(selectedActor)`, deliberately (defect 10, fix
+   * round 2 - "it previously accepted ANY non-row participant, including a
+   * player character, which p. 380-381's lieutenant rule has no meaning for
+   * at all"). The comment is fixed to match that gate rather than the gate
+   * widened to match the old comment: p. 380-381's mechanic (a lieutenant
+   * sharing the single combined Condition Monitor shape and tie-break
+   * precedence a grunt/row has) genuinely has no meaning for a PC or an
+   * ordinary NPC, so a plain `Participant` from "Add Participant" correctly
+   * gets no dropdown - and, for now, no explanation either; a disabled
+   * control or a tooltip explaining the omission would close that gap
+   * further but is not built here.
+   */
+  onLieutenantTeamRowChanged(lieutenant: IParticipant, row: NpcRowParticipant | null): void {
+    if (row) {
+      this.setLieutenantTeam(lieutenant, row);
+    } else {
+      this.clearLieutenantTeam(lieutenant);
+    }
+    this.sort();
+  }
+
+  /**
+   * Effective Initiative value used to order ties: raw Score, plus the +100
+   * "edged" weighting and the -1000 "out of combat" weighting the tracker
+   * already applies elsewhere (an edged participant sorts first among ties,
+   * an OOC one sorts last). Factored out so `applyLieutenantPrecedence` (D4
+   * fix below) uses the **exact** equality test `initiativeTieBreakComparator`
+   * does, rather than a second copy that could silently drift from it.
+   */
+  private effectiveInitiativeForSort(p: IParticipant): number {
+    return p.getCurrentInitiative() + (p.edge ? 100 : 0) - (p.ooc ? 1000 : 0);
+  }
+
+  /**
+   * The plain ERIC ladder (p. 159): Edge, Reaction, Intuition, coin toss,
+   * then insertion order. **Does not** special-case a lieutenant against his
+   * own team - that used to live here as a pairwise override
+   * (`isLieutenantOf(p1, p2) ? -1 : isLieutenantOf(p2, p1) ? 1 : ...`), which
+   * made the comparator non-transitive: with a lieutenant tied with his own
+   * row AND with an unrelated third party (all Edge 0, the lieutenant beating
+   * the row on Reaction/Intuition but losing to the third party on the same),
+   * the pairwise rule produced lieutenant < row, row < third party, and third
+   * party < lieutenant - a strict 3-cycle `sort()` could order inconsistently
+   * between runs (defect D4, validator round; brief implementation appendix
+   * "How the lieutenant tie-break would be represented" flagged this exact
+   * risk as a known limitation).
+   *
+   * The p. 381 "lieutenant beats his own tied team" rule is now applied
+   * **after** this comparator has produced a totally ordered array - see
+   * `applyLieutenantPrecedence`. That keeps this ladder itself transitive and
+   * explicable on its own (any two participants' relative order here follows
+   * from their own Edge/Reaction/Intuition/coin-toss/insertion-order alone,
+   * never from a third participant), and moves the lieutenant rule to a
+   * single well-defined post-processing pass instead of a pairwise exception
+   * that can chain into a cycle.
+   */
   private initiativeTieBreakComparator(p1: IParticipant, p2: IParticipant): number {
-    const p1Ini = p1.getCurrentInitiative() + (p1.edge ? 100 : 0) - (p1.ooc ? 1000 : 0);
-    const p2Ini = p2.getCurrentInitiative() + (p2.edge ? 100 : 0) - (p2.ooc ? 1000 : 0);
+    const p1Ini = this.effectiveInitiativeForSort(p1);
+    const p2Ini = this.effectiveInitiativeForSort(p2);
     if (p1Ini !== p2Ini) {
       return p2Ini - p1Ini;
     }
@@ -7097,11 +8321,82 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return p1.sortOrder - p2.sortOrder;
   }
 
+  /**
+   * p. 381 / U7, applied as a **post-sort adjustment** rather than a pairwise
+   * comparator override (defect D4 fix, validator round - see
+   * `initiativeTieBreakComparator`'s doc comment for why the override was
+   * removed from there). Mutates `items` in place: for every lieutenant tied
+   * on effective Initiative with his own linked row, splice him out and
+   * reinsert him immediately before that row.
+   *
+   * Item 2 fix (fix round 3, RULINGS.md 2026-08-30 "A lieutenant's tie-break
+   * precedence applies against everyone, not just his own team"): the line
+   * this replaced claimed "everyone else's relative order... is left exactly
+   * as the comparator produced it" - that is false for the lieutenant's own
+   * pair with an uninvolved third party tied at the same Initiative Score.
+   * The splice below moves the lieutenant ahead of his row unconditionally
+   * once both are found tied, which can also move him ahead of a third
+   * combatant ERIC had placed between them - a **deliberate** leapfrog
+   * ("if it's a fair leapfrog then it's fair," Xavier's ruling), not a
+   * comparator bug. The two rules genuinely cycle on a three-way tie (p. 381
+   * says the lieutenant always precedes his row; ERIC, p. 159, may place the
+   * third party between them) and the book gives no answer; this is where
+   * the cycle is broken, in the lieutenant's favour. Only the
+   * lieutenant/row/third-party relationship is affected - the third party's
+   * order relative to everyone *else* is untouched, and this is still a
+   * total, deterministic order: each lieutenant is considered in his current
+   * (ERIC-decided) position, so two lieutenants linked to the same tied row
+   * both end up somewhere ahead of it (p. 381 is satisfied for each), but not
+   * necessarily adjacent to it or to each other. `[L1, X, L2, ROW]` stays
+   * exactly `[L1, X, L2, ROW]`: both lieutenants already precede the row and
+   * take the "already ahead" early-continue below, so `X` is never displaced
+   * from between them. Only a lieutenant found *behind* his row gets moved,
+   * and only up to immediately before it.
+   *
+   * The comparator itself stays free of this override (no pairwise
+   * exceptions), which is what keeps `initiativeTieBreakComparator`
+   * transitive - the precedence rule is applied here, once, as a post-sort
+   * splice, not baked into the ladder's own ordering logic.
+   */
+  private applyLieutenantPrecedence(items: IParticipant[]): void {
+    if (this.participantLieutenantTeamRowId.size === 0) {
+      return;
+    }
+    for (const lieutenant of [ ...items ]) {
+      const teamRowId = this.participantLieutenantTeamRowId.get(lieutenant);
+      if (!teamRowId) {
+        continue;
+      }
+      const rowIndex = items.findIndex(p => p !== lieutenant && this.getParticipantId(p) === teamRowId);
+      if (rowIndex === -1) {
+        continue;
+      }
+      const row = items[rowIndex];
+      if (this.effectiveInitiativeForSort(lieutenant) !== this.effectiveInitiativeForSort(row)) {
+        continue;
+      }
+      const lieutenantIndex = items.indexOf(lieutenant);
+      if (lieutenantIndex < rowIndex) {
+        // Already somewhere ahead of his row - p. 381 only requires that he
+        // go first, not that he sit immediately adjacent. Splicing him up to
+        // be adjacent anyway would demote him past whichever participants
+        // ERIC legitimately placed between him and the row (defect 1, fix
+        // round 2 - the old `=== rowIndex - 1` guard only recognised the
+        // already-adjacent case and reshuffled every other already-ahead
+        // lieutenant backwards).
+        continue;
+      }
+      items.splice(lieutenantIndex, 1);
+      items.splice(items.indexOf(row), 0, lieutenant);
+    }
+  }
+
   private enforceSingleCurrentActor() {
     if (!this.combatManager.started || this.combatManager.currentActors.count <= 1) {
       return;
     }
     const ranked = [ ...this.combatManager.currentActors.items ].sort((a, b) => this.initiativeTieBreakComparator(a, b));
+    this.applyLieutenantPrecedence(ranked);
     const keep = ranked[0];
     for (const actor of [ ...this.combatManager.currentActors.items ]) {
       if (actor === keep) {

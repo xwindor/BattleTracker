@@ -47,6 +47,9 @@ Delegate to the `sr5-change-reviewer` subagent. Pass it the paths to both
 `briefs/<slug>.md` and `briefs/<slug>-spec.md`, and the files changed in
 Stage 2. It reports only, never fixes.
 
+When you relay the reviewer's output to me, lead with its Plain summary. Do not
+paste raw technical output as the first thing I read.
+
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list to a fresh
 `sr5-implementer`, then re-run a fresh `sr5-change-reviewer`. Cap at two loops.
 
@@ -62,11 +65,17 @@ Never launch a third fix round without naming which of the three this is.
 
 ## Stage 4 — summary
 
-Show me: what changed file by file, the review verdict, any unfixed defects with
-severity, and a short numbered tap-through script exercising the riskiest
-scenario. Then stop.
+Lead with a plain-language summary — three to six sentences on what changed,
+what it means at the table, and anything I need to decide. Below that, show me:
+what changed file by file, the review verdict (led by the reviewer's Plain
+summary, not its raw technical output), any unfixed defects with severity, and
+a short numbered tap-through script exercising the riskiest scenario. Then stop.
 
 ## Stage 5 — only after I approve
+
+Lead everything you show me in this stage with a plain-language summary of what
+happened and what it means for the tracker in play. Test output, diffs, and
+other technical detail go below it.
 
 1. Move scenario tests into `src/scenarios/` and confirm they run under the
    standard test command. Run the full suite and show real output.
@@ -76,6 +85,8 @@ scenario. Then stop.
 
 ## Standing rules
 
+- Every output shown to Xavier leads with a plain-language summary. He is not a
+  software engineer. Technical detail goes below it, never instead of it.
 - Work in the main checkout. Do not create worktrees or branches.
 - If any subagent reports a gap or contradiction, surface it rather than
   resolving it silently.

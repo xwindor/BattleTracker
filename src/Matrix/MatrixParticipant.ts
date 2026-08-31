@@ -9,6 +9,19 @@ const COLD_SIM_INITIATIVE_DICE = 3;
 const AR_INITIATIVE_DICE = 1;
 
 /**
+ * Sentinel stored value for "Data Processing has not been entered yet".
+ *
+ * A live persona's rules-reachable floor is 1 - Diffusion cannot reduce a
+ * Matrix attribute below 1 (printed p. 252) - so no legitimate rating is ever
+ * 0. RULINGS.md 2026-08-30 ("Data Processing is imported from a statblock
+ * only where the book supplies one, and is blank otherwise") makes this
+ * explicit: a stored 0 always means "unset", never a rated 0, and a
+ * participant with this value derives no VR Initiative until the GM enters a
+ * real one.
+ */
+export const DATA_PROCESSING_UNSET = 0;
+
+/**
  * MatrixParticipant
  *
  * A decker (or persona) participating in the Matrix. Extends the standard
@@ -87,7 +100,7 @@ export class MatrixParticipant extends Participant {
     super();
     this._attack = 0;
     this._sleaze = 0;
-    this._dataProcessing = 0;
+    this._dataProcessing = DATA_PROCESSING_UNSET;
     this._firewall = 0;
     this._deviceRating = 0;
     this._vrMode = VRMode.None;
@@ -124,10 +137,18 @@ export class MatrixParticipant extends Participant {
    *
    * Pass `p.changeDiceCount(n, ...)` for a real mid-turn change, or
    * `p.setDicesWithoutRoll(n)` for construction/setup.
+   *
+   * If Data Processing is unset (`DATA_PROCESSING_UNSET`), this derives **no**
+   * VR Initiative rather than the plausible-looking `0 + intuition`
+   * (RULINGS.md 2026-08-30) - `baseIni` is left at the sentinel too, so a
+   * caller/display reading `baseIni` sees the same "not derivable" signal
+   * `getParticipantBaseInitiative()` produces for the same case.
    */
   applyJackInMode(mode: VRMode, intuition: number, applyDiceCount: (targetDiceCount: number) => void): void {
     this.vrMode = mode;
-    this.baseIni = this.dataProcessing + intuition;
+    this.baseIni = this.dataProcessing > DATA_PROCESSING_UNSET
+      ? this.dataProcessing + intuition
+      : DATA_PROCESSING_UNSET;
     this.jackedIn = true;
     this.blocksPhysicalActions = (mode !== VRMode.AR);
     // Applied last so a caller that logs the resulting Score sees both halves

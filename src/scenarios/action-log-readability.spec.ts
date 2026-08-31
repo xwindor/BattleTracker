@@ -432,17 +432,17 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   // ── AC17 - addGrunt ────────────────────────────────────────────────────────
 
   describe('AC17 - addGrunt log text', () => {
-    it('produces one entry, actor = the grunt, text exactly "added.", box-count-free', () => {
+    it('produces one entry, actor = the grunt, text exactly "added.", box-count-free (queued until rolled, RULINGS.md 2026-08-30)', () => {
+      const grunt = component.addGrunt('Ganger A');
       sent.length = 0;
+      component['rollAndLogInitiative'](grunt);
 
-      component.addGrunt('Ganger A');
-
-      expect(sent.length).toBe(1);
-      expect(sent[0].actor).toBe('Ganger A');
-      expect(sent[0].text).toBe('added.');
-      expect(sent[0].text).not.toMatch(/\d/);
-      expect(sent[0].text).not.toContain('boxes');
-      expect(sent[0].text).not.toContain('Condition Monitor');
+      const addedLines = sent.filter(e => e.text === 'added.');
+      expect(addedLines.length).toBe(1);
+      expect(addedLines[0].actor).toBe('Ganger A');
+      expect(addedLines[0].text).not.toMatch(/\d/);
+      expect(addedLines[0].text).not.toContain('boxes');
+      expect(addedLines[0].text).not.toContain('Condition Monitor');
     });
   });
 
@@ -451,14 +451,19 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('AC18, AC19 - addNpcToRow join line', () => {
     it('AC18 - an unwounded joiner reads "<name> joined the group.", no score', () => {
       const row = gmRow('Gangers');
+      // Reinforcement onto an already-rolled row (Decision 7) announces
+      // immediately; onto a still-unrolled row it would queue instead
+      // (RULINGS.md 2026-08-30) - see IA9b in
+      // grunt-naming-and-statblocks.spec.ts for that half.
+      component['rollAndLogInitiative'](row);
       sent.length = 0;
 
       component.addNpcToRow(row, 'Veteran');
 
-      expect(sent.length).toBe(1);
-      expect(sent[0].actor).toBe('Gangers');
-      expect(sent[0].text).toBe('Veteran joined the group.');
-      expect(sent[0].text).not.toMatch(/\d/);
+      const joinLines = sent.filter(e => e.text === 'Veteran joined the group.');
+      expect(joinLines.length).toBe(1);
+      expect(joinLines[0].actor).toBe('Gangers');
+      expect(joinLines[0].text).not.toMatch(/\d/);
     });
 
     // The public `addNpcToRow(row, name, body, willpower)` signature always
@@ -474,6 +479,7 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     // than fabricating the resulting string.
     it('AC19 - a wounded joiner names the penalty (member.wm > 0 at join time)', () => {
       const row = gmRow('Gangers');
+      component['rollAndLogInitiative'](row); // already-rolled row - immediate announcement (Decision 7)
       const originalAddMember = row.addMember.bind(row);
       spyOn(row, 'addMember').and.callFake((member: GruntMember) => {
         member.applyDamage(6, 'physical'); // wm becomes 2 before the join line reads it
@@ -483,15 +489,15 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
 
       component.addNpcToRow(row, 'Veteran');
 
-      expect(sent.length).toBe(1);
-      expect(sent[0].text).toBe('Veteran joined the group, arrives wounded (-2).');
+      const joinLines = sent.filter(e => e.text === 'Veteran joined the group, arrives wounded (-2).');
+      expect(joinLines.length).toBe(1);
     });
   });
 
   // ── AC20 - merge log text ──────────────────────────────────────────────────
 
   describe('AC20 - mergeSelectedGrunts log text', () => {
-    it('produces one entry, actor = the new row, "formed from A, B.", no house-rule/CM wording', () => {
+    it('produces one entry, actor = the new row, "formed from A, B.", no house-rule/CM wording (queued until the new row is rolled, RULINGS.md 2026-08-30)', () => {
       const a = component.addGrunt('A');
       const b = component.addGrunt('B');
       component.toggleMergeSelection(a);
@@ -499,12 +505,14 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       sent.length = 0;
 
       const result = component.mergeSelectedGrunts();
+      expect(sent.length).toBe(0); // "the row goes in unrolled" (Decision 10)
+      component['rollAndLogInitiative'](result.row!);
 
-      expect(sent.length).toBe(1);
-      expect(sent[0].actor).toBe(result.row!.name);
-      expect(sent[0].text).toBe('formed from A, B.');
-      expect(sent[0].text).not.toContain('house rule');
-      expect(sent[0].text).not.toContain('Condition Monitor');
+      const formedLines = sent.filter(e => e.text === 'formed from A, B.');
+      expect(formedLines.length).toBe(1);
+      expect(formedLines[0].actor).toBe(result.row!.name);
+      expect(formedLines[0].text).not.toContain('house rule');
+      expect(formedLines[0].text).not.toContain('Condition Monitor');
     });
   });
 
@@ -875,6 +883,11 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     it('a reinforcement, an interrupt and a stale empty Act all read with no "GM" credit', () => {
       const row = gmRow('Gangers');
       component.addNpcToRow(row, 'G 1');
+      // The row has taken its own Initiative Test by the time reinforcements
+      // arrive (Decision 7's precondition, and per RULINGS.md 2026-08-30 the
+      // precondition for the *join line itself* announcing immediately
+      // rather than queuing).
+      component['rollAndLogInitiative'](row);
       const scoreBefore = row.getCurrentInitiative();
 
       // A reinforcement walks in already hurt (Decision 7's join-time case).
@@ -887,8 +900,8 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
 
       component.addNpcToRow(row, 'Ganger 4');
 
-      expect(sent.length).toBe(1);
-      expect(sent[0].text).toBe('Ganger 4 joined the group, arrives wounded (-2).');
+      const joinLines = sent.filter(e => e.text === 'Ganger 4 joined the group, arrives wounded (-2).');
+      expect(joinLines.length).toBe(1);
       expect(row.getCurrentInitiative()).toBe(scoreBefore); // Score-neutral join
 
       // The GM hovers Add NPC and reads the answer off the tooltip.

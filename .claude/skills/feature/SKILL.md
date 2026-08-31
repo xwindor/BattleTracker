@@ -57,6 +57,9 @@ Stage 2, and the instruction to report only, never fix. It has `rules/` access
 and must independently re-derive every citation in the brief rather than
 trusting it.
 
+When you relay the validator's output to me, lead with its Plain summary. Do
+not paste raw technical output as the first thing I read.
+
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list back to a
 fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at two
 loops.
@@ -79,12 +82,16 @@ Never launch a third fix round without naming which of the three this is.
 ## Stage 4 — approval brief
 
 Delegate to `sr5-approval-brief`. Pass it the paths to both `briefs/<slug>.md`
-and `briefs/<slug>-spec.md`, and the validator's report. Show me its output and
-stop.
+and `briefs/<slug>-spec.md`, and the validator's report. Show me its output —
+led by its Plain summary, never raw technical output first — and stop.
 
 ## Stage 5 — only after I approve
 
 When I say approved:
+
+Lead everything you show me in this stage with a plain-language summary of what
+happened and what it means for the tracker in play. Test output, diffs, and
+other technical detail go below it.
 
 1. Move the scenario tests into `src/scenarios/` and confirm they run as part
    of the standard test command. Run the full suite and show me real output.
@@ -99,6 +106,8 @@ When I say approved:
 
 ## Standing rules
 
+- Every output shown to Xavier leads with a plain-language summary. He is not a
+  software engineer. Technical detail goes below it, never instead of it.
 - Never cite a rulebook page that wasn't confirmed present in `rules/`.
 - Never paste rulebook prose into source files or docs. Paraphrase and cite.
 - If any stage's subagent reports a gap or a contradiction, surface it to me

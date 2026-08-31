@@ -1,6 +1,6 @@
 export { VRMode } from "./VRMode";
 export { ICType } from "./ICType";
-export { MatrixParticipant } from "./MatrixParticipant";
+export { MatrixParticipant, DATA_PROCESSING_UNSET } from "./MatrixParticipant";
 export { ICParticipant } from "./ICParticipant";
 export { MatrixTarget } from "./MatrixTarget";
 export type { MatrixTargetType, MatrixTargetSpotted, MatrixTargetContext } from "./MatrixTarget";

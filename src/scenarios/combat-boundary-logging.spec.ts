@@ -491,7 +491,7 @@ describe('Action Log entries for combat structural boundaries', () => {
   });
 
   describe('Defect 1 - mergeSelectedGrunts logs before the boundary it can cause', () => {
-    it('"formed from" precedes any boundary line produced by removing the acting grunt', () => {
+    it('re-based on RULINGS.md 2026-08-30: the "formed from" line no longer races the boundary line at all, because it is not written at merge time - the structural boundary from removing the acting grunt still fires correctly, and "formed from" only appears later, once the new row is rolled', () => {
       // Neither grunt has rolled Initiative this turn (`diceIni` stays 0) -
       // `mergeGruntsIntoRow` refuses any grunt that has, so a positive Score
       // from `baseIni` alone (no dice) is what makes G1 eligible to be the
@@ -522,9 +522,24 @@ describe('Action Log entries for combat structural boundaries', () => {
       const result = component.mergeSelectedGrunts();
 
       expect(result.ok).toBe(true);
-      expect(sent.length).toBeGreaterThan(1);
-      expect(sent[0].text).toContain('formed from');
-      expect(sent.slice(1).some(e => STRUCTURAL_PATTERN.test(e.text))).toBe(true);
+      // Item 1 fix (fix round 3): the original defect this test guarded
+      // against was an *ordering* hazard between two lines written in the
+      // same commit. Under RULINGS.md 2026-08-30 "formed from" is queued,
+      // not written, until the new row has its own rolled Initiative Score
+      // (Decision 10: a merged row goes in unrolled) - so it is no longer
+      // written in this commit at all, and the race this test defended
+      // against cannot occur any more, by construction. What still has to
+      // hold: the structural boundary line from removing G1 (the current
+      // actor) fires correctly on its own.
+      expect(sent.some(e => e.text.includes('formed from'))).toBe(false);
+      expect(sent.some(e => STRUCTURAL_PATTERN.test(e.text))).toBe(true);
+
+      // Rolling the new row afterwards is what actually writes the line -
+      // necessarily after everything logged so far, since nothing else can
+      // append to this test's log between the merge and this roll.
+      const before = sent.length;
+      component['rollAndLogInitiative'](result.row!);
+      expect(sent.slice(before).some(e => e.text.includes('formed from'))).toBe(true);
     });
   });
 

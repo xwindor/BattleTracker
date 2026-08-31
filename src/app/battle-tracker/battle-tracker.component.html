@@ -170,6 +170,12 @@
               (change)="toggleMergeSelection(p)"
               title="Select for merging into a Grunt Group (only before this grunt has rolled Initiative this Combat Turn)">
             }
+            <!-- Item 1 fix (fix round 3): the `(blur)`/`(keydown.enter)`
+                 handlers that used to call `onParticipantNameCommitted` are
+                 removed - there is no "commit" event left to hang a join
+                 line off (RULINGS.md 2026-08-30). The join line now fires
+                 only from `announceJoinIfPending`, itself only called from a
+                 genuine Initiative Test result. -->
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control gm-name-input"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
             <!-- Identification badges (addendum Decision 12): presentation only.
@@ -179,9 +185,30 @@
             <span class="participant-badge participant-badge-group" data-testid="badge-npc-row"
               [attr.title]="getNpcRowBadgeTooltip(asNpcRow(p))">GROUP</span>
             }
-            @else if (hasGruntConditionMonitor(p)) {
-            <span class="participant-badge participant-badge-grunt" data-testid="badge-grunt"
-              title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (p. 379)">GRUNT</span>
+            <!-- Defect 10 (fix round 2): the "Lieutenant of" link (Stats tab)
+                 had no visible marker anywhere else in the GM view - a linked
+                 lieutenant read identically to any other standalone grunt at
+                 a glance. More specific than the GRUNT badge below, so it is
+                 checked first.
+
+                 Item 8 fix (fix round 4): `getLieutenantTeamRow(p)` filters
+                 every participant for NPC rows (`existingNpcRows()`), a fresh
+                 array allocation - calling it a second time in the tooltip
+                 below repeated that allocation for every grunt row, every
+                 change-detection tick. The `; as team` binding calls it once
+                 and reuses the result for both the inner `@if` check and the
+                 tooltip. Nested rather than `@else if ... as` directly -
+                 Angular only allows an `as` binding on the *primary* `@if` of
+                 a chain, not on an `@else if`. -->
+            @else {
+              @if (hasGruntConditionMonitor(p) && getLieutenantTeamRow(p); as team) {
+              <span class="participant-badge participant-badge-lieutenant" data-testid="badge-lieutenant"
+                [attr.title]="'Lieutenant of ' + team.name + ' - beats his own team on an Initiative tie (p. 381)'">LIEUTENANT</span>
+              }
+              @else if (hasGruntConditionMonitor(p)) {
+              <span class="participant-badge participant-badge-grunt" data-testid="badge-grunt"
+                title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (p. 379)">GRUNT</span>
+              }
             }
           </div>
           <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
@@ -537,7 +564,21 @@
                 <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
               </button>
               }
-              <button type="button" class="btn btn-danger gm-trailing-icon" (click)="btnDelete_Click(p)"
+              <!-- Item 1 fix (fix round 3): the round-2 `(mousedown)`
+                   focus-steal suppression that used to live here is removed
+                   - it existed only to stop a native mousedown's default
+                   focus/blur shift from committing a Tab-added row's
+                   deferred join line an instant before Delete removed the
+                   participant it named. There is no blur-triggered
+                   commit any more at all (RULINGS.md 2026-08-30, "A
+                   combatant is announced when they enter the initiative
+                   order, not when a name box loses focus") - the join line
+                   now only ever fires the first time a combatant has a
+                   rolled Initiative Score, so deleting an unrolled,
+                   Tab-added row (with or without a focus-steal in between)
+                   is never announced regardless of focus. -->
+              <button type="button" class="btn btn-danger gm-trailing-icon"
+                (click)="btnDelete_Click(p)"
                 title="Delete this participant">
                 <i class="fa fa-trash fa-lg"></i>
               </button>
@@ -578,7 +619,7 @@
                 {{ getRowActedSummary(asNpcRow(p)) }}
               </span>
               <button type="button" class="btn btn-sm btn-outline-primary ms-auto npc-row-add-member"
-                (click)="addNpcToRow(asNpcRow(p))"
+                (click)="btnAddNpcToRow_Click(asNpcRow(p))"
                 title="Add an NPC to this row — it inherits the row's current shared Initiative Score. A wounded arrival's penalty applies to their own tests only; the group's shared score does not move.">
                 Add NPC
               </button>
@@ -698,8 +739,8 @@
               <div class="input-group input-group-sm gm-inline-input-group">
                 <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
                 <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).dataProcessing"
-                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="1" title="Data Processing">
+                  [ngModel]="getMatrixDataProcessingDisplayValue(p)" placeholder="not set"
+                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="0" title="Data Processing">
                 <span class="input-group-text gm-stat-chip" title="Attack">A</span>
                 <input class="form-control text-center gm-stat-input" type="number"
                   [ngModel]="asMatrix(p).attack"
@@ -801,7 +842,7 @@
                 [class.btn-warning]="asAstral(p).astralProjecting"
                 [class.btn-outline-warning]="!asAstral(p).astralProjecting"
                 (click)="toggleAstralProjecting(p)"
-                title="Toggle astral projection — changes initiative to INT×2 + 1d6">
+                title="Toggle astral projection — adds 2 Initiative Dice (max 5D6) and switches the initiative attribute to INT×2 (RULINGS.md 2026-08-30)">
                 {{ asAstral(p).astralProjecting ? "Return to Body" : "Astral Project" }}
               </button>
             </div>
@@ -827,7 +868,8 @@
           <!-- One Initiative Test, one slot in the order, several NPCs acting
                back-to-back (brief "NPC Group Initiative" criteria 1-2,
                p. 379). -->
-          <button type="button" class="btn btn-outline-primary ms-1" (click)="addNpcRow()"
+          <button type="button" class="btn btn-outline-primary ms-1" data-testid="add-npc-row-btn"
+            (click)="btnAddNpcRow_Click()"
             title="Add a linked NPC row (grunt group): one shared Initiative Score, one slot in the order">
             <i class="fa fa-users"></i> Grunt Group
           </button>
@@ -848,7 +890,7 @@
         <div class="mt-2 merge-grunts-bar" data-testid="merge-grunts-bar">
           <button type="button" class="btn btn-outline-info" data-testid="merge-grunts-btn"
             [disabled]="!canMergeSelectedGrunts()"
-            (click)="mergeSelectedGrunts()"
+            (click)="btnMergeSelectedGrunts_Click()"
             title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn. Their Condition Monitor damage carries over; no wound penalty is applied to the group for damage taken before the merge (house rule).">
             <i class="fa fa-object-group"></i>
             Merge {{ getMergeSelectionCount() }} into a Grunt Group
@@ -1015,6 +1057,16 @@
       <div class="card">
         <div class="card-header">
           <h3>{{ selectedActor.name || "Selected Actor" }}</h3>
+          <!-- Defect 7 (fix round 2): D-X4 retains professionalRating/label
+               as GM-only identification "so the GM can see what a
+               participant was created from" - nothing rendered it. GM-only
+               view, GM-only data (getParticipantStatblockLabel never reads
+               SharedParticipantState). -->
+          @if (getParticipantStatblockLabel(selectedActor); as statblockLabel) {
+          <div class="text-muted small" title="Statblock this participant was created from (GM only)">
+            {{ statblockLabel }}
+          </div>
+          }
         </div>
         <div class="card-body">
           <nav ngbNav #nav="ngbNav" class="nav-tabs">
@@ -1121,6 +1173,33 @@
               <button ngbNavLink>Stats</button>
               <ng-template ngbNavContent>
                 <h4>Stats</h4>
+                <!-- Retroactive lieutenant/team-row link (GM-only, defect D3
+                     validator round): only offered for a non-row participant,
+                     and only once at least one linked NPC row exists to link
+                     to. Unobtrusive - one dropdown, tucked under the Stats
+                     tab, that does nothing until the GM opens it.
+                     Defect 10 (fix round 2): also restricted to a grunt-
+                     shaped standalone participant (`hasGruntConditionMonitor`)
+                     - it previously accepted ANY non-row participant,
+                     including a player character, which p. 380-381's
+                     lieutenant rule has no meaning for at all. -->
+                @if (!isNpcRow(selectedActor) && hasGruntConditionMonitor(selectedActor) && existingNpcRows().length > 0) {
+                <div class="row align-items-center mb-2">
+                  <div class="col-7">
+                    <span title="A lieutenant tied with his own team's Score always goes first (p. 381)">Lieutenant of</span>
+                  </div>
+                  <div class="col-5">
+                    <select class="form-select form-select-sm" data-testid="lieutenant-team-row-select"
+                      [ngModel]="getLieutenantTeamRow(selectedActor)"
+                      (ngModelChange)="onLieutenantTeamRowChanged(selectedActor, $event)">
+                      <option [ngValue]="null">-- none --</option>
+                      @for (row of existingNpcRows(); track row) {
+                      <option [ngValue]="row">{{ row.name }}</option>
+                      }
+                    </select>
+                  </div>
+                </div>
+                }
                 <div class="row align-items-center mb-2">
                   <div class="col-7"><span>Initiative Dices</span></div>
                   <div class="col-5">
@@ -1355,6 +1434,121 @@
       </button>
     </div>
   </div>
+</ng-template>
+
+<!-- "Name before add" dialog (brief U1/U12): the single choke point every
+     add path routes through. Creates NOTHING while open - `commitAddDraft()`
+     is what actually creates the participant/row/member, on Confirm only. -->
+<ng-template #addDraftModalTpl>
+  @if (pendingAddDraft) {
+  <div class="modal-header">
+    <h5 class="modal-title">
+      @switch (pendingAddDraft.kind) {
+        @case ('participant') { Add Participant }
+        @case ('grunt') { Add Grunt }
+        @case ('row') { Add Grunt Group }
+        @case ('rowMember') { Add NPC to {{ pendingAddDraft.targetRow?.name || 'row' }} }
+        @case ('merge') { Merge into a Grunt Group }
+      }
+    </h5>
+    <button type="button" class="btn-close" aria-label="Close" (click)="cancelAddDraft()"></button>
+  </div>
+  <div class="modal-body">
+    <div class="mb-2">
+      <label class="form-label" for="addDraftName">Name</label>
+      <input id="addDraftName" type="text" autocomplete="off" class="form-control" data-testid="add-draft-name"
+        [(ngModel)]="pendingAddDraft.name" placeholder="Leave blank to use the default name">
+    </div>
+
+    @if (pendingAddDraft.kind === 'row') {
+    <div class="mb-2">
+      <label class="form-label" for="addDraftCount">Number of NPCs</label>
+      <input id="addDraftCount" type="number" min="1" max="50" class="form-control" data-testid="add-draft-count"
+        [(ngModel)]="pendingAddDraft.count">
+    </div>
+    }
+
+    <!-- Statblock picker. Only offered for a grunt or a fresh row - not for a
+         reinforcement joining an existing row (which inherits that row's own
+         imprint) nor a merge (which takes the first selected grunt's). A row
+         only ever offers "grunt"-kind templates: a lieutenant template must
+         become its own separate participant with its own Initiative Score,
+         never a shared row member (a Grunt Group built entirely out of
+         lieutenants would share ONE Score between them - see
+         `statblockOptionsForDraft`). -->
+    @if (pendingAddDraft.kind === 'grunt' || pendingAddDraft.kind === 'row') {
+    <div class="mb-2">
+      <label class="form-label" for="addDraftStatblock">Template</label>
+      <select id="addDraftStatblock" class="form-select" data-testid="add-draft-statblock"
+        [(ngModel)]="pendingAddDraft.statblockId">
+        <option [ngValue]="null">-- hand-built (no template) --</option>
+        @for (sb of statblockOptionsForDraft(); track sb.id) {
+        <option [ngValue]="sb.id">{{ sb.label }}</option>
+        }
+      </select>
+    </div>
+    }
+
+    @if (!selectedDraftStatblock() && (pendingAddDraft.kind === 'grunt' || pendingAddDraft.kind === 'row' || pendingAddDraft.kind === 'rowMember')) {
+    <div class="row g-2 mb-2">
+      <div class="col">
+        <label class="form-label" for="addDraftBody">Body</label>
+        <input id="addDraftBody" type="number" min="0" class="form-control" data-testid="add-draft-body"
+          [(ngModel)]="pendingAddDraft.body">
+      </div>
+      <div class="col">
+        <label class="form-label" for="addDraftWillpower">Willpower</label>
+        <input id="addDraftWillpower" type="number" min="0" class="form-control" data-testid="add-draft-willpower"
+          [(ngModel)]="pendingAddDraft.willpower">
+      </div>
+    </div>
+    }
+    <!-- Everything below only makes sense once a template is actually
+         selected: nothing in this section controls anything for a
+         hand-built grunt/row, a plain participant, or a merge (defect D5 -
+         this used to render for every kind that fell through the `@else`
+         above, including 'participant' and 'merge', where it controlled
+         nothing at all). -->
+    @if (selectedDraftStatblock()) {
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" id="addDraftAugmented" data-testid="add-draft-augmented"
+        [(ngModel)]="pendingAddDraft.loadAugmented">
+      <label class="form-check-label" for="addDraftAugmented">
+        Load augmented (bracketed) values - untick for "ware off" base values
+      </label>
+    </div>
+    @if (selectedDraftStatblock()?.notes?.length) {
+    <div class="small text-muted mb-2" data-testid="add-draft-notes">
+      @for (note of selectedDraftStatblock()?.notes; track note) {
+      <div>{{ note }}</div>
+      }
+    </div>
+    }
+    <!-- Only meaningful for a lieutenant template, and never auto-filled - a
+         lieutenant is never auto-linked to a group. -->
+    @if (pendingAddDraft.kind === 'grunt' && selectedDraftStatblock()?.kind === 'lieutenant' && existingNpcRows().length > 0) {
+    <div class="mb-2">
+      <label class="form-label" for="addDraftLieutenantRow">
+        Beats this row on an Initiative tie (p. 381) - optional
+      </label>
+      <select id="addDraftLieutenantRow" class="form-select" data-testid="add-draft-lieutenant-row"
+        [(ngModel)]="pendingAddDraft.lieutenantTeamRow">
+        <option [ngValue]="null">-- none --</option>
+        @for (row of existingNpcRows(); track row) {
+        <option [ngValue]="row">{{ row.name }}</option>
+        }
+      </select>
+    </div>
+    }
+    }
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" data-testid="add-draft-cancel"
+      (click)="cancelAddDraft()">Cancel</button>
+    <button type="button" class="btn btn-primary" data-testid="add-draft-confirm"
+      (click)="commitAddDraft()">Confirm</button>
+  </div>
+  }
 </ng-template>
 
 <ng-template #convergenceModalTpl>

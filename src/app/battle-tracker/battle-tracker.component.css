@@ -786,6 +786,19 @@
   border: 1px solid rgba(108, 117, 125, 0.45);
 }
 
+/* Item 5 fix (fix round 3): this class was applied at battle-tracker.component.html
+   (the "Lieutenant of <row>" badge) with no matching rule anywhere - it
+   rendered as bare unstyled text next to the two properly-coloured chips
+   above. Amber/gold, distinct from both the group badge's cyan and the
+   grunt badge's grey, and consistent with the warning-coloured "Astral
+   Project"/"Jack In" buttons already used elsewhere for a state that changes
+   how this participant behaves in combat. */
+.participant-badge-lieutenant {
+  background: rgba(255, 193, 7, 0.18);
+  color: #997404;
+  border: 1px solid rgba(255, 193, 7, 0.55);
+}
+
 /* Merge tick box: big enough to hit on a tablet, out of the way of the name.
    Geometry from the shared token (AC 7) so it tracks the rest of the app. */
 .merge-select-box {

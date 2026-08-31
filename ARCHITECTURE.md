@@ -49,9 +49,55 @@ combat order.** The GM component's `sort()` branches on
   same array with a more elaborate comparator (`initiativeTieBreakComparator`,
   a private method on the GM component), then `enforceSingleCurrentActor()`.
   The second comparator is the one whose output actually reaches players; the
-  first sort's result is completely overwritten — see "Known rough edges."
+  first sort's result is completely overwritten — see "Known rough edges." In
+  the "started" branch, `sort()` also runs `applyLieutenantPrecedence()`
+  between the comparator sort and `enforceSingleCurrentActor()` — see
+  "Lieutenant tie-break" immediately below.
 
 Either branch ends with `syncSharedState()`.
+
+**Lieutenant tie-break (p. 381 / `briefs/grunt-naming-and-statblocks-spec.md`
+U7).** `initiativeTieBreakComparator` implements the plain ERIC ladder only —
+Edge, Reaction, Intuition, coin toss, then insertion order — and is a totally
+ordered, transitive comparator on its own: any two participants' relative
+order follows from their own attributes alone, never from a third
+participant. The p. 381 rule "a lieutenant tied with his own team always goes
+first" is deliberately **not** implemented as a branch inside that comparator.
+An earlier version did exactly that (`isLieutenantOf(p1, p2) ? -1 : ...`), and
+it was wrong: a pairwise override inside a comparator does not compose safely
+with the rest of the ladder, and produced a strict 3-cycle whenever a
+lieutenant, his tied row, and an unrelated third participant were all tied and
+the lieutenant beat the row on Reaction/Intuition but lost to the third party
+on the same attributes — lieutenant < row, row < third party, third party <
+lieutenant, all simultaneously true, which is exactly the kind of order
+`Array.prototype.sort` is not specified to handle consistently.
+
+Instead, `applyLieutenantPrecedence(items)` (private, GM component) runs as a
+**post-sort adjustment**, after `initiativeTieBreakComparator` has already
+produced a totally ordered array: for every participant with an entry in
+`participantLieutenantTeamRowId` whose effective Initiative (`getCurrentInitiative()`
+plus the same ±100 edge / −1000 OOC weighting the comparator uses) equals his
+linked row's, it is spliced out and reinserted immediately before that row.
+Everyone else's relative order — already fully decided by the ERIC ladder — is
+left untouched. `sort()` calls it once after the comparator sort;
+`enforceSingleCurrentActor()` calls it again on its own `ranked` copy of
+`currentActors`, for the same reason it re-runs the comparator there — ties
+can put more than one participant in `currentActors` simultaneously, and
+whichever one is kept as sole current actor has to respect the same ordering
+rule the display does.
+
+`participantLieutenantTeamRowId: Map<IParticipant, string>` is keyed by
+`getParticipantId(row)`, not an object reference — object identity does not
+survive `restoreFromSharedState()`, which rebuilds every participant. It rides
+`SharedGmParticipantState.lieutenantTeamRowId` (GM-only; a lieutenant's team
+membership is not player-facing) and is set via `setLieutenantTeam()` /
+`clearLieutenantTeam()`, both public on the GM component — reachable from the
+Add Grunt dialog's lieutenant-template picker (`kind === "grunt"` with a
+lieutenant template selected) **and**, retroactively, from a "Lieutenant of"
+dropdown on the details panel's Stats tab for any already-existing,
+non-row participant. It is **not** copied when a participant is duplicated
+(`btnDuplicate_Click`) — a duplicated lieutenant is created unlinked, or a
+clone and its source would both be linked to the same row.
 
 Each participant carries a **stored, running Initiative Score** for the
 current Combat Turn — `Participant.currentInitiativeScore` (backing field
@@ -476,25 +522,53 @@ plus a UI-gating flag:
   (`setDicesWithoutRoll`, does not) — it used to assign `dices` itself and
   leave the roll to callers, which is how the "Switch Mode" control came to
   change the dice count with no Score effect at all.
+
+  **Data Processing may be unset** (RULINGS 2026-08-30). `dataProcessing` is a
+  plain non-nullable `number`, so "unset" is represented by the sentinel
+  `DATA_PROCESSING_UNSET = 0` (`src/Matrix/MatrixParticipant.ts`) - a stored 0
+  means *no value entered*, never a rated 0. The rules floor for a live persona
+  is 1 (Diffusion cannot reduce a Matrix attribute below it, printed p. 252),
+  so 0 is not a reachable rating and is safe as a sentinel. When Data
+  Processing is unset, `applyJackInMode` derives **no** VR Initiative attribute
+  (`baseIni` stays at the sentinel) and the GM's Data Processing box renders
+  blank with a "not set" placeholder rather than a literal 0. Promoting a
+  participant to a Matrix form no longer seeds a hardcoded default - the old
+  `defaultDP = 6` was nobody's rating and read on screen exactly like a real
+  one.
+
+  `getParticipantBaseInitiative()` uses the Data Processing formula **only
+  while actually jacked into a VR mode**. It previously applied it to any
+  `MatrixParticipant` regardless of mode, so editing Reaction or Intuition on a
+  participant sitting in AR silently recomputed from Data Processing. AR uses
+  physical Initiative and physical Initiative Dice (printed p. 231), so the
+  guard is on `jackedIn`/`vrMode`, not on the class.
 - `AstralParticipant` carries the same shape of state (`astralProjecting`,
   `blocksPhysicalActions`, `isAwakened`) but has **no `applyJackInMode`
   equivalent**: the INT×2 base formula lives in the GM component's
   `toggleAstralProjecting()`, not on the class. Its dice count is expressed as
   a **relative** delta, not an absolute per-mode count:
-  `ASTRAL_PROJECTION_DICE_DELTA` = `ASTRAL_INITIATIVE_DICE (2) -
-  PHYSICAL_INITIATIVE_DICE (1)` = +1, requested by `toggleAstralProjecting()`
+  `ASTRAL_PROJECTION_DICE_DELTA` = `ASTRAL_INITIATIVE_DICE (3) -
+  PHYSICAL_INITIATIVE_DICE (1)` = +2, requested by `toggleAstralProjecting()`
   on the way in, through the `changeParticipantDiceCount` funnel so the gained
-  die is rolled and moves the running Score. Relative rather than absolute so a
-  magician already carrying bonus Initiative Dice (Increase Reflexes, wired
-  reflexes, a drug) keeps them (`RULINGS.md` 2026-07-31, "Bonus Initiative Dice
-  carry additively into astral space"). The way *out* does **not** blindly
-  negate the constant: the funnel's 5D6 cap (pp. 52/288) can absorb the
-  requested +1 into nothing (a magician already at 5D6 gains no die and the
-  Score does not move), so `AstralParticipant` records what was actually
-  realized in `projectionDiceGain` — carried by `clone()` — and the
-  return trip requests `-projectionDiceGain`, not `-1`. This keeps a capped-out
-  round trip (project, return) net-zero on both dice count and Score, matching
-  "you only roll and subtract dice you actually lose" (p. 160).
+  dice are rolled and move the running Score. `ASTRAL_INITIATIVE_DICE` is 3,
+  not 2 (`RULINGS.md` 2026-08-30, "Astral Initiative is 3D6 total, not 2D6" —
+  this entry supersedes the dice *count* in the 2026-07-31 entry below it,
+  though the *shape* of the rule, a relative delta rather than an absolute
+  overwrite, is unchanged and still cited as 2026-07-31). Relative rather than
+  absolute so a magician already carrying bonus Initiative Dice (Increase
+  Reflexes, wired reflexes, a drug) keeps them (`RULINGS.md` 2026-07-31,
+  "Bonus Initiative Dice carry additively into astral space"). The way *out*
+  does **not** blindly negate the constant: the funnel's 5D6 cap (pp. 52/288)
+  can absorb the requested +2 into fewer dice or nothing (a magician already
+  at 5D6 gains no die and the Score does not move), so `AstralParticipant`
+  records what was actually realized in `projectionDiceGain` — carried by
+  `clone()` — and the return trip requests `-projectionDiceGain`, not `-2`.
+  This keeps a capped-out round trip (project, return) net-zero on both dice
+  count and Score, matching p. 160's rule for a dice decrease: that
+  participant "immediately rolls the number of lost dice and subtracts the
+  total from their Initiative Score (along with any decrease to their
+  Initiative Attribute)" — i.e. you only roll and subtract dice you actually
+  lose.
   `MatrixParticipant`'s per-mode counts are still absolute and have the same
   modelling limitation; that is a deferred Matrix-module concern.
 - `ICParticipant` sets `baseIni = hostRating * 2` and `dices` to 2 (Patrol IC)
@@ -843,7 +917,12 @@ GM-component-side, a row is created by `addNpcRow()` and is given an Edge
 rating of `NPC_ROW_EDGE_RATING` (0), which is what makes the existing
 `initiativeTieBreakComparator` resolve a row's ties by Reaction, then
 Intuition, then the coin toss (`RULINGS.md` 2026-08-01, "Grunt Edge: the book
-contradicts itself, Edge 0 stands"). Rows inherit every side-map obligation in
+contradicts itself, Edge 0 stands") - **unless the row is tied with its own
+linked lieutenant**, in which case the lieutenant goes first regardless of
+Reaction/Intuition/coin toss (p. 381, `briefs/grunt-naming-and-statblocks-spec.md`
+U7). That override is **not** part of `initiativeTieBreakComparator` itself -
+see "Lieutenant tie-break" below for why, and for where it actually lives.
+Rows inherit every side-map obligation in
 §7 / "Known rough edges"; `forgetParticipant()` is the shared cleanup helper
 for participants removed outside `btnDelete_Click`.
 
@@ -1967,11 +2046,40 @@ component.
   `Map<IParticipant, ...>` (`participantOwners`, `participantClaimable`,
   `participantEdgeRatings`, `participantReactions`, `participantIntuitions`,
   `participantTieBreakers`, `participantIds`, `lastKnownDamage`,
-  `rowMemberDamageValues`, the panel-expansion `Set`s) has to be explicitly
-  cleaned up any time a participant is removed or type-swapped (see
-  `btnDelete_Click`, `forgetParticipant`, `upsertPlayerParticipant`'s
-  type-mismatch branch). A new feature that adds another such map inherits this
-  obligation with no compiler enforcement.
+  `rowMemberDamageValues`, `participantStatblocks`,
+  `participantLieutenantTeamRowId`, the panel-expansion `Set`s, and
+  `pendingJoinAnnouncement`) has to be explicitly cleaned up any time a
+  participant is removed or type-swapped (see `btnDelete_Click`,
+  `forgetParticipant`, `upsertPlayerParticipant`'s type-mismatch branch). A new
+  feature that adds another such map inherits this obligation with no compiler
+  enforcement. `participantLieutenantTeamRowId` is the one exception to the
+  usual four-place pattern (clear on restore / drop on forget / copy on
+  duplicate / delete on type-mismatch) — it is deliberately **not** copied on
+  duplicate (see "Lieutenant tie-break" above).
+
+  `pendingJoinAnnouncement` is `Map<IParticipant, JoinAnnouncementResolver[]>`
+  as of the "grunt naming and statblocks" fix round 3 (RULINGS.md 2026-08-30,
+  "A combatant is announced when they enter the initiative order, not when a
+  name box loses focus") — it used to be a `Set` marking a participant as
+  owing a join line, consulted from a blur/Enter handler
+  (`onParticipantNameCommitted`, now removed). It now holds, per participant,
+  every deferred join-log line still owed, each a function of whichever
+  `IParticipant` instance it is fired against rather than a closure over the
+  object that queued it — the array-valued shape exists because `addNpcToRow`
+  can queue more than one pending line onto the same still-unrolled row before
+  it ever rolls. `queueJoinAnnouncement()` is the single point every GM-side
+  add path funnels its wording through; `announceJoinIfPending()` is the
+  single choke point that actually writes a queued line, called from every
+  place that writes a genuine Initiative Test result to `diceIni`
+  (`rollAndLogInitiative`, the player `roll_submission` command, and the
+  manual rolled-total box) and from `queueJoinAnnouncement` itself (so a
+  reinforcement joining an already-rolled row, `addNpcToRow`, announces
+  immediately rather than waiting for a roll that member will never get). It
+  now follows the full four-place pattern like any other side map, plus the
+  promote/demote carry-over `participantStatblocks`/
+  `participantLieutenantTeamRowId` already had (round 2 defect 8 — a still-
+  queued join line used to be silently dropped by every one of the four
+  promote/demote type-swap helpers).
 - **`isUnusedPlaceholder()` diffs a fresh reference instance, not a hand-list**
   (P2-2, round 5). It used to check eight fields by name and missed `baseIni`,
   the condition-monitor sizing fields, `painTolerance` and `status`/`waiting`,

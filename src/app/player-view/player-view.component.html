@@ -361,11 +361,20 @@
         </div>
         } @else {
         <div class="d-flex align-items-center gap-2 flex-wrap">
+          <!-- Item 5 fix (fix round 4): the fixed "INT×2 + 3d6" wording this
+               tooltip used to carry stated a wrong total for any character
+               already carrying bonus Initiative Dice (Increase Reflexes,
+               wired reflexes, a drug) - projecting adds a *relative* 2 dice
+               (capped at 5D6), not a fixed 3D6 (see
+               `ASTRAL_PROJECTION_DICE_DELTA`, `src/Magic/AstralParticipant.ts`,
+               RULINGS.md 2026-08-30). The player-facing string below also no
+               longer names the file - that citation belongs in a code
+               comment, not in a player's own view. -->
           <button type="button" class="btn btn-sm"
             [class.btn-warning]="primaryCharacter.isAstralProjecting"
             [class.btn-outline-warning]="!primaryCharacter.isAstralProjecting"
             (click)="sendAstralProject(!primaryCharacter.isAstralProjecting)"
-            title="Toggle astral projection — changes initiative to INT×2 + 1d6">
+            title="Toggle astral projection — adds 2 Initiative Dice (max 5D6) and switches the initiative attribute to INT×2">
             {{ primaryCharacter.isAstralProjecting ? "Return to Body" : "Astral Project" }}
           </button>
           @if (primaryCharacter.isAstralProjecting) {

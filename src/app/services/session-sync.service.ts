@@ -316,6 +316,54 @@ export interface SharedGmParticipantState {
    * brief promises that type gains no new field a player can see.
    */
   rowMemberHasActed?: boolean[];
+
+  // Statblock imprint (brief "Grunt naming and statblocks", GM-only per U2 -
+  // never on `SharedParticipantState`). Set only for a participant
+  // instantiated from a sample grunt/lieutenant template.
+  /**
+   * `GruntStatblock.id`, e.g. `"pr5-grunt"`. The single source of truth for
+   * this participant's template identity (Decision D-X4, "GM-only
+   * identification so the GM can see what a participant was created from") -
+   * `label` and `professionalRating` are re-derived from it on demand
+   * (`getParticipantStatblockLabel()`, `getStatblockById(statblockId)`)
+   * rather than sent as their own wire fields. (Item 8 fix, fix round 3: this
+   * interface used to also declare `professionalRating`/`label` fields that
+   * `buildGmParticipantState()` actually populated - contradicting its own
+   * doc comment, which already claimed they weren't sent - and that had no
+   * reader anywhere in `src/` on either side. Removed rather than kept and
+   * wired up: `statblockId` alone is smaller on the wire and leaves no second
+   * copy of the template identity to drift from `GruntStatblock` itself.)
+   */
+  statblockId?: string;
+  /** Was this template loaded with its augmented (bracketed) values (U4)? */
+  statblockAugmented?: boolean;
+  /**
+   * U7 (p. 381): the id (`getParticipantId`) of the row this lieutenant beats
+   * on an Initiative tie with his own team, without consulting ERIC. GM-only -
+   * a player has no use for it and it is presentation of the same class the
+   * rest of this interface already withholds.
+   */
+  lieutenantTeamRowId?: string;
+
+  /**
+   * `AstralParticipant.projectionDiceGain` (item 7, fix round 3): how many
+   * Initiative Dice this participant actually gained on the way into astral
+   * space (0-2 with the 2026-08-30 ruling's delta of 2, less if the 5D6 hard
+   * cap absorbed part of the gain, pp. 52/288). GM-only, restated here rather
+   * than re-derived, for the same reason `baseIni`/`currentInitiativeScore`
+   * are: it is a fact about *how this Score got here*, not something the
+   * current state can reconstruct after the fact. Set only when
+   * `p instanceof AstralParticipant`.
+   *
+   * Without this, a GM reconnect while a mage is projecting silently strands
+   * the gained dice forever: `restoreFromSharedState()` used to rebuild the
+   * `AstralParticipant` with `projectionDiceGain` defaulted to 0, so "Return
+   * to Body" computed a return delta of `0 - 0` and requested no change - the
+   * mage kept the extra dice and the inflated Score for the rest of the fight
+   * (pre-existing defect, doubled in visibility by RULINGS 2026-08-30 raising
+   * the stakes from one stranded die to two).
+   */
+  astralProjectionDiceGain?: number;
 }
 
 /**

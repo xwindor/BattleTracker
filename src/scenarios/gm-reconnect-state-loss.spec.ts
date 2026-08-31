@@ -896,6 +896,57 @@ describe('GM reconnect state loss', () => {
       expect(restored.baseIni).toBe(10);
     });
 
+    it('item 7 fix (fix round 3): a GM reconnect mid-projection carries projectionDiceGain, so Return to Body still subtracts the realized gain instead of stranding it', () => {
+      CombatManager.started = true;
+      // Set up exactly as `toggleAstralProjecting()` would have left it: a
+      // mage who projected with no other Initiative Dice bonus realized the
+      // full delta of 2 (RULINGS 2026-08-30, ASTRAL_PROJECTION_DICE_DELTA).
+      const mage = new AstralParticipant();
+      mage.name = 'Hexer';
+      mage.astralProjecting = true;
+      mage.blocksPhysicalActions = true;
+      mage.baseIni = 10; // INT(5) x 2
+      mage.setDicesWithoutRoll(1); // physical baseline before projecting
+      CombatManager.participants.insert(mage);
+      component['participantReactions'].set(mage, 4);
+      component['participantIntuitions'].set(mage, 5);
+      mage.diceIni = 4; // pretend Initiative Test already rolled this turn
+      mage.setDicesWithoutRoll(3); // 3D6 total while projecting (p. 314)
+      mage.projectionDiceGain = 2;
+      const scoreBeforeReconnect = mage.getCurrentInitiative();
+
+      component.shareRoomCode = 'ABC123';
+      component['syncSharedState']();
+      const { state, gmState } = lastBroadcast();
+
+      resetCombat();
+      component['restoreFromSharedState'](state, gmState);
+
+      const restored = CombatManager.participants.items[0] as AstralParticipant;
+      expect(restored.astralProjecting).toBeTrue();
+      // The defect: without carrying this, `projectionDiceGain` silently
+      // reset to 0 across the reconnect.
+      expect(restored.projectionDiceGain).toBe(2);
+      expect(restored.getCurrentInitiative()).toBe(scoreBeforeReconnect);
+
+      // Return to Body, post-reconnect: must request `-2` (the realized
+      // outbound gain), not `-0`, or the mage keeps the extra die and the
+      // inflated Score for the rest of the fight.
+      component['participantReactions'].set(restored, 4);
+      component['participantIntuitions'].set(restored, 5);
+      const scoreBeforeReturn = restored.getCurrentInitiative();
+      component.toggleAstralProjecting(restored);
+
+      expect(restored.astralProjecting).toBeFalse();
+      expect(restored.dices).toBe(1); // back to the 1D6 physical baseline
+      expect(restored.projectionDiceGain).toBe(0);
+      // baseIni half: INT x2 (10) -> REA+INT (9), a delta of -1. The dice
+      // half rolls and subtracts the realized 2 gained dice. Score strictly
+      // decreases by more than just the baseIni half - the stranded-dice
+      // defect this closes left the dice half at 0.
+      expect(restored.getCurrentInitiative()).toBeLessThan(scoreBeforeReturn - 1);
+    });
+
     it('AC 12: each row member\'s hasActed round-trips (Open Decision 2 / D2)', () => {
       const row = new NpcRowParticipant();
       row.name = 'Gangers';

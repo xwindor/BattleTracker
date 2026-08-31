@@ -30,6 +30,14 @@ against `max(0, score)`.
 
 ## 2026-07-31 — Bonus Initiative Dice carry additively into astral space
 
+> **SUPERSEDED IN PART, 2026-08-30.** The dice *count* below is wrong: astral
+> is **3D6 total**, so the delta is **+2**, not +1. See "2026-08-30 — Astral
+> Initiative is 3D6 total, not 2D6" at the end of this file. What survives
+> unchanged is the *shape* of the rule: the change is applied as a **relative
+> delta** on the character's current dice count, never as an absolute
+> overwrite, so bonus dice from Increase Reflexes, wired reflexes or a drug
+> are preserved. Read the numbers below as +2/-2.
+
 **Ruling:** When a character astrally projects, their Astral Initiative Dice
 count is their current Physical Initiative Dice count **plus one** (not an
 absolute reset to a flat 2D6). Returning from astral space subtracts back
@@ -597,3 +605,175 @@ is still cleared at every pass boundary and Combat Turn boundary exactly as
 before (`resetMemberActed()`) — only the *rejoin* behaviour changed, and it
 carries no rules content either way — it is presentation/bookkeeping, the same
 class of thing `rowMembers` already was.
+
+## 2026-08-30 — Astral Initiative is 3D6 total, not 2D6
+
+**Ruling:** A projecting magician rolls **3D6** Initiative Dice, not 2D6.
+Xavier's ruling, made 2026-08-30 to resolve a contradiction printed in the
+rulebook itself.
+
+**Why:** The book disagrees with itself, and not evenly — it says 2D6 in
+three places and 3D6 in one:
+
+- printed p. 101 (`rules/pages/p0103.txt`), Final Calculations: Astral
+  Initiative (Intuition x 2) + 2D6
+- printed p. 159 (`rules/pages/p0161.txt`), Initiative Attribute chart: 2D6
+- printed p. 160 (`rules/pages/p0162.txt`), worked example: a projecting
+  magician "gains the die", singular
+- printed p. 314 (`rules/pages/p0316.txt`), Astral Attributes table:
+  `Initiative Dice +2D6 (3D6 total)`
+
+Xavier ruled for the p. 314 reading on 2026-08-30. This is a house ruling
+that overrides the majority of the printed text, made deliberately and with
+the three-to-one split known. The tracker previously implemented the 2D6
+reading, so astral characters were rolling one die short of this ruling.
+
+This surfaced during the grunt-statblock work: the printed PR 2 wagemage
+statblock reads "Astral Initiative 8 + 3D6", which the feature brief had
+written off as a misprint. It is not a misprint — it agrees with p. 314. The
+GM-facing statblock note asserting the book was wrong was drafted on that
+mistaken basis and is withdrawn. (An earlier draft of this entry said "two
+notes"; there was one, carried as both an inline comment and a `notes[]`
+string.) Nothing in the statblock data should assert the opposite claim
+either — that the book is *consistent* here. It is not; this entry is where
+the contradiction is recorded.
+
+**How to apply:** `ASTRAL_INITIATIVE_DICE` (`src/Magic/AstralParticipant.ts`)
+is an **absolute** total dice count, not a bonus, and becomes `3`.
+`ASTRAL_PROJECTION_DICE_DELTA` is derived from it
+(`ASTRAL_INITIATIVE_DICE - PHYSICAL_INITIATIVE_DICE`) and therefore becomes
+`2` on its own — a magician projecting mid-turn gains two dice, rolls them,
+and adds them to the running Initiative Score; returning loses them the same
+way. The delta stays **relative** so bonus dice from Increase Reflexes, wired
+reflexes or a drug are preserved, and the 5D6 hard cap still applies at the
+write site. Statblocks continue to store no astral initiative line at all —
+the value is always derived.
+
+## 2026-08-30 — A combatant is announced when they enter the initiative order, not when a name box loses focus
+
+**Ruling:** The "joined the fight" log line for any **GM-added** combatant is
+written the first time that combatant actually enters a rolled initiative
+order — not on blur, not on Enter, not at the moment the add dialog is
+confirmed. Each combatant is announced at most once.
+
+**Player-registered participants are the exception:** a player connecting to
+the room is announced **immediately on connect**, as they are today
+("<name> joined the session"). A player who has connected is in the fight by
+definition, and the GM needs to see the connection the moment it happens.
+
+**Why:** Three rounds of fixes failed to stop a phantom join line because the
+trigger was a *focus* event. "The name box lost focus" is not the same fact as
+"this character entered the fight". Focus moves for reasons that have nothing
+to do with the GM's intent — most damagingly when a confirmation pop-up opens,
+which blurs the name box an instant before the combatant is deleted, writing a
+join line for someone who never entered the fight. The log is append-only, so
+there is nothing to retract.
+
+There are **eleven** pop-up sites in `battle-tracker.component.ts` alone, and
+every one steals focus. Suppressing them one at a time is unbounded work with
+no end state. Entering the initiative order is the first moment the tracker
+can *know* a combatant is in the fight, and it is reached by exactly one code
+path regardless of which button created the combatant.
+
+**How to apply:** All GM-side add paths — the plus button, Tab-to-add, Add
+Grunt, Grunt Group, Add NPC, merge, and the add dialog's Confirm — defer their
+announcement. The announcement fires from the single point where a participant
+first receives a rolled Initiative Score. A combatant created and deleted
+before initiative is rolled is never announced, which is the point.
+
+**Consequence the GM will notice:** combatants added during setup do not
+appear in the log until initiative is first rolled. This is a deliberate
+change in *timing*, not in wording — the line still carries the name the GM
+typed. Acceptance criteria written against "one line, at commit" (brief U1,
+D2) are amended by this ruling; the line is still exactly one, still at a
+single choke point, but the choke point moved.
+
+## 2026-08-30 — A lieutenant's tie-break precedence applies against everyone, not just his own team
+
+**Ruling:** When a lieutenant ties with his own grunt row, he goes first — and
+he keeps that position even if it puts him ahead of an unrelated combatant who
+beat him on the ERIC ladder. Xavier's ruling: "if it's a fair leapfrog then
+it's fair."
+
+**Why:** Printed p. 381 (`rules/pages/p0383.txt`) scopes the rule to the
+lieutenant's own team: if he gets the same Initiative as his team, he always
+goes first. Printed p. 159 (`rules/pages/p0161.txt`) gives the ERIC ladder
+(Edge, Reaction, Intuition, Coin toss) for everyone else. When a lieutenant,
+his row, and an uninvolved third party are all tied on the same Initiative
+Score, the two rules give genuinely cyclic preferences and the book gives no
+answer: the lieutenant must precede his row, but ERIC may place the third
+party ahead of the lieutenant and behind the row.
+
+The cycle has to be broken somewhere. Breaking it in the lieutenant's favour
+keeps the printed rule intact and costs only that the third party is passed by
+one combatant on an exact tie — a coin-toss-adjacent outcome either way.
+
+**How to apply:** `applyLieutenantPrecedence` moves the lieutenant ahead of
+his row and leaves every other pair as the ERIC comparator ordered it. A
+lieutenant already ahead of his row is never moved backwards. The doc comment
+on that method must not claim everyone else's relative order is untouched —
+the lieutenant-versus-third-party pair *is* affected, deliberately, by this
+ruling. The comparator itself stays free of pairwise overrides so it remains
+transitive; the precedence is applied as a post-sort splice.
+
+## 2026-08-30 — Data Processing is imported from a statblock only where the book supplies one, and is blank otherwise
+
+**Ruling:** The tracker imports a Data Processing value for a printed grunt
+statblock **only when the rules derive one from the block's own printed
+attributes**. Where the book deliberately declines to supply a number, the
+tracker stores nothing and shows the field blank until the GM fills it in. A
+Matrix participant with no Data Processing derives **no** VR Initiative;
+promoting a participant to a Matrix form no longer seeds a hardcoded default.
+
+Xavier's decision, 2026-08-30, on being shown that the promote path was seeding
+a hardcoded 6.
+
+**Why:** A made-up number that looks authoritative is worse than a blank. The
+old default of 6 belongs to no character in the book, but reads on screen
+exactly like a real rating — which is how the PR 4 technomancer came to show a
+plausible, wrong VR Initiative (6 + Intuition 5 = 11 + 4D6) rather than an
+obviously broken one. A blank is self-announcing: the GM can see the tracker
+does not know, and fill it in.
+
+**How to apply, per block:**
+
+- **`pr4-lieutenant` (technomancer) stores Data Processing 5.** A technomancer
+  has no deck — his living persona takes its Matrix ratings from his Mental
+  attributes, and the Living Persona table makes Data Processing equal to
+  **Logic** (printed pp. 101 and 251). His block prints Logic 5 (printed
+  p. 383). Hot-sim VR therefore derives 5 + Intuition 5 = 10, with 4D6 from the
+  mode (printed pp. 101, 159, 230, 231).
+- **`pr5-lieutenant` (decker) stores no Data Processing**, and carries a
+  GM-facing note recording his Shiawase Cyber-5 and its array `8 7 6 5`
+  (printed pp. 227, 384, 439). The book refuses to assign a decker's array to
+  particular attributes — the numbers are chosen when the deck boots, and two of
+  them can be swapped again as a Free Action mid-fight (printed pp. 227, 228).
+  Any single number the tracker picked would be the app making a tactical choice
+  that belongs to the GM, and one the GM can legally change during the fight.
+- **The other twelve blocks store no Data Processing.** Each carries only a
+  commlink (printed pp. 381-384), which has no printed attribute array
+  (p. 439), and none carries the sim module a commlink needs for VR (p. 439).
+
+**Consequences and limits, all deliberate:**
+
+- **Data Processing is not part of the augmented/base toggle.** It derives from
+  Logic (p. 251) and the block prints no bracketed alternative. The toggle
+  models switchable cyberware; this is not that.
+- **Cold-sim stays available for the technomancer**, and computes correctly if
+  chosen (10 + 3D6). Printed p. 251 says a living persona supports AR and
+  hot-sim only, so this is technically an illegal mode for him — but per
+  `SCOPE.md` the tracker does not enforce legality, and the GM overrides things
+  routinely.
+- **The printed line "Matrix Initiative 9 + 3D6 (Hot Sim)" is never imported as
+  a value** (printed p. 383). It stays a GM-facing note. Both halves disagree
+  with the rules: the 9 is his *physical* initiative attribute (Reaction 4 +
+  Intuition 5), and 3D6 is the cold-sim dice count, on a line labelled hot-sim,
+  for a character who cannot use cold-sim at all.
+- **No mid-combat Data Processing mutation is modelled.** The book's mutators
+  are Infusion and Diffusion of a Matrix attribute (p. 252) and a decker's
+  Reconfigure Free Action (p. 228). The PR 4 lieutenant carries both Infusion
+  and Diffusion of Data Processing on his own block (p. 383). These stay manual
+  GM edits, and a manual edit follows whatever convention the tracker already
+  uses for a mid-turn Reaction edit — no second, Matrix-only convention.
+- **A stored 0 means "unset", never a rated 0.** A live persona's floor is 1:
+  Diffusion cannot reduce a Matrix attribute below 1 (p. 252).

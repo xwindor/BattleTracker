@@ -663,11 +663,15 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // Astral Initiative is 2D6 base against Physical's 1D6 (Initiative Attribute
-  // Chart, p. 159), and projecting mid-turn "gains the die (and the change in
-  // Initiative) for their Astral Initiative during that Combat Turn" (p. 160).
+  // Astral Initiative is 3D6 total against Physical's 1D6 (Astral Attributes
+  // Table, printed p. 314, `rules/pages/p0316.txt`; RULINGS 2026-08-30
+  // supersedes the tracker's prior 2D6 reading), and projecting mid-turn
+  // "gains the die (and the change in Initiative) for their Astral
+  // Initiative during that Combat Turn" (p. 160, `rules/pages/p0162.txt`
+  // line 53 - singular in the book because its example predates the 3D6
+  // ruling above; under that ruling the actual gain is two dice, not one).
   // toggleAstralProjecting previously moved only the attribute half and left
-  // the dice count untouched, so projecting gained no die at all.
+  // the dice count untouched, so projecting gained no dice at all.
   describe('toggleAstralProjecting (dice half)', () => {
     /** Awakened, not projecting. REA 5 / INT 5, so the attribute half is a no-op. */
     function awakened(dice = 1, roll = 4): AstralParticipant {
@@ -682,60 +686,61 @@ describe('BattleTrackerComponent', () => {
       return ap;
     }
 
-    it('gains a die, rolls it and adds it to the running Score when projecting', () => {
+    it('gains two dice, rolls them and adds the total to the running Score when projecting', () => {
       const ap = awakened();       // 1D6, rolled 4 -> Score 14
       CombatManager.started = true;
       expect(ap.currentInitiativeScore).toBe(14);
-      scriptDice(component, [5]);
+      scriptDice(component, [5, 2]);
 
       component.toggleAstralProjecting(ap);
 
       expect(ap.astralProjecting).toBeTrue();
-      expect(ap.dices).toBe(2);                  // 1D6 physical -> 2D6 astral
-      expect(ap.diceIni).toBe(9);                // 4 + the newly rolled die
-      expect(ap.currentInitiativeScore).toBe(19); // 14 + 5, not 14
+      expect(ap.dices).toBe(3);                  // 1D6 physical -> 3D6 astral
+      expect(ap.diceIni).toBe(11);               // 4 + the two newly rolled dice (5+2)
+      expect(ap.currentInitiativeScore).toBe(21); // 14 + 7, not 14
     });
 
-    it('loses that die, rolls it and subtracts it when returning from astral space', () => {
+    it('loses those dice, rolls them and subtracts the total when returning from astral space', () => {
       const ap = awakened();
       CombatManager.started = true;
-      scriptDice(component, [5, 3]);
+      scriptDice(component, [5, 2, 3, 1]);
 
-      component.toggleAstralProjecting(ap); // out: +5 -> Score 19, 2D6
-      component.toggleAstralProjecting(ap); // back: -3
+      component.toggleAstralProjecting(ap); // out: +7 (5+2) -> Score 21, 3D6
+      component.toggleAstralProjecting(ap); // back: -4 (3+1)
 
       expect(ap.astralProjecting).toBeFalse();
       expect(ap.dices).toBe(1);
-      expect(ap.diceIni).toBe(6);                // 9 - 3
-      expect(ap.currentInitiativeScore).toBe(16); // 19 - 3
+      expect(ap.diceIni).toBe(7);                // 11 - 4
+      expect(ap.currentInitiativeScore).toBe(17); // 21 - 4
     });
 
-    // The dice change is a RELATIVE +1/-1, not an absolute "set to 2D6": a
+    // The dice change is a RELATIVE +2/-2, not an absolute "set to 3D6": a
     // magician already carrying bonus Initiative Dice from another source must
-    // keep them (an absolute overwrite would silently drop two of these three).
-    it('adds one die on top of bonus dice from another source rather than overwriting the count', () => {
+    // keep them (an absolute overwrite would silently drop dice from the
+    // bonus source instead of adding to it).
+    it('adds two dice on top of bonus dice from another source rather than overwriting the count', () => {
       const ap = awakened(3, 12);  // 3D6 (e.g. Increase Reflexes), rolled 12 -> Score 22
       CombatManager.started = true;
       expect(ap.currentInitiativeScore).toBe(22);
-      scriptDice(component, [6]);
+      scriptDice(component, [6, 3]);
 
       component.toggleAstralProjecting(ap);
 
-      expect(ap.dices).toBe(4);                  // 3 + 1, NOT 2
-      expect(ap.diceIni).toBe(18);               // 12 + the one new die
-      expect(ap.currentInitiativeScore).toBe(28); // 22 + 6
+      expect(ap.dices).toBe(5);                  // 3 + 2, clamped at the 5D6 cap
+      expect(ap.diceIni).toBe(21);               // 12 + the two new dice (6+3)
+      expect(ap.currentInitiativeScore).toBe(31); // 22 + 9
     });
 
-    it('returning from astral space also subtracts only one die from a bonus-stacked pool', () => {
+    it('returning from astral space subtracts the two projected dice from a bonus-stacked pool', () => {
       const ap = awakened(3, 12);
       CombatManager.started = true;
-      scriptDice(component, [6, 2]);
+      scriptDice(component, [6, 3, 4, 1]);
 
       component.toggleAstralProjecting(ap);
       component.toggleAstralProjecting(ap);
 
       expect(ap.dices).toBe(3);                  // back to the physical pool, bonus intact
-      expect(ap.currentInitiativeScore).toBe(26); // 28 - 2
+      expect(ap.currentInitiativeScore).toBe(26); // 31 - 5 (4+1)
     });
 
     it('does not roll or move the Score outside a running combat', () => {
@@ -744,15 +749,15 @@ describe('BattleTrackerComponent', () => {
 
       component.toggleAstralProjecting(ap);
 
-      expect(ap.dices).toBe(2);                  // count still tracks the mode
+      expect(ap.dices).toBe(3);                  // count still tracks the mode
       expect(ap.currentInitiativeScore).toBe(14); // no roll owed, Score untouched
     });
 
-    // Defect D1: the return trip used to re-apply the constant -1 regardless of
+    // Defect D1: the return trip used to re-apply the constant regardless of
     // what the outbound trip actually achieved. A dice decrease "rolls the
     // number of lost dice and subtracts the total" (p. 160) - you only roll and
     // subtract dice you actually lose - and the 5D6 hard cap (pp. 52/288) can
-    // mean the outbound trip gained nothing at all.
+    // mean the outbound trip gained fewer dice than the full delta, or none.
     describe('round trip against the 5D6 cap (defect D1)', () => {
       it('gains nothing when already at the 5D6 cap: no roll, no Score change', () => {
         const ap = awakened(5, 20);   // already capped (e.g. Increase Reflexes), Score 30
@@ -762,7 +767,7 @@ describe('BattleTrackerComponent', () => {
         component.toggleAstralProjecting(ap);
 
         expect(ap.astralProjecting).toBeTrue();
-        expect(ap.dices).toBe(5);                   // cap absorbed the die
+        expect(ap.dices).toBe(5);                   // cap absorbed the dice
         expect(die).not.toHaveBeenCalled();         // nothing lost or gained to roll
         expect(ap.currentInitiativeScore).toBe(30); // Score untouched
         expect(ap.projectionDiceGain).toBe(0);      // realized gain, not the constant
@@ -783,25 +788,26 @@ describe('BattleTrackerComponent', () => {
         expect(ap.diceIni).toBe(20);
       });
 
-      // Mirror direction: the die WAS granted, then something else took it away
-      // while still projecting. There is nothing left to give back on return.
-      it('gives nothing back on return when the gained die was already lost by another path', () => {
+      // Mirror direction: the dice WERE granted, then something else took them
+      // away while still projecting. There is nothing left to give back on
+      // return.
+      it('gives nothing back on return when the gained dice were already lost by another path', () => {
         const ap = awakened();        // 1D6, rolled 4 -> Score 14
         CombatManager.started = true;
-        const die = scriptDice(component, [5, 3]);
+        const die = scriptDice(component, [5, 3, 2, 1]);
 
-        component.toggleAstralProjecting(ap);            // out: +5 -> Score 19, 2D6
-        expect(ap.projectionDiceGain).toBe(1);
-        component['changeParticipantDiceCount'](ap, 1);  // GM drops her back to 1D6: -3
+        component.toggleAstralProjecting(ap);            // out: +8 (5+3) -> Score 22, 3D6
+        expect(ap.projectionDiceGain).toBe(2);
+        component['changeParticipantDiceCount'](ap, 1);  // GM drops her back to 1D6: -3 (2+1)
         expect(ap.dices).toBe(1);
-        expect(ap.currentInitiativeScore).toBe(16);
+        expect(ap.currentInitiativeScore).toBe(19);
 
         component.toggleAstralProjecting(ap);            // back to physical
 
         expect(ap.astralProjecting).toBeFalse();
         expect(ap.dices).toBe(1);                   // already at the floor
-        expect(die).toHaveBeenCalledTimes(2);       // no third die rolled on return
-        expect(ap.currentInitiativeScore).toBe(16); // nothing left to subtract
+        expect(die).toHaveBeenCalledTimes(4);       // no further dice rolled on return
+        expect(ap.currentInitiativeScore).toBe(19); // nothing left to subtract
         expect(ap.projectionDiceGain).toBe(0);
       });
 
@@ -809,17 +815,17 @@ describe('BattleTrackerComponent', () => {
       it('still rolls and applies both halves of an ordinary uncapped round trip', () => {
         const ap = awakened();        // 1D6, rolled 4 -> Score 14
         CombatManager.started = true;
-        const die = scriptDice(component, [5, 3]);
+        const die = scriptDice(component, [5, 3, 2, 2]);
 
-        component.toggleAstralProjecting(ap);   // out: +5 -> 19
-        expect(ap.dices).toBe(2);
-        expect(ap.currentInitiativeScore).toBe(19);
+        component.toggleAstralProjecting(ap);   // out: +8 (5+3) -> 22
+        expect(ap.dices).toBe(3);
+        expect(ap.currentInitiativeScore).toBe(22);
 
-        component.toggleAstralProjecting(ap);   // back: -3 -> 16
+        component.toggleAstralProjecting(ap);   // back: -4 (2+2) -> 18
 
         expect(ap.dices).toBe(1);
-        expect(die).toHaveBeenCalledTimes(2);
-        expect(ap.currentInitiativeScore).toBe(16);
+        expect(die).toHaveBeenCalledTimes(4);
+        expect(ap.currentInitiativeScore).toBe(18);
       });
     });
   });

@@ -1823,9 +1823,12 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
     // `LogHandler.logbook` is a process-wide singleton that outlives a test, so
     // every assertion here reads only the lines this test produced.
     it('does not tell players a new grunt\'s Condition Monitor size', () => {
-      const before = LogHandler.logbook.length;
-
       const grunt = component.addGrunt('Ganger A', 9, 3); // 13 boxes
+      // The join line is queued at creation and only actually written once
+      // this grunt has a rolled Initiative Score (RULINGS.md 2026-08-30, "A
+      // combatant is announced when they enter the initiative order").
+      const before = LogHandler.logbook.length;
+      component['rollAndLogInitiative'](grunt);
 
       const line = LogHandler.logbook.slice(before).map(e => e.text)
         .find(t => /^Ganger A added\.$/.test(t))!;
@@ -1859,9 +1862,14 @@ describe('NPC group initiative - addendum defect fixes D1-D4 / D7', () => {
       const b = component.addGrunt('Ganger B');
       component.toggleMergeSelection(a);
       component.toggleMergeSelection(b);
-      const before = LogHandler.logbook.length;
 
-      component.mergeSelectedGrunts();
+      const result = component.mergeSelectedGrunts();
+      // The merge's "formed from ..." line is queued, not written, until the
+      // new row has its own rolled Initiative Score - "the row goes in
+      // unrolled so the GM makes its single group Initiative Test" (brief
+      // Decision 10; RULINGS.md 2026-08-30).
+      const before = LogHandler.logbook.length;
+      component['rollAndLogInitiative'](result.row!);
 
       const line = LogHandler.logbook.slice(before).map(e => e.text)
         .find(t => /formed from/.test(t))!;

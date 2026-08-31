@@ -27,3 +27,22 @@ export {
   hasGruntConditionMonitor,
   createStandaloneGrunt
 } from "./DetachedGruntParticipant";
+export {
+  ALL_GRUNT_STATBLOCKS,
+  getStatblockById
+} from "./statblocks";
+export type {
+  GruntStatblock,
+  GruntStatblockKind,
+  GruntStatblockAugmented
+} from "./statblocks";
+export {
+  instantiateStandaloneFromStatblock,
+  instantiateRowFromStatblock,
+  resolveEffectiveStatblockAttributes
+} from "./statblock-instantiation";
+export type {
+  EffectiveGruntAttributes,
+  StandaloneStatblockResult,
+  RowStatblockResult
+} from "./statblock-instantiation";
