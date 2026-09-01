@@ -8,7 +8,8 @@ export type HostAccessMethod = "none" | "hack-on-fly" | "brute-force" | "direct-
  *
  * A target host (server / corporate node) the GM created or selected. Holds
  * its own A/S/D/F + Matrix CM, the contained MatrixTargets, and currently
- * active IC. Plain class - mutated directly by MatrixStateService.
+ * active IC. Plain class (not Undoable) — mutate via UndoHandler.DoAction
+ * from MatrixStateService.
  */
 export class MatrixHost {
   id: string;
@@ -36,6 +37,12 @@ export class MatrixHost {
   /** IC participants spawned and currently active in this host. */
   icActive: ICParticipant[];
 
+  /**
+   * Canonical mark count for this host and all IC within it.
+   * marks[deckerId] = count (host-wide propagation per SR5E p.247).
+   */
+  marks: Record<string, number>;
+
   constructor(init?: Partial<MatrixHost>) {
     this.id = init?.id ?? "";
     this.name = init?.name ?? "";
@@ -50,5 +57,6 @@ export class MatrixHost {
     this.accessMethod = init?.accessMethod ?? "none";
     this.deckerInside = init?.deckerInside ?? [];
     this.icActive = init?.icActive ?? [];
+    this.marks = init?.marks ?? {};
   }
 }

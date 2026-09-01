@@ -1,0 +1,33 @@
+<div class="modal-header os-prompt-header">
+  <h5 class="modal-title">Apply Overwatch Score — {{ deckerName }}</h5>
+  <button type="button" class="btn-close" aria-label="Close" (click)="cancel()"></button>
+</div>
+<div class="modal-body">
+  <div class="os-action-list mb-3">
+    @for (entry of actionEntries; track entry.name) {
+    <div class="os-action-row">
+      <span class="os-action-name">{{ entry.name }}</span>
+      <span class="os-action-delta badge bg-danger">+{{ entry.delta }}</span>
+    </div>
+    }
+  </div>
+  @if (mode === 'confirm') {
+  <div class="os-total-row">
+    Suggested OS: <strong>+{{ suggestedDelta }}</strong>
+  </div>
+  } @else {
+  <div class="os-modify-row mt-2">
+    <label class="form-label mb-1">Custom OS delta:</label>
+    <input type="number" class="form-control os-custom-input" [(ngModel)]="customDelta" min="0" />
+  </div>
+  }
+</div>
+<div class="modal-footer">
+  <button type="button" class="btn btn-outline-secondary" (click)="cancel()">Cancel</button>
+  @if (mode === 'confirm') {
+  <button type="button" class="btn btn-outline-warning" (click)="startModify()">Modify</button>
+  <button type="button" class="btn btn-danger" (click)="accept()">Accept (+{{ suggestedDelta }})</button>
+  } @else {
+  <button type="button" class="btn btn-danger" [disabled]="customDelta < 0" (click)="applyCustom()">Apply (+{{ customDelta }})</button>
+  }
+</div>

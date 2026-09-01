@@ -1,0 +1,338 @@
+<div class="hier-editor">
+
+  <!-- ── Public Space ──────────────────────────────────────────────────── -->
+  <div class="hier-tree-section">
+    <div class="hier-section-header" (click)="togglePublicSpace()">
+      <i class="fas fa-globe me-1"></i>
+      <span class="hier-section-title">Public Space</span>
+      <span class="hier-count">{{ state.publicTargets.length }}</span>
+      <div class="hier-header-actions" (click)="$event.stopPropagation()">
+        <button type="button" class="hier-add-btn"
+          (click)="openAddTarget(null, 'device')"
+          ngbTooltip="Add loose device to public space" placement="top">
+          <i class="fas fa-plus"></i> Loose Device
+        </button>
+      </div>
+      <i class="fas ms-auto"
+        [class.fa-chevron-down]="!publicSpaceExpanded"
+        [class.fa-chevron-up]="publicSpaceExpanded"></i>
+    </div>
+
+    @if (publicSpaceExpanded) {
+    <div class="hier-section-body">
+      @if (state.publicTargets.length === 0 && !isTargetFormForHost(null)) {
+      <div class="hier-empty">No loose devices. Click "+ Loose Device" to add one.</div>
+      }
+      @for (t of state.publicTargets; track t.id) {
+      <app-target-card
+        [target]="t"
+        [host]="null"
+        [activeDeckers]="activeDeckers"
+        [editing]="isEditingTarget(t)"
+        (editTarget)="openEditTarget(null, t)"
+        (deleteTarget)="deleteTarget(null, t)"
+        (cycleVisibilityRequested)="cycleVisibility(null, t)">
+      </app-target-card>
+      }
+
+      <!-- Target form: public space -->
+      @if (isTargetFormForHost(null)) {
+      <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: null }"></ng-container>
+      }
+    </div>
+    }
+  </div>
+
+  <!-- ── Hosts list header ─────────────────────────────────────────────── -->
+  <div class="hier-tree-section hier-hosts-top">
+    <div class="hier-section-header hier-section-header-static">
+      <i class="fas fa-server me-1"></i>
+      <span class="hier-section-title">Hosts</span>
+      <span class="hier-count">{{ state.hosts.length }}</span>
+      <div class="hier-header-actions" (click)="$event.stopPropagation()">
+        <button type="button" class="hier-add-btn"
+          (click)="openAddHost()">
+          <i class="fas fa-plus"></i> Add Host
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add-host form (new host only) -->
+  @if (hostForm.active && !hostForm.isEditing) {
+  <div class="hier-form">
+    <div class="hier-form-title">New Host</div>
+    <div class="hier-form-row">
+      <label class="hier-form-label">Name</label>
+      <input type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
+        placeholder="Host name" maxlength="60" autofocus>
+    </div>
+    <div class="hier-form-row">
+      <label class="hier-form-label">Rating</label>
+      <input type="number" class="hier-form-input hier-form-input-narrow"
+        [(ngModel)]="hostForm.rating" [min]="1" [max]="12">
+      <button type="button" class="hier-suggest-btn" (click)="suggestAsdf()"
+        ngbTooltip="Shuffle A/S/D/F from Rating" placement="top">
+        Suggest A/S/D/F
+      </button>
+    </div>
+    <div class="hier-form-row hier-asdf-row">
+      <label class="hier-form-label">A/S/D/F</label>
+      <input type="number" class="hier-form-input hier-form-input-stat"
+        [(ngModel)]="hostForm.attack" min="1" max="20" placeholder="A">
+      <input type="number" class="hier-form-input hier-form-input-stat"
+        [(ngModel)]="hostForm.sleaze" min="1" max="20" placeholder="S">
+      <input type="number" class="hier-form-input hier-form-input-stat"
+        [(ngModel)]="hostForm.dataProcessing" min="1" max="20" placeholder="D">
+      <input type="number" class="hier-form-input hier-form-input-stat"
+        [(ngModel)]="hostForm.firewall" min="1" max="20" placeholder="F">
+    </div>
+    <div class="hier-form-row">
+      <label class="hier-form-label hier-form-check-label">
+        <input type="checkbox" [(ngModel)]="hostForm.setActive">
+        Set as Active Host
+      </label>
+    </div>
+    <div class="hier-form-actions">
+      <button type="button" class="hier-btn-save" (click)="saveHostForm()"
+        [disabled]="!hostForm.name.trim()">Save</button>
+      <button type="button" class="hier-btn-cancel" (click)="closeHostForm()">Cancel</button>
+    </div>
+  </div>
+  }
+
+  <!-- ── Host nodes ────────────────────────────────────────────────────── -->
+  @for (host of state.hosts; track host.id) {
+  <div class="hier-host-node" [class.hier-host-active]="isActiveHost(host)">
+
+    <!-- Host header row -->
+    <div class="hier-host-header" (click)="toggleHost(host.id)">
+      @if (isActiveHost(host)) {
+      <span class="hier-active-badge">ACTIVE</span>
+      }
+      <i class="fas fa-server hier-host-icon"></i>
+      <span class="hier-host-name">{{ host.name }}</span>
+      <span class="hier-host-rating">R{{ host.rating }}</span>
+      <span class="hier-host-asdf">{{ host.attack }}/{{ host.sleaze }}/{{ host.dataProcessing }}/{{ host.firewall }}</span>
+      <div class="hier-row-actions" (click)="$event.stopPropagation()">
+        @if (!isActiveHost(host)) {
+        <button type="button" class="hier-set-active-btn" (click)="setActiveHost(host)"
+          ngbTooltip="Set as active host" placement="top">
+          Set Active
+        </button>
+        } @else {
+        <button type="button" class="hier-clear-active-btn" (click)="clearActiveHost()"
+          ngbTooltip="Clear active host" placement="top">
+          Clear
+        </button>
+        }
+        <button type="button" class="hier-icon-btn" (click)="openEditHost(host)" title="Edit host">
+          <i class="fas fa-pencil-alt"></i>
+        </button>
+        <button type="button" class="hier-icon-btn hier-icon-btn-del" (click)="deleteHost(host)" title="Remove host">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <i class="fas ms-1"
+        [class.fa-chevron-down]="!isHostExpanded(host.id)"
+        [class.fa-chevron-up]="isHostExpanded(host.id)"></i>
+    </div>
+
+    <!-- Host body -->
+    @if (isHostExpanded(host.id)) {
+    <div class="hier-host-body">
+
+      <!-- Host marks -->
+      @if (activeDeckers.length > 0 || hostMarkEntries(host).length > 0) {
+      <div class="hier-host-marks">
+        <span class="hier-marks-label">Host Marks</span>
+        @for (entry of hostMarkEntries(host); track entry.deckerId) {
+        <span class="hier-mark-entry">
+          <span class="hier-mark-decker">{{ entry.deckerId }}</span>
+          <span class="hier-mark-dots">{{ dots(entry.count) }}</span>
+          <button type="button" class="hier-mark-rm"
+            (click)="removeHostMark(host, entry.deckerId)"
+            title="Remove 1 mark from host">×</button>
+        </span>
+        }
+        @if (hostAvailableDeckers(host).length > 0) {
+        <span class="hier-add-mark-group">
+          @if (!getHostMarkState(host.id).open) {
+          <button type="button" class="hier-add-mark-btn" (click)="openHostAddMark(host)">+Mark</button>
+          } @else {
+          <select class="hier-mark-select" [(ngModel)]="getHostMarkState(host.id).selectedDeckerId">
+            @for (d of hostAvailableDeckers(host); track d.name) {
+            <option [value]="d.name">{{ d.name }}</option>
+            }
+          </select>
+          <button type="button" class="hier-mark-confirm" (click)="confirmHostAddMark(host)">✓</button>
+          <button type="button" class="hier-mark-cancel" (click)="getHostMarkState(host.id).open = false">✕</button>
+          }
+        </span>
+        }
+      </div>
+      }
+
+      <!-- Edit-host form (inline inside node) -->
+      @if (isEditingHost(host)) {
+      <div class="hier-form hier-form-inset">
+        <div class="hier-form-title">Edit Host</div>
+        <div class="hier-form-row">
+          <label class="hier-form-label">Name</label>
+          <input type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
+            placeholder="Host name" maxlength="60">
+        </div>
+        <div class="hier-form-row">
+          <label class="hier-form-label">Rating</label>
+          <input type="number" class="hier-form-input hier-form-input-narrow"
+            [(ngModel)]="hostForm.rating" [min]="1" [max]="12">
+          <button type="button" class="hier-suggest-btn" (click)="suggestAsdf()"
+            ngbTooltip="Shuffle A/S/D/F from Rating" placement="top">
+            Suggest A/S/D/F
+          </button>
+        </div>
+        <div class="hier-form-row hier-asdf-row">
+          <label class="hier-form-label">A/S/D/F</label>
+          <input type="number" class="hier-form-input hier-form-input-stat"
+            [(ngModel)]="hostForm.attack" min="1" max="20" placeholder="A">
+          <input type="number" class="hier-form-input hier-form-input-stat"
+            [(ngModel)]="hostForm.sleaze" min="1" max="20" placeholder="S">
+          <input type="number" class="hier-form-input hier-form-input-stat"
+            [(ngModel)]="hostForm.dataProcessing" min="1" max="20" placeholder="D">
+          <input type="number" class="hier-form-input hier-form-input-stat"
+            [(ngModel)]="hostForm.firewall" min="1" max="20" placeholder="F">
+        </div>
+        <div class="hier-form-actions">
+          <button type="button" class="hier-btn-save" (click)="saveHostForm()"
+            [disabled]="!hostForm.name.trim()">Save</button>
+          <button type="button" class="hier-btn-cancel" (click)="closeHostForm()">Cancel</button>
+        </div>
+      </div>
+      }
+
+      <!-- IC list -->
+      @if (host.icActive.length > 0) {
+      <div class="hier-ic-subsection">
+        <div class="hier-subsection-label">IC Active ({{ host.icActive.length }}/{{ host.rating }})</div>
+        @for (ic of host.icActive; track ic) {
+        <div class="hier-ic-row" [class.hier-ic-bricked]="ic.physicalDamage >= ic.physicalHealth">
+          <i class="fas fa-shield-alt me-1"></i>
+          <span>{{ ic.icType }} IC</span>
+          <span class="hier-ic-cm">{{ ic.physicalDamage }}/{{ ic.physicalHealth }}</span>
+          @if (ic.physicalDamage >= ic.physicalHealth) {
+          <span class="hier-ic-bricked-label">BRICKED</span>
+          }
+        </div>
+        }
+      </div>
+      }
+
+      <!-- Targets section -->
+      <div class="hier-targets-subsection">
+        <div class="hier-subsection-label">
+          Targets ({{ host.targets.length }})
+          <div class="hier-add-type-btns">
+            <button type="button" class="hier-type-add-btn" (click)="openAddTarget(host, 'device')">
+              <i class="fas fa-microchip"></i> Device
+            </button>
+            <button type="button" class="hier-type-add-btn" (click)="openAddTarget(host, 'file')">
+              <i class="fas fa-file-alt"></i> File
+            </button>
+            <button type="button" class="hier-type-add-btn" (click)="openAddTarget(host, 'persona')">
+              <i class="fas fa-user-circle"></i> Persona
+            </button>
+            <button type="button" class="hier-type-add-btn" (click)="openAddTarget(host, 'ic')">
+              <i class="fas fa-shield-alt"></i> IC Target
+            </button>
+          </div>
+        </div>
+
+        @if (host.targets.length === 0 && !isTargetFormForHost(host.id)) {
+        <div class="hier-empty">No targets. Use the buttons above to add one.</div>
+        }
+        @for (t of host.targets; track t.id) {
+        <app-target-card
+          [target]="t"
+          [host]="host"
+          [activeDeckers]="activeDeckers"
+          [editing]="isEditingTarget(t)"
+          (editTarget)="openEditTarget(host, t)"
+          (deleteTarget)="deleteTarget(host, t)"
+          (cycleVisibilityRequested)="cycleVisibility(host, t)">
+        </app-target-card>
+        }
+
+        <!-- Target form: inside host -->
+        @if (isTargetFormForHost(host.id)) {
+        <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: host }"></ng-container>
+        }
+      </div>
+
+    </div>
+    }
+  </div>
+  }
+
+</div>
+
+<!-- ── Target form template ─────────────────────────────────────────────── -->
+<ng-template #targetFormTpl let-host>
+<div class="hier-form hier-form-target" [class.hier-form-inset]="host !== null">
+  <div class="hier-form-title">
+    {{ targetForm.isEditing ? 'Edit' : 'Add' }} {{ typeLabel(targetForm.type) }}
+  </div>
+
+  <div class="hier-form-row">
+    <label class="hier-form-label">Name</label>
+    <input type="text" class="hier-form-input" [(ngModel)]="targetForm.name"
+      placeholder="Target name" maxlength="60">
+  </div>
+
+  <div class="hier-form-row">
+    <label class="hier-form-label">Type</label>
+    <select class="hier-form-select" [(ngModel)]="targetForm.type">
+      <option value="device">Device</option>
+      <option value="file">File</option>
+      <option value="persona">Persona</option>
+      @if (targetForm.hostId !== null) {
+      <option value="ic">IC Target</option>
+      }
+    </select>
+  </div>
+
+  @if (targetForm.type === 'device') {
+  <div class="hier-form-row">
+    <label class="hier-form-label">Device Rating</label>
+    <input type="number" class="hier-form-input hier-form-input-narrow"
+      [(ngModel)]="targetForm.deviceRating" [min]="1" [max]="12">
+  </div>
+  }
+
+  @if (targetForm.type === 'persona') {
+  <div class="hier-form-row">
+    <label class="hier-form-label">Decker Link</label>
+    <select class="hier-form-select" [(ngModel)]="targetForm.linkedParticipantId">
+      <option value="">— None —</option>
+      @for (d of activeDeckers; track d.name) {
+      <option [value]="d.name">{{ d.name }}</option>
+      }
+    </select>
+  </div>
+  }
+
+  <div class="hier-form-row">
+    <label class="hier-form-label">Visibility</label>
+    <select class="hier-form-select" [(ngModel)]="targetForm.visibility">
+      <option value="hidden">HIDDEN — GM prep, not on the Matrix yet</option>
+      <option value="running-silent">RUNNING SILENT — broadcasting covertly; needs Matrix Perception to spot</option>
+      <option value="active">ACTIVE — broadcasting normally; player sees full detail</option>
+    </select>
+  </div>
+
+  <div class="hier-form-actions">
+    <button type="button" class="hier-btn-save" (click)="saveTargetForm()"
+      [disabled]="!targetForm.name.trim()">Save</button>
+    <button type="button" class="hier-btn-cancel" (click)="closeTargetForm()">Cancel</button>
+  </div>
+</div>
+</ng-template>

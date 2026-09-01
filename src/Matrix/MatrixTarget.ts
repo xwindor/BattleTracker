@@ -1,11 +1,24 @@
 /**
  * MatrixTarget
  *
- * A plain value object representing any interactive icon in the Matrix —
- * public icon, host content, or nested host. Mutated directly by callers.
+ * A plain (non-Undoable) value object representing any interactive icon in
+ * the Matrix — public icon, host content, or nested host. Mutations from
+ * outside should be wrapped in UndoHandler.DoAction() so undo/redo still
+ * works for Matrix actions.
  */
 export type MatrixTargetType = "device" | "file" | "persona" | "host" | "ic";
-export type MatrixTargetSpotted = "hidden" | "running-silent" | "spotted";
+
+/**
+ * Visibility of a target. Three-state cycle that replaces the old
+ * `spotted` + `runningSilent` pair:
+ *
+ *   hidden          : GM prep — not on the Matrix yet. Players see nothing.
+ *   running-silent  : Broadcasting silently. Players need a Matrix Perception
+ *                     test to spot it; once spotted it appears as an unknown
+ *                     icon. (SR5E p.224)
+ *   active          : Broadcasting normally. Players see full detail.
+ */
+export type MatrixTargetVisibility = "hidden" | "running-silent" | "active";
 export type MatrixTargetContext = "public" | "host";
 
 export class MatrixTarget {
@@ -25,8 +38,11 @@ export class MatrixTarget {
   dataProcessing: number;
   firewall: number;
 
-  /** General rating / Device Rating */
+  /** General rating (used for CM calc on non-device targets). */
   rating: number;
+
+  /** Device Rating (device type only, 1–12). Used for CM and direct-connection tests. */
+  deviceRating: number;
 
   /** Current Matrix CM damage */
   matrixDamage: number;
@@ -34,8 +50,11 @@ export class MatrixTarget {
   /** Max Matrix CM boxes */
   matrixHealth: number;
 
-  spotted: MatrixTargetSpotted;
-  revealedToPlayers: boolean;
+  /**
+   * Three-state visibility. Subsumes old `spotted` + `runningSilent`.
+   * Cycles: hidden → running-silent → active → hidden.
+   */
+  visibility: MatrixTargetVisibility;
 
   /** Marks placed by each decker, keyed by deckerId. Max 3 per decker. */
   marks: Record<string, number>;
@@ -57,10 +76,10 @@ export class MatrixTarget {
     this.dataProcessing = init?.dataProcessing ?? 0;
     this.firewall = init?.firewall ?? 0;
     this.rating = init?.rating ?? 1;
+    this.deviceRating = init?.deviceRating ?? 4;
     this.matrixDamage = init?.matrixDamage ?? 0;
     this.matrixHealth = init?.matrixHealth ?? 8;
-    this.spotted = init?.spotted ?? "hidden";
-    this.revealedToPlayers = init?.revealedToPlayers ?? false;
+    this.visibility = init?.visibility ?? "hidden";
     this.marks = init?.marks ?? {};
     this.linkedHostId = init?.linkedHostId;
     this.linkedParticipantId = init?.linkedParticipantId;

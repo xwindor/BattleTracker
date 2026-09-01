@@ -1,0 +1,57 @@
+<div class="modal-header ic-spawner-header">
+  <h5 class="modal-title">
+    <i class="fas fa-shield-alt me-2"></i>Spawn IC
+    <span class="host-info">{{ host.name }} &mdash; Rating {{ host.rating }}</span>
+  </h5>
+  <button type="button" class="btn-close btn-close-white" (click)="onCancel()"></button>
+</div>
+
+<div class="modal-body">
+  <div class="mb-3">
+    <label class="form-label fw-semibold">IC Type</label>
+    <select class="form-select" [(ngModel)]="selectedType">
+      @for (type of icTypes; track type) {
+      <option [value]="type" [disabled]="isTypeRunning(type)">
+        {{ type }}{{ isTypeRunning(type) ? ' (running)' : '' }}
+      </option>
+      }
+    </select>
+  </div>
+
+  <div class="ic-preview">
+    <div class="ic-preview-row">
+      <span class="ic-preview-label">Initiative</span>
+      <span class="ic-preview-value">
+        {{ initiativeBase }} + {{ initiativeDice }}d6
+        &nbsp;<span class="text-muted">({{ initiativeMin }}–{{ initiativeMax }})</span>
+      </span>
+    </div>
+    <div class="ic-preview-row">
+      <span class="ic-preview-label">Matrix CM</span>
+      <span class="ic-preview-value">{{ matrixCM }} boxes</span>
+    </div>
+    <div class="ic-preview-row">
+      <span class="ic-preview-label">Active IC</span>
+      <span class="ic-preview-value" [class.text-danger]="atCap">
+        {{ activeCount }} / {{ host.rating }}
+      </span>
+    </div>
+  </div>
+
+  @if (validationMessage) {
+  <div class="alert alert-warning mt-2 mb-0 py-2">
+    <i class="fas fa-exclamation-triangle me-1"></i>{{ validationMessage }}
+  </div>
+  }
+
+  <div class="mt-2 text-muted small">
+    <i class="fas fa-info-circle me-1"></i>IC spawns at start of Combat Turn only (SR5E p.247).
+  </div>
+</div>
+
+<div class="modal-footer">
+  <button type="button" class="btn btn-outline-secondary" (click)="onCancel()">Cancel</button>
+  <button type="button" class="btn btn-danger" (click)="onSpawn()" [disabled]="!canSpawn">
+    <i class="fas fa-shield-alt me-1"></i>Spawn {{ selectedType }} IC
+  </button>
+</div>

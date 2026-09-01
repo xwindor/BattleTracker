@@ -3,7 +3,10 @@ import { Subject } from "rxjs";
 import {
   MatrixRunState,
   MatrixHost,
+  MatrixTarget,
+  MatrixTargetVisibility,
   MatrixParticipant,
+  ICParticipant,
   VRMode
 } from "Matrix";
 
@@ -14,7 +17,8 @@ import {
  * methods have real bodies but only the minimum needed for Phase 1 (jack-in,
  * jack-out, host registration). Phase 2/3 will fill in target/mark/IC logic.
  *
- * The stateChange$ subject lets BattleTrackerComponent trigger a
+ * Mutations are applied directly - the app has no undo system. The
+ * stateChange$ subject lets BattleTrackerComponent trigger a
  * syncSharedState() after any change.
  */
 @Injectable({ providedIn: "root" })
@@ -24,16 +28,10 @@ export class MatrixStateService {
   /** Fires after any state mutation so subscribers can re-broadcast. */
   readonly stateChange$ = new Subject<void>();
 
-  /**
-   * Phase-1 skeleton, currently uncalled (the live GM jack-in path is
-   * BattleTrackerComponent.gmJackIn / handleSessionCommand).
-   *
-   * The dice count is written *without* rolling here on purpose. A mid-turn
-   * dice change needs the roll-and-Score-delta (brief F5, p. 160) and must
-   * therefore go through BattleTrackerComponent's dice-count funnel, not
-   * through here.
-   */
   jackIn(decker: MatrixParticipant, vrMode: VRMode, intuition: number): void {
+    // Setup path, not a mid-turn change: write the dice count without rolling
+    // (a real mid-combat mode switch goes through BattleTrackerComponent's
+    // dice-count funnel so the gained/lost dice are rolled - brief F5, p. 160).
     decker.applyJackInMode(vrMode, intuition, n => decker.setDicesWithoutRoll(n));
     if (!this.state.deckers.includes(decker)) {
       this.state.deckers.push(decker);
@@ -42,6 +40,9 @@ export class MatrixStateService {
   }
 
   jackOut(decker: MatrixParticipant): void {
+    const wasJackedIn = decker.jackedIn;
+    const previousMode = decker.vrMode;
+    const previousOS = decker.overwatch;
     decker.jackedIn = false;
     decker.blocksPhysicalActions = false;
     decker.overwatch = 0;
@@ -50,12 +51,13 @@ export class MatrixStateService {
   }
 
   addHost(host: MatrixHost): void {
-    this.state.hosts.push(host);
+    this.state.hosts.push(host); 
     this.stateChange$.next();
   }
 
   setCurrentHost(id: string | null): void {
-    this.state.currentHostId = id;
+    const previous = this.state.currentHostId;
+    this.state.currentHostId = id; 
     this.stateChange$.next();
   }
 
@@ -63,5 +65,190 @@ export class MatrixStateService {
   getCurrentHostName(): string | undefined {
     if (!this.state.currentHostId) return undefined;
     return this.state.hosts.find(h => h.id === this.state.currentHostId)?.name;
+  }
+
+  /** Returns the currently active host, or null if none is set. */
+  getCurrentHost(): MatrixHost | null {
+    if (!this.state.currentHostId) return null;
+    return this.state.hosts.find(h => h.id === this.state.currentHostId) ?? null;
+  }
+
+  /**
+   * Creates a new active host (or updates name/rating of the existing one).
+   * Returns the host object so callers can reference it immediately.
+   */
+  createOrSetHost(name: string, rating: number): MatrixHost {
+    const existing = this.getCurrentHost();
+    if (existing) {
+      const prevName = existing.name;
+      const prevRating = existing.rating;
+      const prevHealth = existing.matrixHealth;
+      existing.name = name;
+      existing.rating = rating;
+      existing.matrixHealth = 8 + Math.ceil(rating / 2);
+      this.stateChange$.next();
+      return existing;
+    }
+
+    const host = new MatrixHost({ id: this.generateId(), name, rating });
+    this.state.hosts.push(host);
+    this.state.currentHostId = host.id;
+    this.stateChange$.next();
+    return host;
+  }
+
+  /** Clears the active host (does not delete it from the hosts list). */
+  clearActiveHost(): void {
+    const prev = this.state.currentHostId;
+    if (!prev) return;
+    this.state.currentHostId = null; 
+    this.stateChange$.next();
+  }
+
+  /** Registers an ICParticipant into a host's active IC list. */
+  addICToHost(host: MatrixHost, ic: ICParticipant): void {
+    host.icActive.push(ic); 
+    this.stateChange$.next();
+  }
+
+  /** Removes an ICParticipant from its host's active IC list. */
+  removeICFromHost(host: MatrixHost, ic: ICParticipant): void {
+    const idx = host.icActive.indexOf(ic);
+    if (idx < 0) return;
+    const i = host.icActive.indexOf(ic);
+    if (i >= 0) host.icActive.splice(i, 1);
+    this.stateChange$.next();
+  }
+
+  /**
+   * Adds `count` marks from a decker to the host's canonical marks record,
+   * then mirrors the updated count to all active IC in the host.
+   * (SR5E p.247 host-wide mark propagation.)
+   */
+  addMarkToHost(host: MatrixHost, deckerId: string, count = 1): void {
+    const prev = host.marks[deckerId] ?? 0;
+    const next = Math.min(3, prev + count);
+    if (next === prev) return;
+    host.marks[deckerId] = next;
+    for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
+    this.stateChange$.next();
+  }
+
+  /**
+   * Removes one mark placed directly on the host (GM-applied via host mark UI).
+   */
+  removeMarkFromHost(host: MatrixHost, deckerId: string): void {
+    const prev = host.marks[deckerId] ?? 0;
+    if (prev <= 0) return;
+    const next = prev - 1;
+    if (next === 0) { delete host.marks[deckerId]; } else { host.marks[deckerId] = next; }
+    for (const ic of host.icActive) { ic.marksPlaced.set(deckerId, next); }
+    this.stateChange$.next();
+  }
+
+  /** Adds a MatrixTarget to a host's target list or to public space (host = null). */
+  addTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    if (host) {
+      host.targets.push(target);
+    } else {
+      this.state.publicTargets.push(target);
+    }
+    this.stateChange$.next();
+  }
+
+  /** Removes a MatrixTarget from a host or public space. */
+  removeTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    const list = host ? host.targets : this.state.publicTargets;
+    const idx = list.indexOf(target);
+    if (idx < 0) return;
+    const i = list.indexOf(target);
+    if (i >= 0) list.splice(i, 1);
+    this.stateChange$.next();
+  }
+
+  /** Updates the visibility state on a MatrixTarget. */
+  setTargetVisibility(target: MatrixTarget, visibility: MatrixTargetVisibility): void {
+    const prev = target.visibility;
+    if (prev === visibility) return;
+    target.visibility = visibility; 
+    this.stateChange$.next();
+  }
+
+  /** Applies a partial field update to a MatrixTarget (name, type, rating, etc.). */
+  updateTarget(target: MatrixTarget, fields: Partial<MatrixTarget>): void {
+    const prev: Partial<MatrixTarget> = {};
+    for (const k of Object.keys(fields) as Array<keyof MatrixTarget>) {
+      (prev as Record<string, unknown>)[k] = target[k];
+    }
+    Object.assign(target, fields); 
+    this.stateChange$.next();
+  }
+
+  /**
+   * Updates editable host fields (name, rating, ASDF, matrixHealth).
+   * Pass only the keys you want to change.
+   */
+  updateHost(
+    host: MatrixHost,
+    fields: Partial<Pick<MatrixHost, "name" | "rating" | "attack" | "sleaze" | "dataProcessing" | "firewall" | "matrixHealth">>
+  ): void {
+    const prev: typeof fields = {};
+    for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
+      (prev as Record<string, unknown>)[k] = host[k];
+    }
+    Object.assign(host, fields); 
+    this.stateChange$.next();
+  }
+
+  /** Removes a host from the hosts list. Clears currentHostId if it matched. */
+  removeHost(host: MatrixHost): void {
+    const idx = this.state.hosts.indexOf(host);
+    if (idx < 0) return;
+    const wasActive = this.state.currentHostId === host.id;
+    this.state.hosts.splice(this.state.hosts.indexOf(host), 1);
+    if (wasActive) this.state.currentHostId = null;
+    this.stateChange$.next();
+  }
+
+  /**
+   * Places one mark from `deckerId` on `target` (max 3).
+   * Only updates target.marks — host marks are tracked independently via
+   * addMarkToHost().
+   */
+  addMark(target: MatrixTarget, deckerId: string): void {
+    const prev = target.marks[deckerId] ?? 0;
+    if (prev >= 3) return;
+    const next = prev + 1;
+    target.marks[deckerId] = next; 
+    this.stateChange$.next();
+  }
+
+  /**
+   * Removes one mark from `deckerId` on `target`.
+   * Only updates target.marks — host marks are tracked independently via
+   * removeMarkFromHost().
+   */
+  removeMark(target: MatrixTarget, deckerId: string): void {
+    const prev = target.marks[deckerId] ?? 0;
+    if (prev <= 0) return;
+    const next = prev - 1;
+    if (next === 0) { delete target.marks[deckerId]; } else { target.marks[deckerId] = next; } 
+    this.stateChange$.next();
+  }
+
+  /** Sets the access method on a host (hack-on-fly, brute-force, direct-connection, or none). */
+  setHostAccessMethod(host: MatrixHost, method: import("Matrix").HostAccessMethod): void {
+    const prev = host.accessMethod;
+    if (prev === method) return;
+    host.accessMethod = method; 
+    this.stateChange$.next();
+  }
+
+  private generateId(): string {
+    return `h-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  generateTargetId(): string {
+    return `t-${Math.random().toString(36).slice(2, 10)}`;
   }
 }

@@ -6195,7 +6195,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   getParticipantBaseInitiative(p: IParticipant): number {
     const intuition = this.getParticipantIntuition(p);
-    if (this.isMatrix(p) && p.jackedIn && MatrixParticipant.isVRMode(p.vrMode)) {
+    // No `jackedIn` guard: `vrMode` alone decides the formula, and every
+    // jack-out path resets it to `None`/`AR`, so the two can never disagree.
+    if (this.isMatrix(p) && MatrixParticipant.isVRMode(p.vrMode)) {
       // Only the VR modes use the Matrix Initiative attribute (Data
       // Processing + Intuition, pp. 229-230). **AR does not**: "When in AR,
       // you use your normal Initiative and Initiative Dice" (p. 229), and the

@@ -1,0 +1,163 @@
+.mpv-wrap {
+  font-size: 0.95rem;  /* up from 0.875 — more readable at table distance */
+}
+
+/* ── Decker status row ────────────────────────────────────────────────── */
+.mpv-decker-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: rgba(0,0,0,0.08);
+  border: 1px solid var(--bs-border-color);
+}
+
+.mpv-vr-chip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-vr-ar   { background: rgba(108,117,125,0.2); color: var(--bs-secondary); border: 1px solid var(--bs-secondary); }
+.mpv-vr-cold { background: rgba(13,202,240,0.15); color: var(--bs-info);      border: 1px solid rgba(13,202,240,0.4); }
+.mpv-vr-hot  { background: rgba(255,193,7,0.15);  color: var(--bs-warning);   border: 1px solid rgba(255,193,7,0.4); }
+
+.mpv-vr-label {
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+  letter-spacing: 0.04em;
+}
+
+/* ── Context header ───────────────────────────────────────────────────── */
+.mpv-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+.mpv-ctx-icon {
+  color: var(--bs-info);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.mpv-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.mpv-host-marks {
+  font-family: monospace;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  color: var(--bs-warning);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────── */
+.mpv-empty {
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  font-style: italic;
+  padding: 6px 0;
+}
+
+/* ── Target rows ──────────────────────────────────────────────────────── */
+.mpv-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  transition: background 0.15s;
+}
+
+.mpv-row-silent {
+  border-color: var(--bs-secondary-color);
+  opacity: 0.7;
+  animation: mpv-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes mpv-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 0.4; }
+}
+
+.mpv-icon {
+  width: 16px;
+  text-align: center;
+  color: var(--bs-info);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.mpv-icon-silent {
+  color: var(--bs-secondary-color);
+}
+
+.mpv-name {
+  flex: 1;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpv-name-silent {
+  color: var(--bs-secondary-color);
+  font-style: italic;
+}
+
+.mpv-type-badge {
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(13, 202, 240, 0.12);
+  color: var(--bs-info);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mpv-type-silent {
+  background: rgba(108, 117, 125, 0.15);
+  color: var(--bs-secondary-color);
+}
+
+/* ── Matrix CM ────────────────────────────────────────────────────────── */
+.mpv-cm {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+
+.mpv-cm-dmg {
+  color: var(--bs-danger);
+  font-weight: 700;
+}
+
+.mpv-cm-sep {
+  margin: 0 2px;
+  opacity: 0.5;
+}
+
+.mpv-cm-max {
+  /* inherits parent colour */
+}

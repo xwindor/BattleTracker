@@ -1,0 +1,63 @@
+<div class="matrix-run-panel">
+
+  <!-- ── Header ────────────────────────────────────────────────────────── -->
+  <div class="matrix-panel-header" (click)="toggleCollapse()">
+    <span class="matrix-panel-title">
+      <i class="fas fa-microchip me-2"></i>Matrix
+    </span>
+
+    <i class="fas collapse-caret ms-auto"
+       [class.fa-chevron-down]="collapsed"
+       [class.fa-chevron-up]="!collapsed"></i>
+  </div>
+
+  @if (!collapsed) {
+  <div class="matrix-panel-body">
+
+    <!-- ── Decker status cards ────────────────────────────────────────── -->
+    @if (activeDeckers.length > 0) {
+    <div class="decker-cards-row">
+      @for (d of activeDeckers; track d) {
+      <app-decker-card
+        [decker]="d"
+        (jackInRequested)="onJackInRequested($event)"
+        (jackOutRequested)="onJackOutRequested($event)">
+      </app-decker-card>
+      }
+    </div>
+    }
+
+    <!-- ── Two-pane layout ────────────────────────────────────────────── -->
+    <div class="matrix-two-pane">
+
+      <!-- Left: hierarchy editor + access host panel -->
+      <div class="matrix-left-pane">
+        <div class="pane-header">
+          <i class="fas fa-sitemap me-1"></i>Hierarchy
+        </div>
+        <app-hierarchy-editor [activeDeckers]="activeDeckers"></app-hierarchy-editor>
+
+        @if (activeHost) {
+        <div class="pane-header pane-header-access">
+          <i class="fas fa-door-open me-1"></i>Access Host
+        </div>
+        <app-access-host-panel [activeDeckers]="activeDeckers"></app-access-host-panel>
+        }
+      </div>
+
+      <!-- Right: node graph -->
+      <div class="matrix-right-pane">
+        <div class="pane-header">
+          <i class="fas fa-project-diagram me-1"></i>Matrix Graph
+        </div>
+        <app-matrix-graph
+          [gmMode]="true"
+          [activeDeckers]="activeDeckers">
+        </app-matrix-graph>
+      </div>
+
+    </div>
+  </div>
+  }
+
+</div>

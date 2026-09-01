@@ -3,7 +3,7 @@ export { ICType } from "./ICType";
 export { MatrixParticipant, DATA_PROCESSING_UNSET } from "./MatrixParticipant";
 export { ICParticipant } from "./ICParticipant";
 export { MatrixTarget } from "./MatrixTarget";
-export type { MatrixTargetType, MatrixTargetSpotted, MatrixTargetContext } from "./MatrixTarget";
+export type { MatrixTargetType, MatrixTargetVisibility, MatrixTargetContext } from "./MatrixTarget";
 export { MatrixHost } from "./MatrixHost";
 export type { HostAccessMethod } from "./MatrixHost";
 export { MatrixIcon } from "./MatrixIcon";
