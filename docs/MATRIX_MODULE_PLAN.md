@@ -1,9 +1,12 @@
 # SR5E Battle Tracker — Matrix Module: Incremental Build Plan
 
-> **Deferral note:** The Matrix rules claims in `docs/UNVERIFIED-RULES.md`
-> (items 1-9) are deliberately left unverified while this module is parked.
-> Before any Matrix work resumes, run those items through
-> `sr5-rules-analyst` first.
+> **Deferral note:** The Matrix rules claims still open in
+> `docs/UNVERIFIED-RULES.md` (items 1, 2, 9 and 10) are deliberately left
+> unverified while this module is parked. Before any Matrix work resumes, run those
+> items through `sr5-rules-analyst` first. Items 3, 4, 5, 6, 7 and 8 were
+> resolved by `briefs/matrix-port-rules-correctness-spec.md` (2026-09-01) —
+> the `[UNVERIFIED: ...]` markers below that cited them have been replaced
+> with that brief's findings.
 
 **Status: deferred.** Core tracker work takes priority; this plan is parked
 here until it's picked back up. Rules numbers below marked `[UNVERIFIED: ...]`
@@ -45,9 +48,46 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ---
 
+## Step 1 — Decker in the initiative tracker ✅ DONE (2026-08-29)
+
+> **What this step actually turned out to be.** The plan assumed Step 1 was a
+> build. It was not — `gmJackIn`, `gmJackOut`, `applyVRMode`,
+> `promoteToMatrixParticipant`, `onDeckStatChanged`, `pendingVrModes` and a
+> Matrix branch in `getParticipantBaseInitiative` were **already on `main`**.
+> (The old "Phase 1 does NOT include a way for the GM to create a
+> MatrixParticipant" note was wrong; `promoteToMatrixParticipant` does exactly
+> that.) Step 1 was therefore a **correctness fix** to existing code, which is
+> where the four wrong rules claims had already done damage:
+>
+> 1. `getParticipantBaseInitiative` returned **DP + INT for every
+>    MatrixParticipant regardless of mode**, so an AR decker used the Matrix
+>    formula. It also disagreed with `applyVRMode`'s own AR branch (REA + INT),
+>    so the two only diverged once something recomputed the base — editing
+>    Reaction or Intuition on an AR decker jumped their Initiative.
+> 2. `AR_INITIATIVE_DICE = 1` in `MatrixParticipant` meant returning to AR
+>    **truncated any augmented decker to 1D6**, permanently.
+> 3. `gmJackOut` and the player `configure_deck` jack-out path both wrote a
+>    hard-coded `PHYSICAL_INITIATIVE_DICE`, same truncation.
+> 4. Initial deck creation wrote `setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE)`
+>    — so simply handing an augmented character a cyberdeck cut their dice.
+>
+> **Fixed:** mode-aware base initiative; `initiativeDiceForMode` now returns
+> `number | null` (null for AR/None) so no caller can silently receive 1D6; new
+> `MatrixParticipant.preVrDiceCount` remembers the pre-VR count, restored via
+> `restorePhysicalDiceCount` through the normal dice funnel; deck creation
+> leaves dice alone. **10 regression tests added; suite 954 → 964, all green.**
+>
+> Deferred to Step 2 as planned: `overwatchAlert` in `MatrixParticipant` still
+> carries the fictional OS-20 `'ic-alert'` tier, matching the same defect in
+> `os-tracking.service.ts`.
+
 ## Step 2 — OS counter inline editor
 
-**Goal:** Clicking the OS chip in the badge opens ± controls inline. Threshold alerts fire at OS 20 (amber banner) and OS 40 (red modal). Reset on jack-out. `[UNVERIFIED: docs/UNVERIFIED-RULES.md #3]`
+**Goal:** Clicking the OS chip in the badge opens ± controls inline. There is
+exactly one Overwatch threshold, 40 (p. 232) — the "OS 20 amber banner" this
+step originally described does not exist; resolved by
+`briefs/matrix-port-rules-correctness-spec.md` (2026-09-01), see
+`docs/UNVERIFIED-RULES.md` item 3. Reset on jack-out.
 
 **Files to create/modify:**
 - `src/app/matrix/matrix-participant-badge/matrix-participant-badge.component.html` — expand OS chip into ±/reset row on click
@@ -58,14 +98,42 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 **Acceptance criteria:**
 1. Clicking OS chip toggles an inline panel with [−5] [−1] [+1] [+5] [Reset] buttons.
 2. Tapping +1 increments OS on the participant, badge color updates.
-3. When OS crosses 20 → amber banner: "⚠ IC Alert — [Decker name] OS: 21". `[UNVERIFIED: docs/UNVERIFIED-RULES.md #3]`
-4. When OS crosses 40 → red modal: "☠ Convergence! GOD attacks [Decker name]". `[UNVERIFIED: docs/UNVERIFIED-RULES.md #3]`
+3. ~~When OS crosses 20 → amber banner: "⚠ IC Alert — [Decker name] OS: 21".~~ Not a rule — removed (p. 232; `docs/UNVERIFIED-RULES.md` item 3, resolved 2026-09-01).
+4. When OS crosses 40 → convergence signal: "☠ Convergence! GOD attacks [Decker name]" (p. 232, the sole Overwatch threshold).
 5. Reset sets OS to 0 (confirmed via the existing ConfirmationDialogService).
 6. Threshold fires exactly once when crossing the boundary, not on every increment above it.
 
 **Unlocks:** Step 3 (OS resets correctly when IC is spawned / decker jacks out; needed to wire IC spawning to OS tracking).
 
 ---
+
+## Step 2 — Overwatch Score counter (manual) ✅ DONE (2026-08-29)
+
+> **Ruled and applied:** **C1** — banding below 40 is display-only, no
+> mechanical effect. **C6** — reboot/jack-out resets OS to zero and erases that
+> decker's marks, with no cooldown (the reset itself is printed, pp. 240, 242;
+> the ruling settles that no friction is added on top).
+>
+> The OS-20 fiction reached further than the plan assumed — it was in **six**
+> places, several of them live UI: `OsAlertLevel`, `getOSAlert` and the
+> fabricated "Section 9.2 / Table 25" comment in `os-tracking.service.ts`;
+> `MatrixParticipant.overwatchAlert`; the badge's `osTier`; a subscriber branch
+> in `ngOnInit`; an "⚠ IC Alert" strip in the GM template with its CSS; and the
+> wire-field comment in `session-sync.service.ts`. All corrected.
+>
+> Two things were **kept** rather than deleted, because they are rules-correct:
+> the reminder strip (renamed `icAlertMessages` → `osReminders`, relabelled
+> "Overwatch owed") legitimately tells the GM that OS is owed once defense
+> resolves, which is exactly the printed rule (p. 232); and the act-modal
+> reminder. What was wrong there was the framing, not the mechanism.
+>
+> `ILLEGAL_OS_ACTIONS` became a `ReadonlySet<string>`: it was a
+> `Record<string, number>` whose per-action costs (Hack on the Fly 1, Brute
+> Force 2) implied a fixed OS price that does not exist — OS equals the
+> defender's hits, which this app never rolls. Nothing read those values except
+> a `> 0` test.
+>
+> **7 regression tests added; suite 964 → 972, all green.**
 
 ## Step 3 — IC as initiative participants
 
@@ -79,7 +147,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 **Acceptance criteria:**
 1. A "Spawn IC" button appears when the tracker contains ≥1 MatrixParticipant.
 2. GM selects IC type (Patrol / Killer / etc.) and host rating (1–12).
-3. On Spawn: an ICParticipant appears in the tracker with `baseIni = rating × 2`, dices = 2 (Patrol) or 4 (others). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #4]`
+3. On Spawn: an ICParticipant appears in the tracker with `baseIni = hostDataProcessing + hostRating` (Table Ruling 1, RULINGS.md 2026-08-28, restored 2026-09-01) and dices = 4 for every IC type, no exception for Patrol (p. 247). Corrects the port's `baseIni = rating × 2` (that number is the IC attack pool, p. 247) and 2-dice Patrol case; see `docs/UNVERIFIED-RULES.md` item 4, resolved 2026-09-01.
 4. The IC row shows a distinct badge (e.g., "IC — Patrol" label, no OS chip, no PHYS LOCKED).
 5. IC acts on its initiative like any other participant (existing engine handles this with no changes).
 6. The ordinary Delete control removes the IC, same as any other participant.
@@ -96,7 +164,7 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 - `src/app/matrix/matrix-run-panel/matrix-run-panel.component.{ts,html,css}` — outer container with stepper + step panels; `@Input activeDeckers`
 - `src/app/matrix/jack-in-panel/jack-in-panel.component.{ts,html,css}` — decker dropdown, mode selector (AR/Cold/Hot), Confirm Jack In, Jack Out buttons
 - `src/app/battle-tracker/battle-tracker.component.html` — import and render `<app-matrix-run-panel>` (collapsible section below the participant list)
-- `src/app/battle-tracker/battle-tracker.component.ts` — pass `activeDeckers` getter to the panel; handle jackOut event → `matrixState.jackOut()` + `osTracking.resetOS()`
+- `src/app/battle-tracker/battle-tracker.component.ts` — pass `activeDeckers` getter to the panel; handle jackOut event → `matrixState.jackOut()`. As of round-4 (`MatrixStateService.jackOut()`, defect D-9), this single call already zeroes Overwatch (via `OsTrackingService.resetOS()` internally) **and** erases the decker's marks from every host/target — a separate `osTracking.resetOS()` call from this wiring is no longer needed and would just be a harmless no-op duplicate.
 
 **Acceptance criteria:**
 1. A "Matrix" collapsible section appears in the GM view (collapsed by default).
@@ -104,7 +172,21 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 3. Jack In form shows all MatrixParticipants from the tracker as a dropdown.
 4. Selecting a decker and clicking "Jack In (Hot-Sim)" calls `matrixState.jackIn()`, updates the tracker badge, and marks Step 1 complete on the stepper.
 5. "Jack Out" button resets OS to 0 (with confirmation) and reverts the badge to AR.
-6. Noise is explicitly NOT a field here — plan doc says it's a per-roll modifier (Step 9). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #10]`
+6. Noise is **not** set here — jack-in only. `MatrixRunState.noise` is a
+   persistent GM-set reminder field, tracked and displayed, never applied to
+   any dice pool (`SCOPE.md`, "Enforcing legality"/in-scope list; Scope
+   Question B, `briefs/matrix-port-rules-correctness-spec.md`, approved
+   2026-09-01). This corrects the line's earlier claim that noise is
+   "explicitly NOT a field" at all — that predates Scope Question B's
+   approval and contradicted `SCOPE.md` and the shipped `MatrixRunState`.
+   Whether noise under RAW is itself a persistent, jack-in-time value (as
+   opposed to a purely per-roll modifier) was never something the rulebook
+   states either way — this is a scope decision, not a rules finding
+   (`docs/UNVERIFIED-RULES.md` item 10, resolved and removed round-4,
+   2026-09-02): the app's own answer is settled regardless of what a table
+   without this tracker would do, and round-4 added the missing editor
+   (`MatrixStateService.setNoise()`, `HierarchyEditorComponent`) so the field
+   is reachable, not just displayed.
 
 **Unlocks:** Step 5 (the Host step panel plugs into the existing stepper slot).
 
@@ -133,17 +215,17 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ## Step 6 — Mark tracking
 
-**Goal:** GM can place / remove marks on targets, recording which decker placed each mark (max 3 per decker per target). Marks are visible on target cards as filled dots. `[UNVERIFIED: docs/UNVERIFIED-RULES.md #5]`
+**Goal:** GM can place / remove marks on targets, recording which decker placed each mark (max 3 per decker per target, confirmed p. 236 — `docs/UNVERIFIED-RULES.md` item 5, moved out with its citation 2026-09-01). Marks are visible on target cards as filled dots.
 
 **Files to create/modify:**
 - `src/app/matrix/target-card/target-card.component.{ts,html,css}` — add mark dots (●○○ style), decker selector for "+Mark" button, "Remove Mark" per decker
 - `src/app/services/matrix-state.service.ts` — `addMark(target, deckerId)`, `removeMark(target, deckerId)`, each mutating `MatrixRunState` directly (no wrapper - see `ARCHITECTURE.md` §3 for the backing-field convention these should follow)
 
 **Acceptance criteria:**
-1. Clicking "+Mark" on a target card: dropdown selects decker → mark count increments (max 3). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #5]`
+1. Clicking "+Mark" on a target card: dropdown selects decker → mark count increments (max 3, p. 236).
 2. Dots rendered: e.g., `●●○` for 2 marks.
 3. "×" button next to each decker's dot row removes 1 mark.
-4. Cannot place a 4th mark (button disabled at 3). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #5]`
+4. Cannot place a 4th mark (button disabled at 3, p. 236).
 5. The "×" control removes the last mark placed - the correction path for a
    mis-tapped "+Mark" (there is no undo control; see `ARCHITECTURE.md` §3).
 6. Mark data persists across step navigation (stays in MatrixRunState).
@@ -201,16 +283,16 @@ Phase 1 data models, services, and badge are **already committed** (`563a3b7`):
 
 ## Step 9 — Full hacking workflow (access methods + direct connection)
 
-**Goal:** The AccessHost step panel has working Hack on the Fly, Brute Force, and Direct Connection flows with dice-roll prompts and OS tracking.
+**Goal:** The AccessHost step panel has working Hack on the Fly, Brute Force, and Direct Connection flows, with GM-typed marks and OS tracking.
 
 **Files to create/modify:**
-- `src/app/matrix/access-host-panel/access-host-panel.component.{ts,html,css}` — three entry methods with confirm buttons; wires to dice-roll prompt and OsPromptComponent
+- `src/app/matrix/access-host-panel/access-host-panel.component.{ts,html,css}` — three entry methods with confirm buttons; wires to OsPromptComponent. No dice roller of its own (Xavier's decision 2, 2026-09-02, "the matrix module should not have a separate dice roller"; `RULINGS.md` 2026-09-02) — an earlier version of this line said the panel would reuse `DiceRollerComponent`; withdrawn along with Scope Question A / A′.
 - `src/app/matrix/matrix-run-panel/matrix-run-panel.component.html` — plug in AccessHostPanelComponent at step 4 slot
 
 **Acceptance criteria:**
-1. "Hack on the Fly" button opens a dice roll prompt (reusing DiceRollerComponent) then the OS prompt (+2 per mark on success, per RAW). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #6]`
-2. "Brute Force" button does the same with opposed test hints and OS cost (marks × 4). `[UNVERIFIED: docs/UNVERIFIED-RULES.md #7]`
-3. "Direct Connection" checkbox: sets accessMethod = 'direct-connection'; 1 mark on host, 0 OS, confirmation log entry. `[UNVERIFIED: docs/UNVERIFIED-RULES.md #8]`
+1. "Hack on the Fly" button opens the marks-placed control (0-3 buttons) then the OS prompt — no dice roller in between. There is no "+2 per mark" formula — Overwatch rises by the defender's hits on its defense test, not by marks (p. 232; `docs/UNVERIFIED-RULES.md` item 6, resolved 2026-09-01). The GM types both the marks placed and the hit count in; nothing here derives or rolls either (Xavier's decision 1, 2026-09-02).
+2. "Brute Force" button does the same. There is no "marks × 4" formula either, same citation as above (`docs/UNVERIFIED-RULES.md` item 7, resolved 2026-09-01).
+3. "Direct Connection" checkbox: sets accessMethod = 'direct-connection'; places **no** marks (marks come only from the icon inviting you, Brute Force, or Hack on the Fly, p. 236); 0 OS is correct (connecting a cable is not an Attack or Sleaze action, p. 232); confirmation log entry. `docs/UNVERIFIED-RULES.md` item 8, resolved 2026-09-01 — the "1 mark" half of the original claim was false, the "0 OS" half was true.
 4. Access method persists on the MatrixHost object.
 
 **Unlocks:** Step 10 (icon generator is purely additive).

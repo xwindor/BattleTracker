@@ -1,0 +1,82 @@
+<div class="tc-wrap" [class.tc-editing]="editing">
+
+  <!-- ── Main info row ──────────────────────────────────────────────────── -->
+  <div class="tc-info-row">
+    <i class="tc-type-icon" [class]="typeIcon(target.type)"
+      [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
+    <span class="tc-name">{{ target.name }}</span>
+    @if (target.type === 'device') {
+    <span class="tc-dr">DR{{ target.deviceRating }}</span>
+    }
+    @if (target.visibility === 'running-silent') {
+    <i class="fas fa-low-vision tc-icon-sm"
+      ngbTooltip="Running Silent — Matrix Perception required" placement="top"></i>
+    }
+    <button type="button" class="tc-spotted-btn" [class]="visibilityClass(target.visibility)"
+      (click)="cycleVisibilityRequested.emit()"
+      [ngbTooltip]="'Visibility: ' + visibilityLabel(target.visibility) + ' — click to cycle'"
+      placement="top">
+      {{ visibilityLabel(target.visibility) }}
+    </button>
+    <div class="tc-actions">
+      <button type="button" class="tc-icon-btn" (click)="editTarget.emit()" title="Edit">
+        <i class="fas fa-pencil-alt"></i>
+      </button>
+      <button type="button" class="tc-icon-btn tc-del-btn" (click)="deleteTarget.emit()" title="Remove">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Marks row ──────────────────────────────────────────────────────── -->
+  @if (markEntries.length > 0 || activeDeckers.length > 0) {
+  <div class="tc-marks-row">
+
+    @for (entry of markEntries; track entry.deckerId) {
+    <span class="tc-mark-entry">
+      <span class="tc-decker-name">{{ deckerLabel(entry.deckerId) }}</span>
+      <span class="tc-dots">{{ dots(entry.count) }}</span>
+      @if (hasPropagatedMark(entry.deckerId)) {
+      <i class="fas fa-link tc-propagated-badge"
+        ngbTooltip="At least one of these marks arrived by propagation from a slaved/parented device, not a direct click here (p. 233). Removing marks here does not remove it upstream."
+        placement="top"></i>
+      }
+      <button type="button" class="tc-mark-rm"
+        (click)="removeMark(entry.deckerId)"
+        [title]="propagationPreview
+          ? 'Remove 1 mark from ' + deckerLabel(entry.deckerId) + ' — any mark this propagated upstream (' + propagationPreview + ') stays; remove it there if wrong'
+          : 'Remove 1 mark from ' + deckerLabel(entry.deckerId)">×</button>
+    </span>
+    }
+
+    @if (availableDeckers.length > 0) {
+    <span class="tc-add-mark-group">
+      @if (!addMarkOpen) {
+      <button type="button" class="tc-add-mark-btn" (click)="openAddMark()">
+        +Mark
+      </button>
+      } @else {
+      <select class="tc-decker-select" [(ngModel)]="selectedDeckerId">
+        @for (d of availableDeckers; track d.name) {
+        <option [value]="d.name">{{ d.name }}</option>
+        }
+      </select>
+      @if (propagationPreview) {
+      <span class="tc-propagation-preview">{{ propagationPreview }}</span>
+      }
+      <button type="button" class="tc-confirm-btn"
+        (click)="confirmAddMark()"
+        [disabled]="!canConfirmAddMark"
+        [title]="addMarkBlockedReason ?? 'Place 1 mark'">✓</button>
+      <button type="button" class="tc-cancel-btn" (click)="addMarkOpen = false">✕</button>
+      @if (addMarkBlockedReason) {
+      <span class="tc-add-mark-blocked">{{ addMarkBlockedReason }}</span>
+      }
+      }
+    </span>
+    }
+
+  </div>
+  }
+
+</div>

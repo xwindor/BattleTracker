@@ -1,0 +1,793 @@
+/* ── Editor shell ────────────────────────────────────────────────────────── */
+
+.hier-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: var(--matrix-font, "Courier New", monospace);
+  font-size: 0.82rem;
+  color: var(--matrix-text-dim, #7ab87a);
+  overflow-y: auto;
+  max-height: 500px;
+}
+
+/* ── Section shells ──────────────────────────────────────────────────────── */
+
+.hier-tree-section {
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-tree-section:last-child {
+  border-bottom: none;
+}
+
+.hier-hosts-top {
+  margin-top: 0.15rem;
+}
+
+/* ── Section headers ─────────────────────────────────────────────────────── */
+
+.hier-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  background: #0a1a0a;
+}
+
+.hier-section-header:hover {
+  background: #0d200d;
+}
+
+.hier-section-header-static {
+  cursor: default;
+}
+
+.hier-section-header-static:hover {
+  background: #0a1a0a;
+}
+
+.hier-section-title {
+  font-size: 0.77rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.hier-count {
+  font-size: 0.71rem;
+  color: #3a5a3a;
+  background: #0d1f0d;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  min-width: 1.1rem;
+  text-align: center;
+}
+
+.hier-header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.3rem;
+}
+
+.hier-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.74rem;
+  font-family: inherit;
+  background: transparent;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text-dim, #7ab87a);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hier-add-btn:hover {
+  background: #0d200d;
+  color: var(--matrix-text, #00ff9f);
+  border-color: #2a6a2a;
+}
+
+/* ── Section body ────────────────────────────────────────────────────────── */
+
+.hier-section-body {
+  padding: 0.15rem 0;
+}
+
+.hier-empty {
+  font-size: 0.77rem;
+  color: #3a5a3a;
+  font-style: italic;
+  padding: 0.25rem 0.7rem;
+}
+
+/* ── Target rows ─────────────────────────────────────────────────────────── */
+
+.hier-target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.55rem;
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+
+.hier-target-row:hover {
+  background: #0a1a0a;
+}
+
+.hier-target-row.hier-target-editing {
+  background: #0d200d;
+  border-top-color: #2a5a2a;
+  border-bottom-color: #2a5a2a;
+}
+
+.hier-type-icon {
+  font-size: 0.77rem;
+  color: #4a7a4a;
+  flex-shrink: 0;
+  width: 0.85rem;
+  text-align: center;
+}
+
+.hier-target-name {
+  flex: 1 1 auto;
+  color: var(--matrix-text-dim, #7ab87a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.hier-device-rating {
+  font-size: 0.68rem;
+  color: #3a5a3a;
+  flex-shrink: 0;
+}
+
+.hier-direct-conn-icon {
+  font-size: 0.74rem;
+  color: #6ab87a;
+  flex-shrink: 0;
+}
+
+.hier-silent-icon {
+  font-size: 0.74rem;
+  color: #7a7a4a;
+  flex-shrink: 0;
+}
+
+/* ── Spotted badge ───────────────────────────────────────────────────────── */
+
+.hier-spotted-btn {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+  cursor: pointer;
+  border: 1px solid;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.hier-spotted-btn:hover {
+  opacity: 0.8;
+}
+
+.spotted-invisible {
+  background: #1a1a1a;
+  color: #4a4a4a;
+  border-color: #2a2a2a;
+}
+
+.spotted-ghost {
+  background: #1a1a2a;
+  color: #8888aa;
+  border-color: #3a3a5a;
+}
+
+.spotted-revealed {
+  background: #0a1f0a;
+  color: var(--matrix-text, #00ff9f);
+  border-color: #1a4a1a;
+}
+
+/* ── Row action buttons ──────────────────────────────────────────────────── */
+
+.hier-row-actions {
+  display: flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.hier-icon-btn {
+  padding: 0.05rem 0.3rem;
+  font-size: 0.71rem;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.hier-icon-btn:hover {
+  background: #0d200d;
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #1a4a1a;
+}
+
+.hier-icon-btn-del:hover {
+  color: #cc4444;
+  border-color: #441414;
+  background: #1a0a0a;
+}
+
+/* ── Host nodes ──────────────────────────────────────────────────────────── */
+
+.hier-host-node {
+  border-left: 2px solid transparent;
+  margin: 0.1rem 0;
+}
+
+.hier-host-node.hier-host-active {
+  border-left-color: var(--matrix-text, #00ff9f);
+}
+
+.hier-host-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  background: #080f08;
+  flex-wrap: nowrap;
+}
+
+.hier-host-header:hover {
+  background: #0d200d;
+}
+
+.hier-host-active .hier-host-header {
+  background: #0a1f0a;
+}
+
+.hier-active-badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.05rem 0.3rem;
+  background: #0a2a0a;
+  border: 1px solid var(--matrix-text, #00ff9f);
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.hier-host-icon {
+  font-size: 0.72rem;
+  color: #4a7a4a;
+  flex-shrink: 0;
+}
+
+.hier-host-name {
+  font-size: 0.87rem;
+  font-weight: 600;
+  color: var(--matrix-text, #00ff9f);
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
+.hier-host-rating {
+  font-size: 0.74rem;
+  color: var(--matrix-text-dim, #7ab87a);
+  flex-shrink: 0;
+}
+
+.hier-host-asdf {
+  font-size: 0.71rem;
+  color: #3a5a3a;
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.hier-set-active-btn,
+.hier-clear-active-btn {
+  font-size: 0.71rem;
+  font-family: inherit;
+  padding: 0.05rem 0.35rem;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hier-set-active-btn {
+  background: transparent;
+  border: 1px solid #2a6a2a;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.hier-set-active-btn:hover {
+  background: #0d200d;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-clear-active-btn {
+  background: transparent;
+  border: 1px solid #3a4a3a;
+  color: #4a5a4a;
+}
+
+.hier-clear-active-btn:hover {
+  color: #aa6644;
+  border-color: #6a3a2a;
+}
+
+/* ── Host body ───────────────────────────────────────────────────────────── */
+
+.hier-host-body {
+  padding: 0 0 0.3rem 0.7rem;
+  border-top: 1px solid #0d1f0d;
+}
+
+/* ── Subsections (IC / Targets) ──────────────────────────────────────────── */
+
+.hier-ic-subsection {
+  padding: 0.2rem 0 0.1rem;
+  border-bottom: 1px solid #0d1f0d;
+  margin-bottom: 0.1rem;
+}
+
+.hier-targets-subsection {
+  padding: 0.15rem 0 0;
+}
+
+.hier-subsection-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #3a5a3a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+  flex-wrap: wrap;
+}
+
+.hier-add-type-btns {
+  display: flex;
+  gap: 0.2rem;
+  flex-wrap: wrap;
+}
+
+.hier-type-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.68rem;
+  font-family: inherit;
+  background: transparent;
+  border: 1px solid #1a3a1a;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hier-type-add-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #2a5a2a;
+  background: #080f08;
+}
+
+/* ── IC rows (inside host) ───────────────────────────────────────────────── */
+
+.hier-ic-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.77rem;
+  color: #e07050;
+  padding: 0.1rem 0;
+}
+
+.hier-ic-row.hier-ic-bricked {
+  color: #5a5a5a;
+  text-decoration: line-through;
+}
+
+.hier-ic-cm {
+  font-size: 0.71rem;
+  color: #5a5a5a;
+  margin-left: auto;
+}
+
+.hier-ic-bricked-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #5a5a5a;
+  background: #1a1a1a;
+  padding: 0.02rem 0.2rem;
+  border-radius: 2px;
+}
+
+/* ── Inline forms ────────────────────────────────────────────────────────── */
+
+.hier-form {
+  background: #060f06;
+  border: 1px solid #1a3a1a;
+  border-radius: 3px;
+  padding: 0.4rem 0.55rem;
+  margin: 0.25rem 0.1rem;
+}
+
+.hier-form-inset {
+  margin: 0.2rem 0;
+  border-left: 2px solid #2a5a2a;
+}
+
+.hier-form-target {
+  border-left-color: #2a4a6a;
+}
+
+.hier-form-title {
+  font-size: 0.77rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--matrix-text-dim, #7ab87a);
+  margin-bottom: 0.3rem;
+}
+
+.hier-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.hier-asdf-row {
+  align-items: center;
+}
+
+.hier-form-label {
+  font-size: 0.74rem;
+  color: #4a7a4a;
+  min-width: 5rem;
+  flex-shrink: 0;
+}
+
+.hier-form-check-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  min-width: auto;
+  color: var(--matrix-text-dim, #7ab87a);
+  user-select: none;
+}
+
+.hier-form-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.79rem;
+  font-family: inherit;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  outline: none;
+}
+
+.hier-form-input:focus {
+  border-color: #3a7a3a;
+  box-shadow: 0 0 4px rgba(0, 255, 159, 0.12);
+}
+
+.hier-form-input-narrow {
+  max-width: 4rem;
+  flex: 0 0 4rem;
+}
+
+.hier-form-input-stat {
+  max-width: 3.2rem;
+  flex: 0 0 3.2rem;
+  text-align: center;
+}
+
+.hier-form-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.79rem;
+  font-family: inherit;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  outline: none;
+  appearance: auto;
+}
+
+.hier-form-select:focus {
+  border-color: #3a7a3a;
+}
+
+.hier-suggest-btn {
+  font-size: 0.71rem;
+  font-family: inherit;
+  padding: 0.1rem 0.4rem;
+  background: transparent;
+  border: 1px solid #1a4a1a;
+  color: #4a7a4a;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hier-suggest-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #2a6a2a;
+  background: #0d200d;
+}
+
+.hier-form-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+
+.hier-btn-save {
+  padding: 0.15rem 0.65rem;
+  font-size: 0.77rem;
+  font-family: inherit;
+  background: #0a2a0a;
+  border: 1px solid #2a7a2a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hier-btn-save:hover:not(:disabled) {
+  background: #0d350d;
+  border-color: #3a9a3a;
+}
+
+.hier-btn-save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.hier-btn-cancel {
+  padding: 0.15rem 0.65rem;
+  font-size: 0.77rem;
+  font-family: inherit;
+  background: transparent;
+  border: 1px solid #2a3a2a;
+  color: #4a5a4a;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hier-btn-cancel:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #3a5a3a;
+}
+
+/* ── Checkbox overrides ──────────────────────────────────────────────────── */
+
+input[type="checkbox"] {
+  accent-color: var(--matrix-text, #00ff9f);
+  cursor: pointer;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  opacity: 0.4;
+}
+
+/* ── Host marks section ──────────────────────────────────────────────────── */
+
+.hier-host-marks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.1rem 0.55rem 0.15rem;
+  font-size: 0.71rem;
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-marks-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #3a5a3a;
+  margin-right: 0.15rem;
+  flex-shrink: 0;
+}
+
+.hier-mark-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a3a1a;
+  border-radius: 2px;
+  padding: 0.02rem 0.25rem;
+}
+
+.hier-mark-decker {
+  font-size: 0.66rem;
+  color: #5a8a5a;
+  max-width: 5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hier-mark-dots {
+  font-size: 0.71rem;
+  letter-spacing: 0.04em;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-mark-rm {
+  background: transparent;
+  border: none;
+  color: #5a4a4a;
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.hier-mark-rm:hover { color: #cc4444; }
+
+.hier-add-mark-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.hier-add-mark-btn {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.05rem 0.3rem;
+  background: transparent;
+  border: 1px solid #1a3a1a;
+  color: #3a5a3a;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.hier-add-mark-btn:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #2a5a2a;
+  background: #080f08;
+}
+
+.hier-mark-select {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.05rem 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  max-width: 7rem;
+  appearance: auto;
+}
+
+.hier-mark-confirm,
+.hier-mark-cancel {
+  font-size: 0.66rem;
+  font-family: inherit;
+  padding: 0.03rem 0.25rem;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.hier-mark-confirm {
+  background: #0a2a0a;
+  border: 1px solid #2a7a2a;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-mark-confirm:hover { background: #0d350d; }
+
+.hier-mark-cancel {
+  background: transparent;
+  border: 1px solid #2a3a2a;
+  color: #4a5a4a;
+}
+
+.hier-mark-cancel:hover {
+  color: var(--matrix-text-dim, #7ab87a);
+  border-color: #3a5a3a;
+}
+
+/* ── Noise (round-4 D-13) ─────────────────────────────────────────────────── */
+
+.hier-noise-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-noise-hint {
+  flex: 1 1 auto;
+}
+
+/* ── Open-grid parent/child (Decision 7b) ────────────────────────────────── */
+
+.hier-public-node {
+  border-left: 1px solid #1a3a1a;
+  padding-left: 0.35rem;
+}
+
+.hier-parent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.35rem 0.3rem;
+}
+
+.hier-parent-label {
+  font-size: 0.68rem;
+  min-width: auto;
+}
+
+.hier-parent-select {
+  font-size: 0.68rem;
+  font-family: inherit;
+  padding: 0.05rem 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  max-width: 10rem;
+}
+
+.hier-parent-clear-btn {
+  background: transparent;
+  border: none;
+  color: #4a5a4a;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.hier-parent-clear-btn:hover { color: #cc4444; }
+
+/* Round-5, Decision 9: propagation visibility (2026-09-03) */
+.hier-propagated-badge {
+  color: #ffb340;
+  font-size: 0.65rem;
+  margin-left: 0.15rem;
+  cursor: help;
+}

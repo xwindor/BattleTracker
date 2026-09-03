@@ -1,12 +1,13 @@
 export { VRMode } from "./VRMode";
 export { ICType } from "./ICType";
 export { MatrixParticipant, DATA_PROCESSING_UNSET } from "./MatrixParticipant";
-export { ICParticipant } from "./ICParticipant";
+export { ICParticipant, IC_INITIATIVE_DICE } from "./ICParticipant";
 export { MatrixTarget } from "./MatrixTarget";
-export type { MatrixTargetType, MatrixTargetSpotted, MatrixTargetContext } from "./MatrixTarget";
+export type { MatrixTargetType, MatrixTargetVisibility, MatrixTargetContext } from "./MatrixTarget";
 export { MatrixHost } from "./MatrixHost";
 export type { HostAccessMethod } from "./MatrixHost";
 export { MatrixIcon } from "./MatrixIcon";
 export type { MatrixIconType } from "./MatrixIcon";
 export { MatrixRunState } from "./MatrixRunState";
 export type { MatrixStep } from "./MatrixRunState";
+export { matrixConditionMonitor } from "./matrixConditionMonitor";

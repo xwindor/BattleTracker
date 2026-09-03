@@ -1,0 +1,245 @@
+.ahp-panel {
+  font-size: 0.82rem;
+  color: #c8d6e5;
+}
+
+.ahp-no-host {
+  padding: 12px;
+  color: #6b7f96;
+  font-style: italic;
+}
+
+/* ── Host summary ──────────────────────────────────────────────────── */
+
+.ahp-host-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #111b27;
+  border-bottom: 1px solid #1e2d3d;
+  flex-wrap: wrap;
+}
+
+.ahp-host-name {
+  font-weight: 600;
+  color: #00c8a0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ahp-host-rating {
+  color: #7ea8c4;
+  font-size: 0.75rem;
+}
+
+.ahp-asdf {
+  color: #5b8fa8;
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.ahp-method-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.ahp-badge-none        { background: #1e2d3d; color: #6b7f96; }
+.ahp-badge-hotf        { background: #1a3a1a; color: #4dda4d; }
+.ahp-badge-bf          { background: #3a1a1a; color: #da4d4d; }
+.ahp-badge-dc          { background: #1a2a3a; color: #4d8dda; }
+
+/* ── Method buttons ────────────────────────────────────────────────── */
+
+.ahp-method-buttons {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  flex-wrap: wrap;
+}
+
+.ahp-btn-method {
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  border: 1px solid;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.ahp-btn-method:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ahp-btn-hotf {
+  border-color: #2e6b2e;
+  color: #4dda4d;
+}
+.ahp-btn-hotf:hover:not(:disabled) {
+  background: #1a3a1a;
+}
+
+.ahp-btn-bf {
+  border-color: #6b2e2e;
+  color: #da4d4d;
+}
+.ahp-btn-bf:hover:not(:disabled) {
+  background: #3a1a1a;
+}
+
+.ahp-btn-dc {
+  border-color: #2e4d6b;
+  color: #4d8dda;
+}
+.ahp-btn-dc:hover:not(:disabled) {
+  background: #1a2a3a;
+}
+
+/* ── Flow panels ───────────────────────────────────────────────────── */
+
+.ahp-flow-panel {
+  border-top: 1px solid #1e2d3d;
+  padding: 10px;
+}
+
+.ahp-flow-hotf { border-top-color: #2e6b2e; }
+.ahp-flow-bf   { border-top-color: #6b2e2e; }
+.ahp-flow-dc   { border-top-color: #2e4d6b; }
+
+.ahp-flow-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+  color: #e0ecff;
+}
+
+.ahp-flow-hint {
+  font-size: 0.78rem;
+  color: #7ea8c4;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ahp-noise-warn {
+  color: #e0a030;
+}
+
+/* ── Field row / select ────────────────────────────────────────────── */
+
+.ahp-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ahp-field-label {
+  font-size: 0.75rem;
+  color: #7ea8c4;
+  min-width: 72px;
+}
+
+.ahp-select {
+  background: #0d1825;
+  border: 1px solid #2a3f55;
+  color: #c8d6e5;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  flex: 1 1 auto;
+}
+
+/* ── Marks placed ──────────────────────────────────────────────────── */
+
+.ahp-marks-row {
+  margin-bottom: 6px;
+}
+
+.ahp-marks-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.ahp-mark-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #2a3f55;
+  background: #0d1825;
+  color: #7ea8c4;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.ahp-mark-btn.selected {
+  background: #1a3a5a;
+  color: #00c8ff;
+  border-color: #00c8ff;
+}
+
+.ahp-marks-penalty-hint {
+  font-size: 0.72rem;
+  color: #5b8fa8;
+  font-style: italic;
+  margin-bottom: 10px;
+}
+
+/* ── Action buttons ────────────────────────────────────────────────── */
+
+.ahp-flow-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ahp-btn-apply {
+  padding: 5px 12px;
+  background: #1a3a5a;
+  border: 1px solid #2a6090;
+  color: #00c8ff;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ahp-btn-apply:hover {
+  background: #1e4a70;
+}
+
+.ahp-btn-cancel {
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid #2a3f55;
+  color: #6b7f96;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.ahp-btn-cancel:hover {
+  background: #111b27;
+}
+
+/* ── Confirm message ───────────────────────────────────────────────── */
+
+.ahp-confirm-msg {
+  padding: 8px 10px;
+  background: #0a2a0a;
+  border: 1px solid #1a5a1a;
+  color: #4dda4d;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  margin: 8px 10px;
+}

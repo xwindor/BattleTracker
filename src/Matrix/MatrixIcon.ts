@@ -4,7 +4,12 @@ export type MatrixIconType = "commlink" | "spam" | "vehicle-node" | "sensor" | "
  * MatrixIcon
  *
  * A public-space Matrix icon (commlink, vehicle node, spam, etc.) generated
- * by IconGeneratorService. Plain class - mutated directly by callers.
+ * by IconGeneratorService. There is no undo system in this app (removed
+ * commit 426827b, `SCOPE.md` "Undo / redo") — mutate through whichever
+ * service owns this icon's list, which fires `stateChange$` after writing
+ * directly. Not touched this round beyond this comment fix — spotted while
+ * clearing the same stale `UndoHandler.DoAction` reference from
+ * `MatrixTarget.ts` and `MatrixHost.ts` (round-4).
  */
 export class MatrixIcon {
   id: string;

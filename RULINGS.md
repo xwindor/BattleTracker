@@ -777,3 +777,607 @@ does not know, and fill it in.
   uses for a mid-turn Reaction edit — no second, Matrix-only convention.
 - **A stored 0 means "unset", never a rated 0.** A live persona's floor is 1:
   Diffusion cannot reduce a Matrix attribute below 1 (p. 252).
+
+## 2026-08-29 — Overwatch Score banding below 40 is display-only
+
+**Ruling:** The tracker may colour a decker's Overwatch Score into bands for
+readability, but **no band below 40 carries any mechanical effect**. Crossing a
+band raises no alert, launches no IC, and changes no state. Convergence at OS
+40 remains the only threshold with consequences.
+
+**Why:** SR5 defines exactly one Overwatch threshold — 40 (p. 232). It has no
+"alert level", no "security tier", and nothing at OS 20; a search of all 32
+occurrences of "Overwatch" in the CRB and its Master Index entry (which cites
+only "SR5 231, 232") turns up no second threshold. Hosts launch IC when they
+*spot* unauthorized activity (p. 247) or when the intruder *fails* a Sleaze
+action (pp. 231, 236) — both event-driven, neither a function of OS. The
+previous implementation invented an `'ic-alert'` tier at OS 20 and attributed
+it to "Section 9.2 / Table 25", a citation format SR5 does not use. Colour
+banding keeps the tension curve visible at the table — a decker should be able
+to feel the clock running — without inventing a rule to do it.
+
+**How to apply:** Bands are a CSS concern only. `OsAlertLevel` collapses to
+`'none' | 'convergence'`; nothing between 0 and 39 is an alert. Any banding
+thresholds chosen for colour are arbitrary presentation values and must be
+commented as such, so no later reader mistakes them for printed rules. The
+Master Index points at Data Trails p. 111 for expanded Overwatch rules; if that
+book is ever added to `rules/`, revisit this before house-ruling further.
+
+## 2026-08-29 — Reboot and jack-out reset Overwatch Score to zero, with no cooldown
+
+**Ruling:** Rebooting the device a persona is running on, or jacking out, resets
+that decker's Overwatch Score to **zero** and erases all their marks. There is
+**no cooldown, no minimum offline duration, and no residual OS** — a decker may
+reboot at OS 39 and return at OS 0.
+
+**Why:** The reset itself is printed, not a gap: "When you reboot the device
+your persona is on, your OS is reset to zero and all of your marks, as well as
+the ones others may have put on your icon, are erased" (p. 242), and "When you
+start using the Matrix after a fresh boot, you're as pure and innocent as the
+driven snow" (p. 232). Jack Out "jacks you out of the Matrix and **reboots the
+device you are using**" (p. 240), so it inherits the same reset. The genuinely
+open question was whether to add friction to the resulting loop — RAW, a
+Complex Action plus roughly two Combat Turns offline buys a clean slate and a
+fresh fifteen-minute timer, which reads as though it defuses the only pressure
+mechanic in the chapter. This table takes the printed rules as they stand: the
+book explicitly endorses the tactic ("Hackers, by contrast, reboot regularly to
+avoid detection by GOD and the demiGODs", p. 236), and losing **every mark**
+mid-infiltration is a real cost — the decker has to re-hack everything they had
+access to.
+
+**How to apply:** Jack-out and reboot both zero the OS counter and clear that
+decker's marks. Marks are per-persona, so this touches only the rebooting
+decker; a teammate's marks on the same icon are unaffected. The device returns
+"at the end of the following Combat Turn" (p. 242) — the tracker does not
+enforce that timing, since it does not resolve actions, but the GM prompt
+should mention it. Do **not** add a cooldown, a suspicion carry-over, or a
+minimum offline timer without a new ruling here.
+
+## 2026-08-28 — IC Initiative Attribute = Host Data Processing + Host Rating
+
+> Restored 2026-09-01. This ruling was made on `feat/matrix-v2` (2026-08-28)
+> and lost when that branch was abandoned before landing on `main`; the port
+> that became `feat/matrix-v3` shipped without it and fell back to
+> `Host Rating x 2` instead. Recorded here verbatim from that branch's
+> `RULINGS.md`, not re-decided
+> (`briefs/matrix-port-rules-correctness-spec.md`).
+
+**Ruling:** An IC program's Initiative Score is **Host Data Processing + Host
+Rating, plus 4D6** Initiative Dice. The 4D6 is printed (p. 247); the base
+attribute is this house ruling.
+
+**Why:** CRB p. 247 gives IC "its own Initiative Score" and 4D6 dice (it is
+"treated as if it is in hot-sim"), and says "IC uses the Matrix attributes of
+its host" — but it **never states the Initiative Attribute**. The hot-sim
+formula is Data Processing + Intuition (p. 230), and IC has no Intuition or any
+other Mental attribute. The nearest textual support for a substitution is
+p. 237 ("if a device is completely unattended, the Device Rating stands in for
+any Mental attributes an icon needs but doesn't have"), which is written for
+defense tests rather than initiative, so this is an extension of it, not a
+printed rule. Host Rating therefore stands in for Intuition, and Host Data
+Processing supplies the DP term, which is the most faithful reading of "uses
+the Matrix attributes of its host". The rejected alternative, Host Rating × 2,
+is what `docs/UNVERIFIED-RULES.md` item 4 asserted; it is almost certainly a
+transcription slip, since Host Rating × 2 appears elsewhere on p. 247 as the
+IC **attack dice pool**, an unrelated quantity.
+
+**How to apply:** IC initiative base = host's Data Processing + host's Rating;
+Initiative Dice = 4D6 always. Host Matrix attributes are Rating, +1, +2, +3
+assigned in any order (p. 247), so the DP term varies with how the GM built the
+host and is a deliberate GM lever. The value must be exposed as an **editable
+per-IC field** in the tracker so it can be overridden at the table. Do not
+reuse Host Rating × 2 for initiative — that number is the attack pool only.
+
+## 2026-08-28 — A VR decker is incapacitated, and is not a second initiative row
+
+> Restored 2026-09-01, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note on the ruling above.
+
+**Ruling:** A decker in Cold-Sim or Hot-Sim VR is **physically incapacitated**:
+the body cannot take physical actions, and if attacked physically it is treated
+as "defender unaware of attack" (p. 189 — no defense possible, resolve as a
+Success Test). A VR decker occupies **one** row in the initiative order, using
+their Matrix initiative; the meat body is **never** a second participant row.
+
+**Why:** CRB p. 229 establishes the state plainly ("your body goes limp and
+your only sensory input comes from the Matrix"; in cold-sim "your meat senses
+are blocked, as though your body were asleep") and p. 243 warns "don't do it
+somewhere dangerous", but the book **never** gives mechanics for the limp body
+under physical attack — no defense rule, no prone status, no waking rule,
+nothing about the body being moved or restrained. The Rigger chapter is
+equally silent. Treating it as p. 189's "unaware" case is the reading most
+consistent with senses being blocked. The single-row half is not a gap but
+printed rules: p. 160 is explicit that an alternate initiative type
+**replaces** your Initiative Attribute and dice rather than adding a track (the
+astral-projection worked example replaces Reaction + Intuition with
+Intuition × 2), and p. 243 confirms switching VR→AR *loses* the VR dice.
+
+**How to apply:** In this tracker the defense half is **flavour and state
+only** — the app has no defense-roll code anywhere (`fullDefense` in
+`src/app/shared/interrupt-actions.ts` is a declared interrupt stance with an
+Initiative Score cost and descriptive text; `Participant.isInFullDefense()`
+only reads action history; nothing rolls a defense pool). So the ruling's live
+consequences are: (1) the PHYS LOCKED badge means "incapacitated, cannot act
+physically", and (2) **no code may add a second participant for the meat
+body** — a VR decker is exactly one row whose initiative is the Matrix one. If
+a separately targetable body is ever wanted in the UI, it is an inert token, not
+an initiative entry. Revisit the defense half only if the app ever rolls
+defense tests.
+
+## 2026-08-28 — A host is not an initiative participant; it perceives only through its IC
+
+> Restored 2026-09-01, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note two rulings above.
+
+**Ruling:** A Matrix host is **never** a row in the initiative order. All host
+perception happens through its IC — principally Patrol IC — on that IC's own
+initiative. A host running no Patrol IC is effectively blind until the intruder
+trips a printed detection trigger.
+
+**Why:** Hosts have no Initiative Score, no Condition Monitor, and cannot be
+attacked with Matrix damage (p. 229), and are never listed among combat
+participants — so giving
+one an initiative row would invent a participant the rules do not describe.
+The countervailing text is p. 236, which says a target that survives an Attack
+action "will most likely actively search for you on its next action", implying
+the host acts; but p. 247 resolves this by having the host and its IC "instantly
+share spotting information", so IC perception *is* host perception. The printed
+detection triggers remain fully in force and are event-driven, not turn-driven:
+a failed Sleaze action gives the target a free mark on you and immediately
+alerts the owner and launches IC (pp. 231, 236), and a host that spots
+unauthorized activity informs its owner and launches IC (p. 247).
+
+**How to apply:** Model the host as **context, not a participant** — no
+initiative row, no turn, no Initiative Score. Only IC entities enter the
+initiative order. Host awareness reaches the tracker through two paths: IC
+Matrix Perception on the IC's own action, and the printed failure/detection
+triggers above, which fire as events regardless of whose turn it is. Note the
+consequence for host design: a host with no Patrol IC has no polling perception
+at all, so Patrol IC is what makes a host dangerous to a silent-running decker.
+
+## 2026-08-28 — IC launched at the start of a Combat Turn rolls normally and acts that turn
+
+> Restored 2026-09-01, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note three rulings above.
+
+**Ruling:** IC launched by a host at the beginning of a Combat Turn rolls its
+Initiative Score as normal in Step 1 and acts in that same Combat Turn. The
+mid-combat entry penalty (−10 per Initiative Pass already elapsed) is **not**
+applied to it.
+
+**Why:** p. 247 states the launch timing precisely — "A host can launch one IC
+program per Combat Turn, at the beginning of each Combat Turn" — which places
+the spawn at the same moment everyone else rolls initiative, so the p. 160
+join-in-progress rule ("subtract 10 for each Initiative Pass that has already
+occurred") has no elapsed pass to charge for. The book never reconciles the two
+passages explicitly, which is why this is recorded as a ruling. It also matches
+the stated design intent of escalating host pressure: "Once the host starts to
+launch IC, it's time to finish up and buzz out of there" (p. 247).
+
+**How to apply:** On spawn at a Combat Turn boundary, add the IC to the
+initiative roll queue like any other participant — roll base + 4D6 (see the IC
+Initiative Attribute ruling above) with no penalty. Also printed on p. 247 and
+load-bearing here: a host launches **one** IC per Combat Turn, may run up to
+its Rating in IC simultaneously, and cannot run more than one of each type at
+once; crashed IC vanishes and may be relaunched at the start of the next
+Combat Turn. IC never generates an Overwatch Score (p. 248) — it is always
+considered legal.
+
+## 2026-08-29 — IC Matrix Condition Monitor is 8 + (Host Rating ÷ 2)
+
+> Restored 2026-09-01, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note on the first ruling above. This one is dated 2026-08-29, not 2026-08-28,
+> in that branch's own file; kept as originally dated rather than folded into
+> the 2026-08-28 batch (`briefs/matrix-port-rules-correctness-spec.md` names it
+> as one of "the five lost 2026-08-28 Matrix rulings" collectively, but its own
+> heading was always the 29th).
+
+**Ruling:** An IC program's Matrix Condition Monitor is **8 + (Host Rating ÷ 2),
+rounded up** — the same shape as a device's, sized off the host's Rating. A
+Rating 6 host's IC therefore has 11 boxes.
+
+**Why:** The CRB gives IC a Condition Monitor (pp. 229, 247) and **never states
+its size**. It also never gives IC a Device Rating, which is the number the
+device formula needs. Both formulas the book *does* give have the same shape —
+devices at `8 + (Device Rating ÷ 2)` (p. 228) and sprites at `8 + (Level ÷ 2)`
+(p. 254) — and IC "uses the Matrix attributes of its host" (p. 247), borrowing
+every other number it has from there. Host Rating is the one rating IC can be
+said to possess. The rejected alternatives were a flat 8 (most literal, since IC
+has no rating of its own to halve, but it makes host rating irrelevant to how
+durable its IC is) and `8 + (Firewall ÷ 2)` (ties toughness to the damage-
+resistance stat, but nothing in the book sizes a monitor off Firewall).
+
+**How to apply:** `8 + Math.ceil(hostRating / 2)`, matching the device formula's
+rounding (p. 48; the book writes character monitors as "8 + (Will ÷ 2, round
+up)" on p. 108, confirming the convention for monitors). Filling it crashes the
+IC: it vanishes from the host and the initiative order, and the host may run a
+fresh copy at the start of the next Combat Turn (p. 247). IC cannot be repaired
+and loses all damage when it stops running (p. 229) — so no repair path applies
+to it.
+
+## 2026-08-29 — VR Initiative Dice are absolute; meat augmentations do not stack
+
+> Restored 2026-09-02. This ruling was made on `feat/matrix-v2` (2026-08-29)
+> and lost when that branch was abandoned before landing on `main`; the port
+> that became `feat/matrix-v3` shipped without it. Recorded here verbatim,
+> not re-decided (Xavier's decision 3, 2026-09-02,
+> `briefs/matrix-port-rules-correctness.md`).
+
+**Ruling:** Cold-Sim sets a decker's Initiative Dice to **exactly 3D6** and
+Hot-Sim to **exactly 4D6**, regardless of any Initiative Dice the character has
+from augmentations, drugs or spells. Meat-side enhancements do **not** add on
+top of the VR base. AR is unaffected — in AR the character keeps their ordinary
+physical Initiative Dice.
+
+**Why:** The CRB is genuinely ambiguous. The Initiative Attribute Chart calls
+3D6/4D6 the "**Base** Initiative Dice" (p. 159), which reads as a floor that
+enhancements add to; but the body text says you "get **+3D6** Initiative Dice
+(remember that any enhancements or bonuses cannot take you past the maximum of
+5D6)" (p. 229), and that parenthetical only makes sense if enhancements can
+apply. The sample decker (p. 102) carries no augmentation line and settles
+nothing. This tracker takes the "Base" reading: the mode determines the dice,
+full stop. It is simpler to run at the table, and it stops a decker needing to
+also be a street samurai to compete on initiative.
+
+**How to apply:** Setting mode to COLD writes `dices = 3`; HOT writes
+`dices = 4`. **Switching back to AR must restore the participant's pre-VR dice
+count, not reset to 1.** This matters because the app has no augmentation model
+— the GM types the character's *total* Initiative Dice into `dices` directly,
+so an augmented decker's row already reads 3 or 4 before ever jacking in, and
+an absolute write followed by a naive restore would silently destroy it.
+`AstralParticipant.projectionDiceGain` (`src/Magic/AstralParticipant.ts`) is
+the established pattern for remembering a mode-switch dice change and undoing
+it exactly; VR should mirror it. Note the deliberate asymmetry with astral
+projection, which uses a **relative delta** precisely so augmented dice survive
+(`ASTRAL_PROJECTION_DICE_DELTA`, same file) — VR is absolute by this ruling,
+astral is relative by the rules, and the two must not be refactored into a
+single shared path. The 5D6 cap (pp. 52/288) still applies at the write site.
+
+## 2026-08-29 — Marks propagated from a slave count toward the master's three
+
+> Restored 2026-09-02, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note on the ruling above.
+
+**Ruling:** A mark earned on a slaved device also lands on its master and
+**counts normally toward the three-mark cap on that master**. Three successful
+hacks against slaved devices therefore yield three marks on the host, unlocking
+the 3-mark actions (Reboot Device, Format Device). The master/host is alerted
+only by the **original** action against the slave, under the ordinary
+Attack/Sleaze detection rules — the propagation itself is silent.
+
+**Why:** p. 233 states the propagation plainly — "if you get a mark on a slave
+you also get a mark on the master. This happens even if the slave was marked
+through a direct connection" — and that it does not work in reverse. What the
+CRB never says is whether the propagated mark counts against the master's cap
+of three (p. 236). Counting it normally is the reading that makes the tactic
+work as the GM chapter clearly intends: p. 355 presents it as the signature
+decker play, letting the hacker "gain marks on the device or its Master while
+making tests against the much lower Rating of the device." It is also the
+simplest model — one kind of mark, one cap, no second class of "access-only"
+mark.
+
+**How to apply:** `addMark()` on a slaved device writes the mark on the device
+and one on its master, both counting toward their respective three-mark caps.
+Propagation does not chain past one hop unless the intermediate is itself a
+slave of a further master. It fires no alert of its own. Note the balance this
+assumes: direct connection is deliberately strong — it zeroes noise, ignores
+grid modifiers, and forces the weak device's ratings as the defense pool
+(pp. 232-233) — and is paid for in fiction by the decker having to be
+physically present at the device, and therefore vulnerable in meat space while
+their body is limp in VR (see the 2026-08-28 PHYS LOCKED ruling). The tracker
+should make that physical exposure visible, since it is the cost that balances
+the tactic.
+
+## 2026-08-29 — Matrix damage applies no penalty until the monitor is full
+
+> Restored 2026-09-02, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note two rulings above. This is the page-cited backing for the round-3
+> `ICParticipant.wm` override (brief round-3 defect D5): IC's Matrix Condition
+> Monitor must not feed a wound modifier the way `physicalHealth` does for a
+> meat body.
+
+**Ruling:** Matrix damage produces **no dice pool modifier and no rating
+reduction** at any level below a completely filled monitor. A deck at 8 of 9
+boxes performs exactly as well as an undamaged one. Only filling the track has
+an effect.
+
+**Why:** Printed, and unusually explicit: "There is no penalty for having Matrix
+damage until your Matrix Condition Monitor is completely filled" (p. 228). This
+is recorded as a ruling despite being a plain rule because it is the **inverse
+of every other damage track in this tracker** — physical and stun both apply a
+wound modifier as they fill, wired through `Participant.get wm()` and from there
+into the Initiative attribute. The risk is not misreading the book; it is
+reusing the existing damage code, which would silently introduce a penalty the
+rules do not have.
+
+**How to apply:** Matrix damage must never feed `wm`, never touch `baseIni`, and
+never alter a Matrix attribute. It is a counter with one threshold. When the
+track fills: a device is bricked and stays so until repaired (p. 228); a deck
+being used in VR dumps its user with dumpshock (pp. 228, 229); IC crashes
+(p. 247). Note the separate mechanic that *does* reduce attributes — Acid,
+Binder, Jammer and Marker IC each drain one Matrix attribute per hit (p. 248) —
+is **not** damage, is cleared by rebooting rather than repair, and is out of
+scope for this module (see below).
+
+## 2026-08-29 — This module tracks Matrix state; it does not apply effects
+
+> Restored 2026-09-02, verbatim from `feat/matrix-v2`'s `RULINGS.md` — see the
+> note three rulings above. This is the page-cited backing for round-3
+> Decision 2 (`access-host-panel.component.ts`'s `confirmAccess()`): the panel
+> records a GM-typed mark count and Overwatch delta and does not roll, compare,
+> or resolve anything itself.
+
+**Ruling:** The Matrix module records numbers the GM gives it. It does **not**
+apply mechanical effects to attributes, dice pools or initiative as a
+consequence of Matrix state. Attribute drain from Acid/Binder/Jammer/Marker IC
+(p. 248), drone damage routing (p. 270), rigger damage rerouting (p. 266),
+technomancer Stun conversion (pp. 229, 251) and program effects on damage math
+(pp. 245-246) are **out of scope** — documented in
+`briefs/matrix-condition-monitors-and-access.md` so the rules are not
+re-derived, but not built.
+
+**Why:** Xavier's scope, stated 2026-08-29: "the app is for tracking stuff, not
+applying effects to attributes." The verification brief surfaced a large amount
+of adjacent rules surface, and treating a rules brief as a work list is how the
+first attempt at this module sprawled. Recording a condition monitor is
+bookkeeping; mutating Data Processing because a Binder IC landed a hit is
+resolution.
+
+**How to apply:** New Matrix state is a field the GM edits and the app displays.
+Before adding anything that *reacts* to Matrix state by changing another number,
+check this ruling. The one deliberate exception already in place is the VR
+interface mode, which changes the Initiative attribute and dice — that is core
+initiative-tracker behaviour predating this module and is governed by p. 160.
+
+**Related, now moot:** ruling M6 in the brief asked whether rebooting clears
+Matrix damage. It needs no answer: this module has **no repair action and no
+reboot action that touches damage**. The damage count is a number the GM sets
+and clears by hand, so nothing in the app ever decides to clear it.
+
+## 2026-09-01 — Tied IC act simultaneously, not by coin toss
+
+**Ruling:** Two (or more) IC tied on effective Initiative Score, with no Edge,
+Reaction or Intuition to compare, do not fall through to a coin toss. They act
+**simultaneously** — the gamemaster's-discretion alternative p. 159 itself
+prints ("at the gamemaster's discretion, both characters can act
+simultaneously") — because that is what the engine already does for any tie of
+this shape.
+
+**Why:** `CombatManager.getNextActors()` (`src/Combat/CombatManager.ts:192-198`)
+scans every `Waiting`, non-OOC participant with positive current initiative and
+collects the highest-initiative group into `currentActors` — edge participants
+first, then everyone else tied within the same edge state, grouped together.
+It has no step that falls through to a coin toss for participants with no
+Edge, Reaction or Intuition; it simply puts them in `currentActors` together
+and both act.
+
+`briefs/matrix-port-rules-correctness-spec.md`'s "Table Ruling 4" (Undefined /
+needs a table ruling, item 4) originally recommended "fall through to the coin
+toss, which is what the existing comparator will do with three absent
+attributes" as its own default — that claim was checked against the code by
+adversarial validation on 2026-09-01 and found wrong: the comparator is never
+reached for this case, because `getNextActors()` groups equal-Initiative,
+equal-Edge participants into `currentActors` before any coin-toss step would
+run. The brief has been corrected in place rather than silently superseded, so
+a later reader does not file the actual (correct) behaviour as a bug.
+
+**How to apply:** No code change. This is the existing, already-correct
+behaviour of `getNextActors()`; nothing needs to be built. If a GM wants a
+strict one-at-a-time order between two tied IC instead, that is a manual
+override at the table, not something the tracker currently automates.
+
+## 2026-09-02 — IC has a Matrix Condition Monitor only; the inherited Stun track is dropped
+
+**Ruling:** `ICParticipant` tracks Matrix damage only, on its `physicalHealth`/
+`physicalDamage` slot per Table Ruling 2 above. It has **no** Stun track. The
+10-box `stunHealth` it inherits from `Participant` is never read by `wm` or
+`ooc` for an IC and carries no printed meaning.
+
+**Why:** SR5's IC section gives each IC program "its own Condition Monitor"
+(singular, p. 247) and never describes a second track. The 10-box Stun default
+came from `Participant`'s generic construction (`stunHealth = 10`,
+`Participant.ts`), not from any Matrix rule — a class-hierarchy artifact, not a
+rules claim. Leaving it live would let `Participant.ooc`'s
+`stunDamage >= stunHealth` half go out-of-combat on a track that does not
+exist for IC.
+
+**How to apply:** `ICParticipant` overrides `wm` to return `0` unconditionally
+(the Matrix Condition Monitor produces no wound modifier at all below full,
+per the restored "Matrix damage applies no penalty until the monitor is full"
+ruling above) and overrides `ooc` to test only
+`physicalDamage >= physicalHealth`, plus the shared manual "bench this
+participant" flag every participant type carries. `stunHealth`/`stunDamage`
+stay declared (removing the fields outright would touch shared `Participant`
+plumbing far beyond this module) but are inert for IC — nothing in the Matrix
+UI renders them, and nothing in `ICParticipant` reads them any more.
+
+> **Addendum, round-4 (2026-09-02), "missed interaction 4":** the same
+> treatment now covers `overflowHealth` too. `Participant`'s inherited
+> overflow-track field (a meat Physical Condition Monitor concept, default 4,
+> `Participant.ts`) had no ICParticipant-specific override at all — nothing
+> currently reads it for an IC, so there was no live bug, but leaving it as a
+> plain inherited field with a meat-body default was the same kind of latent
+> trap this ruling's Stun-track fix exists to close off, should a future
+> feature reuse a generic "apply damage"/"resistance track" helper built for
+> meat characters against an IC. `ICParticipant.overflowHealth` is now pinned
+> to `0`: Matrix damage has no overflow phase at all — an IC's Matrix
+> Condition Monitor filling crashes it outright (p. 247), it does not spill
+> into a further track the way a meat body's Physical Condition Monitor does.
+> The setter is still overridden alongside the getter (delegating to
+> `super.overflowHealth`) because TypeScript/JS accessor pairs are replaced as
+> a unit — overriding only the getter would make the property silently
+> read-only for any caller.
+
+## 2026-09-02 — The Matrix module has no dice roller of its own
+
+**Ruling:** No Matrix component gets its own dice-rolling widget. Where a GM
+wants to roll dice for a Matrix action, they use the battle tracker's existing
+dice roller (or their own physical dice) and type the result into the Matrix
+module by hand.
+
+**Why:** Xavier, 2026-09-02: "I'm not aware of a dice roller other than the one
+that already exists in the battle tracker, the matrix module should not have a
+separate dice roller." This withdraws Scope Question A and A′ from
+`briefs/matrix-port-rules-correctness-spec.md` (both approved 2026-09-01,
+"keep the roller inside the access-host panel, sever the wire to the
+derivation, and route the roll into the shared log") — see that brief's
+withdrawal note for the mechanical reason (the panel's roller never actually
+worked, per that brief's appendix C1/C3) alongside this scope reason. It also
+matches the restored "This module tracks Matrix state; it does not apply
+effects" ruling above: a second roller is exactly the kind of resolution
+machinery that ruling warns against growing back.
+
+**How to apply:** `AccessHostPanelComponent` (the one component that had a
+roller) has none — `marksThisAttempt` (renamed from `marksPlaced` round-4,
+Decision 6 — see that ruling below) and the Overwatch delta it hands to
+`OsPromptComponent` are both typed in by the GM from a result produced
+elsewhere. No other Matrix component may import `DiceRollerComponent` or
+`DiceRollRequest`. If a future Matrix screen wants a roll logged and visible to
+players, it routes through the battle tracker's existing roller and logging
+path, the same as every other roll in the app — it does not grow its own.
+
+## 2026-09-02 — D-11 footnote: a restored ruling's wording, not its substance, was corrected
+
+**What this is:** Not a new ruling. The 2026-08-28 "IC Initiative Attribute =
+Host Data Processing + Host Rating" entry above (restored 2026-09-01) carries
+a note claiming it was recorded "verbatim" from `feat/matrix-v2`. That word
+is accurate for the ruling's substance and reasoning, but not for one exact
+phrase, and round-4 validation flagged the mismatch (defect D-11): the
+`feat/matrix-v2` original described the rejected `Host Rating x 2` value as
+appearing "on the adjacent line of p. 247"; the text actually restored onto
+this branch instead reads "elsewhere on p. 247" (see that entry's "Why"
+section).
+
+**Verified:** `rules/pages/p0249.txt` — "IC uses the Matrix attributes of its
+host" (the line the ruling's DP term hangs on) is at line 24; the Host
+Rating × 2 attack-dice-pool line is at line 63, in a different column of the
+page's two-column layout. Not literally the adjacent line either way, so
+"elsewhere on p. 247" is the more accurate of the two phrasings.
+
+**Disposition:** kept as corrected rather than reverted to the milder
+inaccuracy in the original. The "verbatim" claim on that entry should be read
+as "verbatim in substance", not "byte-identical throughout" — this footnote
+exists so a future reader does not treat that one phrase as a restoration
+error and "fix" it back to the less accurate wording.
+
+> **Correction, round-5 (2026-09-03):** the line number just above was itself
+> off by one — "IC uses the Matrix attributes of its host" is at
+> `rules/pages/p0249.txt:24`, not `:23` (line 23 is the previous sentence,
+> "...so it gets a total of 4D6 Initiative Dice in"). Verified directly
+> against the file with `cat -n`. The substance of this footnote is
+> unaffected; only the cited line number is corrected.
+
+## 2026-09-02 — Marks propagate up the containment hierarchy — this is not a Decision 1 violation
+
+**Ruling:** `MatrixStateService.addMark()` placing an additional mark on a
+target's host (Decision 7a) or on its open-grid parent (Decision 7b) is the
+app writing a mark the GM did not directly type into that specific icon. This
+does **not** contradict Xavier's Decision 1 (2026-09-02, "marks are recorded,
+never derived": "we aren't doing any rolls outside the already existing dice
+roller ... and we aren't comparing any dice either").
+
+**Why the distinction holds:** Decision 1 forbids the app from *deriving* a
+mark count from a **dice roll** — computing how many marks a hack earned from
+hits, net hits, or any other roll result this app does not itself resolve.
+Propagation is not that. It derives a second mark from a **rule Xavier has
+explicitly ruled on**: a mark on a slaved device also marks its master (p. 233;
+`RULINGS.md` 2026-08-29 "Marks propagated from a slave count toward the
+master's three", restored 2026-09-02), extended by Xavier's decision 7b
+(2026-09-02) to an open-grid parent/child chain. The GM still places the one
+mark that starts the chain, by hand, from a resolution that happened at the
+table — exactly as Decision 1 requires. The propagated mark's *value* (always
+exactly 1, capped independently per icon at 3) is fixed by the rule, not
+computed from anything the app rolled or compared.
+
+**How to apply:** Do not read a future "the app placed a mark nobody clicked"
+report against this pass as a Decision 1 regression without first checking
+whether it is propagation under this ruling. If a new propagation path is
+ever proposed that derives its mark *count* from something other than "the
+GM's one manually-placed mark, multiplied by nothing", that new path needs
+its own ruling — this entry authorizes only the fixed, one-for-one host/parent
+propagation `MatrixStateService.addMark()` implements.
+
+## 2026-09-03 — Propagation is device-only at both ends
+
+**Ruling:** Only a `type: "device"` icon ever propagates a mark it receives
+upward, and a propagation walk only ever lands on a device or a host. A file,
+persona, IC, or nested-host icon neither propagates a mark it holds, nor
+receives one propagated from below. A device parented to a file does not
+propagate through the file — the walk stops there, and the file itself
+receives nothing.
+
+Verbatim: "Only getting marks on devices propagate to the hosts as well,
+files and personas do not get propagated to and do not propagate" (Xavier,
+2026-09-03).
+
+**Why:** p. 233 states the device-only scope of slaving outright: "Only
+devices can be slaves, masters, or part of a PAN. In a WAN, the slaves must
+be devices, and the master must be a host" (`rules/pages/p0235.txt:54-58`).
+The WAN passage the two host/parent propagation rulings above are built on
+(2026-08-29 "Marks propagated from a slave count toward the master's three";
+2026-09-02 "Marks propagate up the containment hierarchy") is itself written
+for devices slaved to a host — "wide area networks, or WANs, with multiple
+devices slaved to a host" (`rules/pages/p0235.txt:46-47`). Extending that
+device-specific mechanism to files and personas was never supported by the
+text; round-5 validation (validator defect 1) caught that
+`MatrixStateService.addMark()` propagated from every `MatrixTarget` type
+without checking, so marking three paydata files inside a host handed a
+decker three marks on the **host** — enough for Reboot Device (p. 242, 3-mark
+threshold) without ever hacking the host itself.
+
+**How to apply:** `MatrixStateService.addMark()` only calls
+`propagateMarkUp()` when the marked icon's `type === "device"`; within that
+walk, the open-grid parent/child hop (Decision 7b) additionally requires the
+*parent* to be a device before placing anything there or continuing the walk
+past it. Host WAN propagation (Decision 7a) is unaffected on the destination
+side — a host is always a valid destination, it has no `type` to gate on.
+`HierarchyEditorComponent.parentOptionsFor()` mirrors the destination half in
+the UI: a file/persona/IC/nested-host target is never offered as a parent
+choice, and `canHaveParent()` hides the parent control entirely for a
+non-device target, since it could never do anything. See
+`MatrixTarget.parentTargetId`'s doc comment and `MatrixStateService.addMark()`'s
+doc comment for the implementation.
+
+## 2026-09-03 — Propagation is visible, not reversible
+
+**Ruling:** Removing a mark never reverses `addMark()`'s propagation onto an
+ancestor (host or open-grid parent) — this was already the behaviour
+(`RULINGS.md` 2026-08-29, "Marks propagated from a slave count toward the
+master's three", restored 2026-09-02) and stays unchanged. Verbatim, on being
+asked whether an ancestor's mark should auto-remove when the propagating mark
+is removed: "No the mark should not be removed upstream" (Xavier, 2026-09-03).
+
+What changes is **discoverability**, not the mechanic: the GM must be able to
+see that a mark on one icon also placed a mark somewhere else, before and
+after the fact.
+
+- **Before committing:** the `+Mark` control on a device states what it will
+  *also* mark — "Also marks Host: <name>" or "Also marks: <parent name>" —
+  before the GM confirms (`TargetCardComponent.propagationPreview`).
+- **After the fact:** an icon whose current mark for a decker includes at
+  least one that arrived by propagation shows a badge on that decker's mark
+  row (`MatrixTarget.propagatedMarks` / `MatrixHost.propagatedMarks`),
+  distinguishing it from a mark placed there directly. The flag is not a
+  second ledger of *which* stacked mark was the propagated one — it clears
+  once that icon's count for the decker reaches 0, and re-sets on the next
+  propagation.
+- **On removal:** the `×` / remove-mark tooltip on the icon that *caused* a
+  propagation states plainly that the upstream mark stays, and the remove
+  tooltip on the ancestor itself states that a propagated mark's own source
+  is untouched by removing it there.
+
+**Why no auto-removal:** an ancestor's mark may have other sources besides
+the one propagation that happens to still be visible in the moment — a host
+holds one running total, not a per-source breakdown, so an intruder with a
+direct mark on the host *and* a propagated one from a slaved device looks
+identical to an intruder with only the propagated one. Automatically
+decrementing the host's count when the device's mark is removed could erase
+a mark the decker legitimately still holds. The GM, who knows the actual
+history at the table, corrects the ancestor's own row by hand if the
+propagated mark genuinely needs to go.
+
+**How to apply:** `MatrixStateService.removeMark()` and `removeMarkFromHost()`
+only ever touch the record they're called on; `propagatedMarks[deckerId]`
+clears only when that same record's count for that decker reaches 0. Do not
+add a "remove upstream too" option without a new ruling here — this entry
+settles that question as asked and answered.

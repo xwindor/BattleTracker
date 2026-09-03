@@ -7,6 +7,8 @@ import { IParticipant } from 'Combat/Participants/IParticipant';
 import { SharedCombatState } from 'app/services/session-sync.service';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
+import { MatrixHost } from 'Matrix/MatrixHost';
+import { MatrixTarget } from 'Matrix/MatrixTarget';
 import { AstralParticipant } from 'Magic';
 import { LogHandler } from 'Logging';
 import { interruptTable } from 'InterruptTable';
@@ -553,6 +555,325 @@ describe('BattleTrackerComponent', () => {
 
       expect(mp.dices).toBe(4);
       expect(mp.currentInitiativeScore).toBe(before);
+    });
+  });
+
+  // Step 1 rules corrections (docs/MATRIX_MODULE_PLAN.md; verified in
+  // briefs/matrix-rules-verification.md). Two claims the module was previously
+  // built on turned out to be wrong:
+  //   - AR was treated as a Matrix mode using DP + INT at a fixed 1D6. It is
+  //     not: "When in AR, you use your normal Initiative and Initiative Dice"
+  //     (p. 229), and the Initiative Attribute Chart lists Matrix AR as
+  //     Reaction + Intuition (p. 159).
+  //   - VR dice were applied as though 1D6 were always the count to return to,
+  //     which silently truncated any augmented decker.
+  describe('AR uses ordinary physical initiative (pp. 159, 229, 231)', () => {
+    /**
+     * A decker who is NOT jacked in. Reaction 4 + Intuition 5 = 9 physical,
+     * against Data Processing 7 + Intuition 5 = 12 if the Matrix formula were
+     * (wrongly) applied. The two differ so the assertions cannot both pass.
+     */
+    function arDeckerWithDistinctStats(): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.AR;
+      mp.jackedIn = false;
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('computes an AR decker base as REA + INT, not DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      expect(component.getParticipantBaseInitiative(mp)).toBe(9);
+    });
+
+    it('computes a cold-sim decker base as DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.vrMode = VRMode.ColdSim;
+      expect(component.getParticipantBaseInitiative(mp)).toBe(12);
+    });
+
+    it('computes a hot-sim decker base as DP + INT', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.vrMode = VRMode.HotSim;
+      expect(component.getParticipantBaseInitiative(mp)).toBe(12);
+    });
+
+    // The bug this closes: `getParticipantBaseInitiative` returned DP + INT for
+    // every MatrixParticipant regardless of mode, while `applyVRMode`'s AR
+    // branch wrote REA + INT. They only disagreed once something recomputed the
+    // base - so editing a stat on an AR decker jumped their Initiative.
+    it('keeps an AR decker on physical initiative when Intuition is edited', () => {
+      const mp = arDeckerWithDistinctStats();
+      mp.baseIni = component.getParticipantBaseInitiative(mp);
+      expect(mp.baseIni).toBe(9);
+
+      component.onParticipantIntuitionChanged(mp, 6);
+
+      expect(mp.baseIni).toBe(10);  // REA 4 + INT 6, not DP 7 + INT 6 = 13
+    });
+  });
+
+  describe('VR dice are absolute, and AR restores the decker\'s own dice', () => {
+    /**
+     * An *augmented* decker in AR: their row already reads 3D6 (the GM types
+     * the character's total Initiative Dice directly - the app has no
+     * augmentation model). This is the case the old hard-coded 1D6 destroyed.
+     */
+    function augmentedArDecker(): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Wired Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.AR;
+      mp.setDicesWithoutRoll(3);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('sets hot-sim to exactly 4D6 regardless of augmented dice', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.HotSim);
+
+      // Absolute, not 3 + 4: meat augmentations do not stack onto the VR base
+      // (RULINGS.md 2026-08-29).
+      expect(mp.dices).toBe(4);
+    });
+
+    it('restores 3D6 - not 1D6 - when an augmented decker returns to AR', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.HotSim);
+      expect(mp.dices).toBe(4);
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(3);
+      expect(mp.preVrDiceCount).toBeNull();
+    });
+
+    // A Cold -> Hot switch must not overwrite the remembered *physical* count
+    // with the cold-sim 3, or the round trip lands on 3D6 by coincidence for a
+    // 3D6 decker and on the wrong number for everyone else.
+    it('remembers the pre-VR count across a cold-sim to hot-sim switch', () => {
+      const mp = augmentedArDecker();
+      mp.setDicesWithoutRoll(2);
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.ColdSim);
+      expect(mp.dices).toBe(3);
+      component.onVRModeChange(mp, VRMode.HotSim);
+      expect(mp.dices).toBe(4);
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(2);
+    });
+
+    it('falls back to 1D6 when no pre-VR count was ever recorded', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Restored Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.HotSim;
+      mp.setDicesWithoutRoll(4);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+
+      component.onVRModeChange(mp, VRMode.AR);
+
+      expect(mp.dices).toBe(1);
+    });
+
+    it('carries preVrDiceCount through clone()', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+      component.onVRModeChange(mp, VRMode.HotSim);
+
+      const clone = mp.clone() as MatrixParticipant;
+
+      expect(clone.preVrDiceCount).toBe(3);
+    });
+
+    it('gmJackOut restores the decker\'s own dice', () => {
+      const mp = augmentedArDecker();
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+      expect(mp.dices).toBe(4);
+
+      component.gmJackOut(mp);
+
+      expect(mp.dices).toBe(3);
+      expect(mp.vrMode).toBe(VRMode.None);
+    });
+  });
+
+  // Step 2. SR5 has exactly one Overwatch threshold: 40 (p. 232). The module
+  // previously carried an 'ic-alert' tier at OS 20 attributed to "Section 9.2 /
+  // Table 25" - a citation format SR5 does not use, for a rule that does not
+  // exist (briefs/matrix-rules-verification.md, item 3b).
+  describe('Overwatch Score: convergence is the only threshold', () => {
+    function decker(os = 0): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.vrMode = VRMode.HotSim;
+      mp.overwatch = os;
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      return mp;
+    }
+
+    it('reports no alert at OS 20', () => {
+      const mp = decker(20);
+      expect(component.osTracking.getOSAlert(mp)).toBe('none');
+      expect(mp.overwatchAlert).toBe('none');
+    });
+
+    it('reports no alert at OS 39', () => {
+      const mp = decker(39);
+      expect(component.osTracking.getOSAlert(mp)).toBe('none');
+      expect(mp.overwatchAlert).toBe('none');
+    });
+
+    it('reports convergence at OS 40', () => {
+      const mp = decker(40);
+      expect(component.osTracking.getOSAlert(mp)).toBe('convergence');
+      expect(mp.overwatchAlert).toBe('convergence');
+    });
+
+    it('emits no threshold event crossing 20', () => {
+      const mp = decker(19);
+      const events: string[] = [];
+      const sub = component.osTracking.threshold$.subscribe(e => events.push(e.alert));
+
+      component.osTracking.addOS(mp, 5, 'test');   // 19 -> 24
+
+      expect(mp.overwatch).toBe(24);
+      expect(events).toEqual([]);
+      sub.unsubscribe();
+    });
+
+    it('emits convergence exactly once when crossing 40', () => {
+      const mp = decker(38);
+      const events: string[] = [];
+      const sub = component.osTracking.threshold$.subscribe(e => events.push(e.alert));
+
+      component.osTracking.addOS(mp, 5, 'test');   // 38 -> 43, crosses
+      component.osTracking.addOS(mp, 5, 'test');   // 43 -> 48, already there
+
+      expect(events).toEqual(['convergence']);
+      sub.unsubscribe();
+    });
+
+    // Display bands are presentation only (RULINGS.md, 2026-08-29). Asserted so
+    // the cut points cannot silently acquire meaning.
+    it('bands the score for display without any mechanical effect', () => {
+      expect(component.osTracking.getOSBand(decker(0))).toBe('low');
+      expect(component.osTracking.getOSBand(decker(14))).toBe('low');
+      expect(component.osTracking.getOSBand(decker(15))).toBe('building');
+      expect(component.osTracking.getOSBand(decker(30))).toBe('high');
+      expect(component.osTracking.getOSBand(decker(40))).toBe('convergence');
+      // A band change is not an alert.
+      expect(component.osTracking.getOSAlert(decker(30))).toBe('none');
+    });
+  });
+
+  describe('Overwatch Score resets on jack-out (pp. 240, 242)', () => {
+    it('zeroes OS when jacking out', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+      component.osTracking.addOS(mp, 22, 'test');
+      expect(mp.overwatch).toBe(22);
+
+      component.gmJackOut(mp);
+
+      expect(mp.overwatch).toBe(0);
+    });
+
+    it('resetOS clears the score', () => {
+      const mp = new MatrixParticipant();
+      mp.overwatch = 31;
+
+      component.osTracking.resetOS(mp);
+
+      expect(mp.overwatch).toBe(0);
+    });
+
+    // Round-5 defect D-3: `gmJackOut()` called `this.osTracking.resetOS(mp)`
+    // directly and never called `MatrixStateService.jackOut()`, so the mark
+    // erasure that method implements (D-9) lived only in a service method
+    // this, the actual GM-facing jack-out button, never invoked. These two
+    // assertions were removed from this describe block in an earlier round
+    // with the (at-the-time accurate, but now stale) justification that
+    // `battle-tracker` doesn't wire in any hosts/targets — restored here,
+    // strengthened to assert against the real records
+    // (`MatrixHost.marks` / `MatrixTarget.marks`) rather than the deleted
+    // `MatrixParticipant.marksPlaced` Map, now that `gmJackOut()` is routed
+    // through `MatrixStateService.jackOut()` and so has something real to
+    // erase.
+    it('erases the decker\'s marks on a host and on a target inside it', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+
+      const host = new MatrixHost({ id: 'h1', name: 'TestHost', rating: 4 });
+      host.marks['Decker'] = 2;
+      const target = new MatrixTarget({ id: 't1', type: 'device', context: 'host', linkedHostId: 'h1' });
+      target.marks['Decker'] = 3;
+      host.targets.push(target);
+      component.matrixState.addHost(host);
+
+      component.gmJackOut(mp);
+
+      expect(host.marks['Decker']).toBeUndefined();
+      expect(target.marks['Decker']).toBeUndefined();
+    });
+
+    it('erases marks another decker or IC placed on this decker\'s own persona icon (p. 242, "as well as the ones others may have put on your icon")', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+
+      const persona = new MatrixTarget({
+        id: 'persona-decker', type: 'persona', context: 'public', personaOwner: 'Decker'
+      });
+      persona.marks['KillerIC-1'] = 2;
+      component.matrixState.addTarget(null, persona);
+
+      component.gmJackOut(mp);
+
+      expect(persona.marks['KillerIC-1']).toBeUndefined();
     });
   });
 

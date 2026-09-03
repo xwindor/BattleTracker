@@ -413,3 +413,48 @@ describe('Initiative Score is a running value, not a recompute', () => {
 
 // Brief scenarios S1-S3, and "the defect this feature actually closes", have
 // been promoted to tests/scenarios/running-initiative-score.spec.ts.
+
+// Round-5 defect D-6: combatTurn resets to 1 on endCombat(), so a value
+// stamped from combatTurn alone cannot tell "turn 1 of this combat" apart
+// from "turn 1 of the next one". combatGeneration gives each encounter a
+// distinct identity.
+describe('CombatManager.combatGeneration (round-5 defect D-6)', () => {
+  // CombatManager is a module-level singleton shared by the whole test
+  // suite (same pattern every other describe block in this file lives
+  // with) - combatGeneration is a monotonic counter with no reset hook
+  // (deliberately: only endCombat() may ever advance it), so these tests
+  // read it relative to a baseline captured at the start of each test
+  // rather than assuming an absolute starting value.
+  beforeEach(() => {
+    resetCombat();
+  });
+
+  it('increments by exactly 1 per endCombat() call', () => {
+    const before = CombatManager.combatGeneration;
+    CombatManager.endCombat();
+    expect(CombatManager.combatGeneration).toBe(before + 1);
+    CombatManager.endCombat();
+    expect(CombatManager.combatGeneration).toBe(before + 2);
+  });
+
+  it('is not touched by endCombatTurn() or nextIniPass() — only endCombat() advances it', () => {
+    const before = CombatManager.combatGeneration;
+    CombatManager.startRound();
+    CombatManager.endCombatTurn();
+    CombatManager.nextIniPass();
+    expect(CombatManager.combatGeneration).toBe(before);
+  });
+
+  it('combatTurn resetting to 1 across two endCombat() calls still leaves distinct generations', () => {
+    CombatManager.combatTurn = 5;
+    CombatManager.endCombat();
+    const genAfterFirst = CombatManager.combatGeneration;
+    expect(CombatManager.combatTurn).toBe(1);
+
+    CombatManager.combatTurn = 1; // a brand-new combat also starts at turn 1
+    CombatManager.endCombat();
+
+    expect(CombatManager.combatTurn).toBe(1);
+    expect(CombatManager.combatGeneration).toBeGreaterThan(genAfterFirst);
+  });
+});

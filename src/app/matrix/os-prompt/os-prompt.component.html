@@ -1,0 +1,33 @@
+<div class="modal-header os-prompt-header">
+  <h5 class="modal-title">Apply Overwatch Score — {{ deckerName }}</h5>
+  <button type="button" class="btn-close" aria-label="Close" (click)="cancel()"></button>
+</div>
+<div class="modal-body">
+  @if (actionEntries.length > 0) {
+  <div class="os-action-list mb-3">
+    @for (entry of actionEntries; track entry.name) {
+    <div class="os-action-row">
+      <span class="os-action-name">{{ entry.name }}</span>
+    </div>
+    }
+  </div>
+  }
+
+  <p class="os-prompt-help">
+    Overwatch Score rises by the number of hits the defender rolled on its
+    defense test — whether this action succeeded or failed (p. 232). Enter
+    that hit count; nothing here is suggested or computed for you.
+  </p>
+
+  <div class="os-modify-row mt-2">
+    <label class="form-label mb-1">Defender's hits:</label>
+    <input type="number" class="form-control os-custom-input" [(ngModel)]="customDelta" min="0" step="1" autofocus />
+    @if (customDelta !== null && !canApply) {
+    <div class="os-input-error">Enter a whole number of hits, 0 or higher — no fractions, negatives, or unreasonably large numbers.</div>
+    }
+  </div>
+</div>
+<div class="modal-footer">
+  <button type="button" class="btn btn-outline-secondary" (click)="cancel()">Cancel</button>
+  <button type="button" class="btn btn-danger" [disabled]="!canApply" (click)="applyCustom()">{{ applyLabel }}</button>
+</div>

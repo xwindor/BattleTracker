@@ -1,0 +1,344 @@
+/* ── Panel shell ─────────────────────────────────────────────────────────── */
+
+.matrix-run-panel {
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 4px;
+  background: var(--matrix-bg, #040d04);
+  color: var(--matrix-text, #00ff9f);
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+  font-family: var(--matrix-font, "Courier New", monospace);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.matrix-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  background: var(--matrix-bg-mid, #0a1a0a);
+  border-radius: 3px 3px 0 0;
+  user-select: none;
+}
+
+.matrix-panel-header:hover {
+  background: #0d200d;
+}
+
+.matrix-panel-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--matrix-text, #00ff9f);
+  flex: 0 0 auto;
+}
+
+.matrix-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+}
+
+.collapse-caret {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+/* ── Noise control ───────────────────────────────────────────────────────── */
+
+.noise-control {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.noise-label {
+  font-size: 0.75rem;
+  color: var(--matrix-text-dim, #7ab87a);
+  white-space: nowrap;
+}
+
+.noise-btn {
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: transparent;
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  color: var(--matrix-text-dim, #7ab87a);
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 1.4rem;
+}
+
+.noise-btn:hover:not(:disabled) {
+  background: #0d200d;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.noise-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.noise-value {
+  font-size: 0.8rem;
+  min-width: 1.4rem;
+  text-align: center;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.noise-value.noise-nonzero {
+  color: #ffc107;
+  font-weight: 700;
+}
+
+/* ── Grid select ─────────────────────────────────────────────────────────── */
+
+.grid-select {
+  font-size: 0.75rem;
+  padding: 0.15rem 1.4rem 0.15rem 0.4rem;
+  background-color: var(--matrix-bg-mid, #0a1a0a);
+  color: var(--matrix-text-dim, #7ab87a);
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 3px;
+  appearance: auto;
+}
+
+/* ── Panel body ──────────────────────────────────────────────────────────── */
+
+.matrix-panel-body {
+  padding: 0.5rem 0.75rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ── Passive stepper strip ───────────────────────────────────────────────── */
+
+.matrix-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: #1a4a1a transparent;
+}
+
+.stepper-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  color: #3a5a3a;
+  white-space: nowrap;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  /* Reference only — not interactive */
+  pointer-events: auto; /* keep for tooltip */
+  cursor: default;
+}
+
+.stepper-step.stepper-lit {
+  color: var(--matrix-text, #00ff9f);
+  background: #0a1a0a;
+  border-color: #2a6a2a;
+  font-weight: 700;
+  box-shadow: 0 0 5px rgba(0, 255, 159, 0.18);
+}
+
+.stepper-step.stepper-past {
+  color: #4a6a4a;
+}
+
+.stepper-check {
+  font-size: 0.6rem;
+  color: #4a7a4a;
+}
+
+.stepper-sep {
+  font-size: 0.65rem;
+  color: #2a3a2a;
+  flex-shrink: 0;
+  padding: 0 0.05rem;
+}
+
+.stepper-sep.stepper-sep-past {
+  color: #3a5a3a;
+}
+
+/* ── Decker cards row ────────────────────────────────────────────────────── */
+
+.decker-cards-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--matrix-border, #1a4a1a);
+  padding-bottom: 0.5rem;
+}
+
+/* ── Two-pane layout ─────────────────────────────────────────────────────── */
+
+.matrix-two-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  min-height: 140px;
+}
+
+@media (max-width: 900px) {
+  .matrix-two-pane {
+    grid-template-columns: 1fr;
+  }
+}
+
+.matrix-left-pane,
+.matrix-right-pane {
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 3px;
+  background: var(--matrix-bg-mid, #040f04);
+  overflow: hidden;
+}
+
+.pane-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--matrix-text-dim, #7ab87a);
+  background: #0a1a0a;
+  padding: 0.25rem 0.55rem;
+  border-bottom: 1px solid var(--matrix-border, #1a4a1a);
+  text-transform: uppercase;
+}
+
+/* ── Left pane: hierarchy ────────────────────────────────────────────────── */
+
+.hier-section {
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-section:last-child {
+  border-bottom: none;
+}
+
+.hier-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--matrix-text-dim, #7ab87a);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.2rem;
+}
+
+.hier-empty {
+  font-size: 0.7rem;
+  color: #3a5a3a;
+  font-style: italic;
+}
+
+.hier-stub {
+  font-size: 0.7rem;
+  color: #3a5a3a;
+  font-style: italic;
+}
+
+.hier-host-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hier-host-name {
+  font-size: 0.77rem;
+  font-weight: 600;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.hier-host-meta {
+  font-size: 0.68rem;
+  color: var(--matrix-text-dim, #7ab87a);
+}
+
+.hier-ic-list {
+  margin-top: 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: 0.75rem;
+}
+
+.hier-ic-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: #e07050;
+}
+
+.hier-ic-row.hier-ic-bricked {
+  color: #6c757d;
+  text-decoration: line-through;
+}
+
+.hier-ic-cm {
+  font-size: 0.65rem;
+  color: #6c757d;
+  margin-left: auto;
+}
+
+.hier-ic-bricked-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #6c757d;
+  background: #1a1a1a;
+  padding: 0.05rem 0.25rem;
+  border-radius: 2px;
+}
+
+.pane-header-access {
+  margin-top: 0;
+  border-top: 1px solid var(--matrix-border, #1a4a1a);
+  border-bottom-color: var(--matrix-border, #1a4a1a);
+}
+
+/* ── Right pane: graph stub ──────────────────────────────────────────────── */
+
+.graph-stub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  height: calc(100% - 28px);  /* subtract pane-header height */
+  min-height: 100px;
+  color: #1e3a1e;
+  padding: 1rem;
+}
+
+.graph-stub-icon {
+  font-size: 2rem;
+  color: #1e3a1e;
+}
+
+.graph-stub-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #2a5a2a;
+  letter-spacing: 0.05em;
+}
+
+.graph-stub-sub {
+  font-size: 0.65rem;
+  color: #1e3a1e;
+  font-style: italic;
+}

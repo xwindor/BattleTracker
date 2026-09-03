@@ -106,7 +106,7 @@ export interface SharedParticipantState {
   isMatrix?: boolean;
   vrMode?: string;          // 'AR' | 'cold-sim' | 'hot-sim'
   overwatch?: number;
-  overwatchAlert?: string;  // 'none' | 'ic-alert' | 'convergence'
+  overwatchAlert?: string;  // 'none' | 'convergence' (SR5's only OS threshold is 40, p. 232)
   jackedIn?: boolean;
   isVRCatatonic?: boolean;  // mirrors blocksPhysicalActions for the player view
   dataProcessing?: number;
@@ -127,13 +127,19 @@ export interface SharedMatrixParticipantState extends SharedParticipantState {
 
 export interface SharedMatrixTarget {
   id: string;
+  /** "Unknown Icon" when visibility === 'running-silent'. Full name when 'active'. */
   name: string;
+  /** Sanitised to 'unknown' when running-silent. */
   type: string;
-  /** 'invisible' omitted from broadcast; 'ghost' sanitised (type='unknown', name=''); 'revealed' sent in full. */
-  spotted: string;
+  /** 'running-silent' | 'active' — hidden targets are never broadcast. */
+  visibility: string;
+  /** Per-decker mark counts. Key = decker name. */
   marks: Record<string, number>;
   matrixDamage: number;
   matrixHealth: number;
+  /** Which host this target lives in, if any. */
+  hostName?: string;
+  /** Devices with a physical cable connection — show plug/wire icon in player view. */
   directConnection?: boolean;
 }
 
@@ -216,6 +222,16 @@ export interface SharedCombatState {
   // shared types are stable from Phase 1 onward).
   matrixTargets?: SharedMatrixTarget[];
   currentHostName?: string;
+  /**
+   * Per-decker mark count on the current host icon itself, keyed by decker
+   * name — the host icon's own marks, distinct from any `SharedMatrixTarget`
+   * inside it (p. 236). Consumed by
+   * `MatrixPlayerViewComponent.hostMarksRecord`
+   * (briefs/matrix-port-rules-correctness-spec.md appendix D). Purely
+   * additive: no producer exists yet, so this key is never present on the
+   * wire today.
+   */
+  currentHostMarks?: Record<string, number>;
 }
 
 /**

@@ -1,0 +1,140 @@
+.decker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  background: var(--matrix-bg-mid, #0a1a0a);
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 4px;
+  min-width: 220px;
+  font-family: var(--matrix-font, "Courier New", monospace);
+  transition: border-color 0.2s;
+}
+
+.decker-card.decker-card-jacked {
+  border-color: #2a6a2a;
+}
+
+.decker-card.decker-card-vr {
+  border-color: #4a7a9f;
+  box-shadow: 0 0 5px rgba(74, 122, 159, 0.25);
+}
+
+/* ── Top row ──────────────────────────────────────────────────────────────── */
+
+.decker-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.decker-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--matrix-text, #00ff9f);
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.decker-mode-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.badge-mode-off  { color: #6c757d; border-color: #343a40; background: #1a1a1a; }
+.badge-mode-ar   { color: #adb5bd; border-color: #495057; background: #212529; }
+.badge-mode-cold { color: #9ec5fe; border-color: #084298; background: #031633; }
+.badge-mode-hot  { color: #f1aeb5; border-color: #842029; background: #2c0b0e; }
+
+.decker-vr-badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #9ec5fe;
+  background: #031633;
+  border: 1px solid #084298;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+
+.decker-os {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+
+/* Presentation-only Overwatch colour bands (RULINGS.md 2026-08-29,
+   "Overwatch Score banding below 40 is display-only"). The cut points
+   (15/30/40) live in exactly one place, `osBandFor()`
+   (app/services/os-tracking.service.ts) - none of the four classes below
+   carry a number of their own. Only `.os-convergence` corresponds to a
+   printed rule: 40 is the sole Overwatch threshold in SR5 (p. 232). */
+.os-low         { color: var(--matrix-text, #00ff9f); background: #0a1a0a; border: 1px solid #1a4a1a; }
+.os-building    { color: #9ec5fe; background: #031633; border: 1px solid #084298; }
+.os-high        { color: #ffc107; background: #1a1200; border: 1px solid #856404; }
+.os-convergence { color: #f8d7da; background: #2c0b0e; border: 1px solid #842029; }
+
+.os-threshold-label {
+  font-size: 0.55rem;
+  font-weight: 700;
+  margin-left: 0.25rem;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
+.os-threshold-conv {
+  color: #f8d7da;
+}
+
+/* ── Action row ───────────────────────────────────────────────────────────── */
+
+.decker-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.mode-group {
+  display: flex;
+}
+
+.mode-btn {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  background: transparent;
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  color: var(--matrix-text-dim, #7ab87a);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.mode-btn:hover {
+  background: #0d200d;
+  color: var(--matrix-text, #00ff9f);
+}
+
+.mode-btn.mode-btn-active {
+  background: #0d200d;
+  color: var(--matrix-text, #00ff9f);
+  border-color: var(--matrix-text, #00ff9f);
+  font-weight: 700;
+}
+
+.mode-btn-cold.mode-btn-active { color: #9ec5fe; border-color: #084298; background: #031633; }
+.mode-btn-hot.mode-btn-active  { color: #f1aeb5; border-color: #842029; background: #2c0b0e; }
+
+.card-action-btn {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.55rem;
+}

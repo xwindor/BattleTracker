@@ -1,0 +1,73 @@
+<div class="mpv-wrap">
+
+  <!-- Decker status: VR mode chip only. Overwatch Score is a secret the GM
+       keeps (p. 232); the only ways a player learns their own current value
+       are the Check Overwatch Score action (p. 238) and the Baby Monitor
+       program (p. 245) — this tracker plays neither for the decker, so no
+       Overwatch renders here under any state. -->
+  <div class="mpv-decker-status">
+    <span class="mpv-vr-chip" [class]="vrModeClass()">{{ vrModeLabel() }}</span>
+    <span class="mpv-vr-label">VR Mode</span>
+  </div>
+
+  <!-- Context header: location + host marks -->
+  <div class="mpv-header">
+    @if (currentHostName) {
+    <i class="fas fa-server mpv-ctx-icon"></i>
+    <span class="mpv-title">{{ currentHostName }}</span>
+    @if (hostMarks() > 0) {
+    <span class="mpv-host-marks" ngbTooltip="Your marks on this host" placement="top">
+      {{ dots(hostMarks()) }}
+    </span>
+    }
+    } @else {
+    <i class="fas fa-globe mpv-ctx-icon"></i>
+    <span class="mpv-title">Public Space</span>
+    }
+  </div>
+
+  @if (contextTargets.length === 0) {
+  <div class="mpv-empty">No icons detected.</div>
+  } @else {
+  @for (target of contextTargets; track target.id) {
+  <div class="mpv-row" [class.mpv-row-silent]="target.visibility === 'running-silent'">
+
+    @if (target.visibility === 'running-silent') {
+    <!-- Unknown / running-silent icon -->
+    <i class="fas fa-question-circle mpv-icon mpv-icon-silent"
+      ngbTooltip="Unknown icon — running silent" placement="right"></i>
+    <span class="mpv-name mpv-name-silent">Unknown Icon ■</span>
+    <span class="mpv-type-badge mpv-type-silent">?</span>
+
+    } @else {
+    <!-- Normal (visible) icon -->
+    <i class="mpv-icon" [class]="typeIcon(target.type)"
+      [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
+    <span class="mpv-name">{{ target.name }}</span>
+    <span class="mpv-type-badge">{{ typeLabel(target.type) }}</span>
+    }
+
+    <!-- Matrix CM: damage only, never the maximum. Matrix Perception can
+         reveal an icon's damage boxes, but capacity is not on that list
+         (p. 235), and RULINGS.md 2026-08-13 bars Condition Monitor maximums
+         from any log or shared view - the maximum is exactly the "how many
+         more hits" figure that ruling withheld. (Scope Question C,
+         briefs/matrix-port-rules-correctness-spec.md, approved 2026-09-01.)
+
+         Type guard: hosts and files have no Matrix Condition Monitor at all
+         (p. 229) - they cannot be attacked with Matrix damage, so there is no
+         track to show a number for. Rendering "0" here for a host or file
+         would imply a track that does not exist (brief defect 7). -->
+    @if (target.type !== 'host' && target.type !== 'file') {
+    <span class="mpv-cm"
+      [ngbTooltip]="'Matrix damage: ' + target.matrixDamage"
+      placement="top">
+      <span [class.mpv-cm-dmg]="target.matrixDamage > 0">{{ target.matrixDamage }}</span>
+    </span>
+    }
+
+  </div>
+  }
+  }
+
+</div>

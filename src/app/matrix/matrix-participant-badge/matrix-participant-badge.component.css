@@ -57,8 +57,19 @@
   outline-offset: 1px;
 }
 
-.os-ok         { color: #2ecc71; }
-.os-alert      { color: #f39c12; background-color: rgba(243, 156, 18, 0.08); }
+/* Presentation-only Overwatch colour bands (RULINGS.md 2026-08-29,
+   "Overwatch Score banding below 40 is display-only"). Cut points (15/30/40)
+   live in exactly one place, `osBandFor()`
+   (app/services/os-tracking.service.ts) - none of the four classes below
+   carry a number of their own. Only `.os-convergence` corresponds to a
+   printed rule: 40 is the sole Overwatch threshold in SR5 (p. 232). This
+   file previously had no rule below `.os-convergence` at all - `.os-low`,
+   `.os-building` and `.os-high` were missing entirely even though the
+   component already called `osBandFor()` and bound the result, so the live
+   chip had no colour below 40. */
+.os-low        { color: #2ecc71; }
+.os-building   { color: #5dade2; background-color: rgba(93, 173, 226, 0.08); }
+.os-high       { color: #f39c12; background-color: rgba(243, 156, 18, 0.08); }
 .os-convergence {
   color: #fff;
   background-color: #c0392b;

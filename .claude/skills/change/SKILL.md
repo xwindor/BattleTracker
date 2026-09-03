@@ -23,10 +23,19 @@ that small changes don't earn.
 ## Stage 1 — spec
 
 Delegate to the `sr5-change-scoper` subagent. Pass it the request verbatim and
-the instruction to read `ARCHITECTURE.md` and `CLAUDE.md` before anything else.
+the instruction to read `SCOPE.md`, `ARCHITECTURE.md` and `CLAUDE.md` before
+anything else — `SCOPE.md` is the product boundary and governs what it may plan
+for.
 
 Write its two documents: `briefs/<slug>.md` (plain-language, for me) and
 `briefs/<slug>-spec.md` (technical, for the implementer).
+
+`briefs/<slug>.md` must include these two sections, written in plain terms:
+
+- **Not building — and why** — the straightforward exclusions, in plain terms.
+- **Scope questions for you** — the things that could go either way, each with
+  the case for and the case against, phrased so I can answer without reading
+  code. State clearly that answering these may mean updating `SCOPE.md`.
 
 **GATE — stop here.** Show me `briefs/<slug>.md` and wait. Note that
 `briefs/<slug>-spec.md` also exists if I want to read the technical detail. Do
@@ -81,10 +90,17 @@ other technical detail go below it.
    standard test command. Run the full suite and show real output.
 2. Check whether this changed anything `ARCHITECTURE.md` describes. If so,
    update it and show me the diff. If not, say so explicitly.
-3. Stage everything and show the diff summary. Don't commit unless I ask.
+3. If I answered a scope question in a way that changes the product boundary,
+   update `SCOPE.md` with the decision and today's date — the same way table
+   rulings go to `RULINGS.md`. Show me the diff.
+4. Stage everything and show the diff summary. Don't commit unless I ask.
 
 ## Standing rules
 
+- Scope every proposal against `SCOPE.md`. Finding a rule does not mean
+  implementing it.
+- Scope exclusions are proposals for Xavier to approve, never filters applied
+  silently.
 - Every output shown to Xavier leads with a plain-language summary. He is not a
   software engineer. Technical detail goes below it, never instead of it.
 - Work in the main checkout. Do not create worktrees or branches.

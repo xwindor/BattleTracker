@@ -21,6 +21,8 @@ a room to see initiative order, roll, and declare actions.
 
 ## Where things are documented
 
+- **`SCOPE.md`** — the product boundary: what this app is and isn't. Read
+  before proposing what to build. Finding a rule does not mean implementing it.
 - **`ARCHITECTURE.md`** — authoritative reference for combat and initiative:
   initiative-order storage, turn/pass boundary semantics, participant state,
   tie-breaking, and how session sync interacts with combat state. Read

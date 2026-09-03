@@ -13,14 +13,22 @@ Feature request: $ARGUMENTS
 ## Stage 1a — rules brief
 
 Delegate to the `sr5-rules-analyst` subagent. In the prompt you pass it,
-include: the feature request verbatim, the instruction to read `RULINGS.md`
-first and treat existing rulings as binding, and the instruction to cite only
-printed page numbers it has actually opened in `rules/`.
+include: the feature request verbatim, the instruction to read `SCOPE.md` and
+`RULINGS.md` first — treating existing rulings as binding and `SCOPE.md` as the
+product boundary — and the instruction to cite only printed page numbers it has
+actually opened in `rules/`.
 
 When it returns, write its two documents: `briefs/<slug>.md` (plain-language,
 for me) and `briefs/<slug>-spec.md` (technical, for the implementer), where
 `<slug>` is a short kebab-case name for the feature. Create `briefs/` if it
 doesn't exist.
+
+`briefs/<slug>.md` must include these two sections, written in plain terms:
+
+- **Not building — and why** — the straightforward exclusions, in plain terms.
+- **Scope questions for you** — the things that could go either way, each with
+  the case for and the case against, phrased so I can answer without reading
+  code. State clearly that answering these may mean updating `SCOPE.md`.
 
 ## Stage 1b — implementation plan
 
@@ -102,10 +110,17 @@ other technical detail go below it.
    change nothing.
 3. Append any table rulings I decided to `RULINGS.md`, each with today's date
    and the reasoning.
-4. Stage everything and show me the diff summary. Don't commit unless I ask.
+4. If I answered a scope question in a way that changes the product boundary,
+   update `SCOPE.md` with the decision and today's date — the same way table
+   rulings go to `RULINGS.md`. Show me the diff.
+5. Stage everything and show me the diff summary. Don't commit unless I ask.
 
 ## Standing rules
 
+- Scope every proposal against `SCOPE.md`. Finding a rule does not mean
+  implementing it.
+- Scope exclusions are proposals for Xavier to approve, never filters applied
+  silently.
 - Every output shown to Xavier leads with a plain-language summary. He is not a
   software engineer. Technical detail goes below it, never instead of it.
 - Never cite a rulebook page that wasn't confirmed present in `rules/`.

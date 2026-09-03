@@ -36,6 +36,7 @@ import {
 } from "Grunts";
 import type { GruntDamageType, GruntMergeResult, GruntStatblock } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
+import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
@@ -481,6 +482,7 @@ const GM_LOG_TEXT = {
     ConditionMonitorComponent,
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
+    MatrixRunPanelComponent,
     AstralBadgeComponent
   ]
 })
@@ -1149,7 +1151,18 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   @ViewChild("convergenceModalTpl") private convergenceModalTpl!: TemplateRef<unknown>;
   /** The "name before add" dialog template (brief U1/U12). */
   @ViewChild("addDraftModalTpl") private addDraftModalTpl!: TemplateRef<unknown>;
-  icAlertMessages: string[] = [];
+
+  /**
+   * Transient "you owe Overwatch Score" reminders shown to the GM.
+   *
+   * These are rules-correct and stay: for any Attack or Sleaze action, "your OS
+   * increases by the number of hits the target gets on its defense test"
+   * (p. 232), which this app never rolls — so the GM is reminded to apply it
+   * once defense is resolved. Formerly named `icAlertMessages` and labelled
+   * "IC Alert", which wrongly implied an OS-driven alert threshold; SR5 has no
+   * Overwatch threshold below convergence at 40.
+   */
+  osReminders: string[] = [];
   convergenceAlertDecker: string | null = null;
   convergenceAlertOs = 0;
   private convergenceModalRef: NgbModalRef | null = null;
@@ -1198,6 +1211,59 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return p instanceof MatrixParticipant;
   }
 
+  /**
+   * Whether the Matrix run panel is shown. Off by default.
+   *
+   * The Matrix module is still parked (`CLAUDE.md`, "Current focus") and this
+   * is the first and only thing that mounts it — `<app-matrix-run-panel>` had
+   * no consumer anywhere in the app, so the hierarchy editor, access-host
+   * panel, matrix graph and decker cards were all compiled, type-checked and
+   * unit-tested but unreachable at runtime. This toggle exists so the module
+   * can be exercised by hand; it is deliberately not the finished GM workflow
+   * (see `docs/MATRIX_MODULE_PLAN.md`).
+   */
+  showMatrixPanel = false;
+
+  toggleMatrixPanel(): void {
+    this.showMatrixPanel = !this.showMatrixPanel;
+  }
+
+  /**
+   * Every Matrix-capable participant that can actually hold a mark, for the
+   * run panel's decker cards and the hierarchy editor's mark controls.
+   *
+   * **Nameless participants are excluded.** `MatrixHost.marks` and
+   * `MatrixTarget.marks` are keyed by `decker.name` (a string), so a
+   * participant with no name cannot be a mark key at all. The constructor
+   * seeds one untouched blank row on every tab load (see
+   * `isUnusedPlaceholder()`), which without this filter reached the +Mark
+   * picker as an option with an empty label and an empty value — the picker
+   * rendered blank and its confirm button silently did nothing, because
+   * `TargetCardComponent.confirmAddMark()` bails on a falsy id.
+   *
+   * Filtering here rather than in the card keeps the rule in one place: a
+   * participant with no name is not addressable by any Matrix record, so it
+   * is not a decker as far as this module is concerned.
+   */
+  get matrixActiveDeckers(): MatrixParticipant[] {
+    return CombatManager.participants.items
+      .filter((p): p is MatrixParticipant => this.isMatrix(p) && (p.name ?? "").trim() !== "");
+  }
+
+  /**
+   * Routes the run panel's jack-in request through the same funnel the GM's
+   * own row button uses, so the dice-count and Initiative handling stay in one
+   * place rather than being duplicated for the panel.
+   */
+  onMatrixJackInRequested(event: { decker: MatrixParticipant; mode: VRMode }): void {
+    this.setPendingVrMode(event.decker, event.mode);
+    this.gmJackIn(event.decker);
+  }
+
+  onMatrixJackOutRequested(decker: MatrixParticipant): void {
+    this.gmJackOut(decker);
+  }
+
   /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
   asMatrix(p: IParticipant): MatrixParticipant {
     return p as MatrixParticipant;
@@ -1232,8 +1298,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.changeDetector.detectChanges();
   }
 
-  dismissIcAlert(index: number): void {
-    this.icAlertMessages.splice(index, 1);
+  dismissOsReminder(index: number): void {
+    this.osReminders.splice(index, 1);
   }
 
   dismissConvergenceAlert(): void {
@@ -1244,20 +1310,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.convergenceAlertDecker = null;
   }
 
-  // -- Act modal OS accumulation prompt --
+  // -- Act modal Overwatch reminder --
 
-  /** Illegal OS-generating actions in the current modal selection, with their deltas. */
-  get actModalIllegalOsActions(): Array<{ name: string; delta: number }> {
+  /**
+   * Attack/Sleaze actions in the current modal selection, which will owe
+   * Overwatch Score once defense is resolved (p. 232).
+   *
+   * Names only, no amounts: OS equals the defender's hits, which this app does
+   * not roll. The former `delta` on each entry came from a per-action cost
+   * table that is not a rule (see `ILLEGAL_OS_ACTIONS`).
+   */
+  get actModalIllegalOsActions(): string[] {
     if (!this.actModalParticipant || !this.isMatrix(this.actModalParticipant)) return [];
     const sel = this.getDeclaredActionSelection(this.actModalParticipant);
     const all = [sel.free, ...sel.simple, sel.complex].filter((a): a is string => !!a);
-    return all
-      .filter(name => name in ILLEGAL_OS_ACTIONS)
-      .map(name => ({ name, delta: ILLEGAL_OS_ACTIONS[name] }));
+    return all.filter(name => ILLEGAL_OS_ACTIONS.has(name));
   }
 
-  get actModalSuggestedOsDelta(): number {
-    return this.actModalIllegalOsActions.reduce((sum, a) => sum + a.delta, 0);
+  /** True when the current selection owes Overwatch Score after defense. */
+  get actModalOwesOverwatch(): boolean {
+    return this.actModalIllegalOsActions.length > 0;
   }
 
   drop(event: CdkDragDrop<string[]>) {
@@ -1271,11 +1343,11 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   async ngOnInit() {
     this.observedLocalLogCount = this.logHandler.logbook.length;
+    // Convergence (OS 40, p. 232) is the only Overwatch event there is. The
+    // former `ic-alert` branch here fired at OS 20 on a rule that does not
+    // exist in SR5 — see `briefs/matrix-rules-verification.md` item 3b.
     this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
-      if (event.alert === "ic-alert") {
-        this.icAlertMessages.push(`${event.decker.name} — OS: ${event.decker.overwatch}`);
-        this.changeDetector.detectChanges();
-      } else if (event.alert === "convergence") {
+      if (event.alert === "convergence") {
         this.convergenceAlertDecker = event.decker.name;
         this.convergenceAlertOs = event.decker.overwatch;
         this.convergenceModalRef = this.modalService.open(this.convergenceModalTpl, { backdrop: "static", centered: true });
@@ -3085,13 +3157,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         mp.baseIni = reaction + intuition;
         if (jackOut) {
           // Jack-out dice loss is always handled GM-side: roll the lost dice,
-          // subtract the total (brief F5 / criterion 8, p. 160).
-          this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
-        } else {
-          // Initial deck creation is character setup, not a mid-turn dice
-          // change - the player sends a full roll_submission afterwards.
-          mp.setDicesWithoutRoll(PHYSICAL_INITIATIVE_DICE);
+          // subtract the total (brief F5 / criterion 8, p. 160). Restores the
+          // decker's own physical dice, not a hard-coded 1D6.
+          this.restorePhysicalDiceCount(mp);
         }
+        // Initial deck creation deliberately leaves the dice count alone.
+        // Creating a deck does not change how fast the character's body is:
+        // they are in AR, using their normal Initiative Dice (p. 229), which
+        // is whatever the row already holds. Writing 1D6 here truncated an
+        // augmented character the moment the GM handed them a cyberdeck.
       }
       // No `else`: a bare stat-edit payload (no create/jackIn/jackOut) writes
       // the stats above and nothing else. It is not reachable from the player
@@ -3274,7 +3348,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
       this.performAct(target, declaredAction, target.name || "Player");
       if (illegalActions.length > 0) {
-        this.icAlertMessages.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
+        this.osReminders.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
       }
       return;
     }
@@ -5233,8 +5307,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.performAct(actor, this.buildDeclaredActionLog(actor));
     }
     if (illegalActions.length > 0) {
-      const names = illegalActions.map(a => a.name).join(", ");
-      this.icAlertMessages.push(`${actor.name}: ${names} — add OS after resolving defense`);
+      const names = illegalActions.join(", ");
+      this.osReminders.push(`${actor.name}: ${names} — add OS after resolving defense`);
     }
     this.clearDeclaredActionSelection(actor);
     if (this.actModalRef) {
@@ -6176,7 +6250,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   getParticipantBaseInitiative(p: IParticipant): number {
     const intuition = this.getParticipantIntuition(p);
-    if (this.isMatrix(p) && p.jackedIn && p.vrMode !== VRMode.AR && p.vrMode !== VRMode.None) {
+    // No `jackedIn` guard: `vrMode` alone decides the formula, and every
+    // jack-out path resets it to `None`/`AR`, so the two can never disagree.
+    if (this.isMatrix(p) && MatrixParticipant.isVRMode(p.vrMode)) {
+      // Only the VR modes use the Matrix Initiative attribute (Data
+      // Processing + Intuition, pp. 229-230). **AR does not**: "When in AR,
+      // you use your normal Initiative and Initiative Dice" (p. 229), and the
+      // Initiative Attribute Chart lists Matrix AR as Reaction + Intuition
+      // (p. 159). An AR decker therefore falls through to the ordinary
+      // Reaction + Intuition return at the bottom, so their row behaves
+      // exactly like any other participant.
       if (p.dataProcessing <= DATA_PROCESSING_UNSET) {
         return DATA_PROCESSING_UNSET;
       }
@@ -7731,13 +7814,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sort();
   }
 
+  /**
+   * Jack Out: clear VR mode, restore physical initiative, reboot the device
+   * you're using — reset OS to zero and erase this decker's marks (p. 242).
+   *
+   * Round-5 defect D-3: an earlier version of this method zeroed OS inline
+   * (`this.osTracking.resetOS(mp)`) and never touched any mark record at
+   * all, so `MatrixStateService.jackOut()`'s mark erasure (D-9) lived only
+   * in a service method this, the actual GM-facing jack-out button, never
+   * called. Routed through that service method instead of duplicating its
+   * logic, so there is exactly one place "jacking out" is defined.
+   *
+   * `vrMode`/`jackedIn`/`blocksPhysicalActions` and the OS reset are all now
+   * `matrixState.jackOut()`'s responsibility — see that method's doc comment
+   * for the `VRMode.None` (not `VRMode.AR`) reconciliation between this
+   * button and the service method.
+   */
   gmJackOut(p: IParticipant): void {
     if (!this.isMatrix(p)) return;
     const mp = p as MatrixParticipant;
-    // Jack Out: clear VR mode, restore physical initiative.
-    mp.vrMode = VRMode.None;
-    mp.jackedIn = false;
-    mp.blocksPhysicalActions = false;
+    this.matrixState.jackOut(mp);
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.getParticipantIntuition(mp);
     mp.baseIni = reaction + intuition;
@@ -7745,7 +7841,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Mid-combat jack out — base stat delta automatic via baseIni; the dice
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
     // 8, p. 160). Outside a running combat the funnel just writes the count.
-    this.changeParticipantDiceCount(mp, PHYSICAL_INITIATIVE_DICE);
+    // Restores the decker's *own* physical dice, not a hard-coded 1D6.
+    this.restorePhysicalDiceCount(mp);
     this.appendParticipantEventLog(p.name || "", PLAYER_COMMAND_LOG_TEXT.jackedOut);
     this.syncSharedState();
     this.sort();
@@ -8130,15 +8227,43 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       mp.baseIni = reaction + intuition;
       mp.jackedIn = false;
       mp.blocksPhysicalActions = false;
-      return this.changeParticipantDiceCount(
-        mp, MatrixParticipant.initiativeDiceForMode(VRMode.AR), options
-      );
+      return this.restorePhysicalDiceCount(mp, options);
+    }
+    // Entering VR overwrites the dice count with an absolute 3D6/4D6, so
+    // remember what it was first or an augmented decker loses those dice
+    // permanently on the way back (RULINGS.md 2026-08-29). Guarded on null so
+    // a Cold -> Hot switch does not overwrite the *original* physical count
+    // with the cold-sim 3.
+    if (mp.preVrDiceCount === null) {
+      mp.preVrDiceCount = mp.dices;
     }
     let result: DiceCountChangeResult = NO_DICE_COUNT_CHANGE;
     mp.applyJackInMode(mode, intuition, target => {
       result = this.changeParticipantDiceCount(mp, target, options);
     });
     return result;
+  }
+
+  /**
+   * Put back the Initiative Dice count a decker had before they jacked in, and
+   * forget it.
+   *
+   * Falls back to `PHYSICAL_INITIATIVE_DICE` only when nothing was recorded -
+   * a participant who was never in VR, or one restored from an older session
+   * snapshot. Falling back to 1 unconditionally is the bug this replaces: it
+   * truncated any augmented decker to 1D6 the first time they jacked out.
+   *
+   * Routed through `changeParticipantDiceCount` like every other dice change,
+   * so a mid-combat restore rolls the regained dice and moves the running
+   * Score (p. 160), while a restore outside combat just writes the count.
+   */
+  private restorePhysicalDiceCount(
+    mp: MatrixParticipant,
+    options: DiceCountChangeOptions = {}
+  ): DiceCountChangeResult {
+    const restored = mp.preVrDiceCount ?? PHYSICAL_INITIATIVE_DICE;
+    mp.preVrDiceCount = null;
+    return this.changeParticipantDiceCount(mp, restored, options);
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {

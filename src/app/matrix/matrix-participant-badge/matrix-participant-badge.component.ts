@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Input, Output } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { MatrixParticipant, VRMode } from "Matrix";
+import { OsBand, osBandFor } from "app/services/os-tracking.service";
 
 @Component({
   standalone: true,
@@ -38,11 +39,20 @@ export class MatrixParticipantBadgeComponent {
     }
   }
 
-  get osTier(): "ok" | "alert" | "convergence" {
-    const os = this.participant?.overwatch ?? 0;
-    if (os >= 40) return "convergence";
-    if (os >= 20) return "alert";
-    return "ok";
+  /**
+   * Colour band for the OS chip.
+   *
+   * **Presentation only.** Only `convergence` (OS 40) is a printed threshold
+   * (p. 232); `building` and `high` are arbitrary cut points that exist so a
+   * rising score reads as rising pressure across the table, and they trigger
+   * nothing (RULINGS.md, 2026-08-29 "Overwatch Score banding below 40 is
+   * display-only").
+   *
+   * This replaces an `alert` tier at OS 20 that presented itself as a rule —
+   * SR5 has no Overwatch threshold below 40.
+   */
+  get osTier(): OsBand {
+    return osBandFor(this.participant?.overwatch ?? 0);
   }
 
   get blocksPhysical(): boolean {

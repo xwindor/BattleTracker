@@ -1,0 +1,117 @@
+<div class="mgn-container" [class.mgn-in-host]="insideHost">
+
+  <!-- ── Header bar ──────────────────────────────────────────────────── -->
+  <div class="mgn-header">
+    @if (insideHost) {
+    <span class="mgn-location-badge mgn-inside-host">
+      <i class="fas fa-server me-1"></i>Inside: {{ hostLabel }}
+    </span>
+    } @else {
+    <span class="mgn-location-badge mgn-public-space">
+      <i class="fas fa-globe me-1"></i>Public Space
+    </span>
+    }
+    @if (gmMode) {
+    <span class="mgn-gm-badge">GM VIEW</span>
+    }
+  </div>
+
+  <!-- ── SVG canvas ──────────────────────────────────────────────────── -->
+  @if (isEmpty) {
+  <div class="mgn-empty">
+    <i class="fas fa-project-diagram mgn-empty-icon"></i>
+    <span>No Matrix icons in this space.</span>
+  </div>
+  } @else {
+  <svg class="mgn-svg"
+    [attr.viewBox]="'0 0 ' + svgW + ' ' + svgH"
+    preserveAspectRatio="xMidYMid meet">
+
+    <!-- ── Background grid ─────────────────────────────────────────── -->
+    <defs>
+      <pattern id="mgGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,200,160,0.06)" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="800" height="460" fill="url(#mgGrid)"/>
+
+    <!-- ── Host label (inside-host view) ───────────────────────────── -->
+    @if (insideHost) {
+    <text class="mgn-canvas-host-label" x="400" y="20" text-anchor="middle">
+      {{ hostLabel }}
+    </text>
+    }
+
+    <!-- ── Nodes ───────────────────────────────────────────────────── -->
+    @for (node of displayNodes; track node.id) {
+    <g [attr.class]="nodeGroupClass(node)"
+       [attr.transform]="'translate(' + node.x + ',' + node.y + ')'">
+
+      <!-- Node body -->
+      <circle [attr.r]="nodeRadius(node)" class="mgn-node-body"/>
+
+      <!-- Symbol / icon text -->
+      <text class="mgn-node-symbol" text-anchor="middle" dominant-baseline="central">
+        {{ nodeSymbol(node) }}
+      </text>
+
+      <!-- Direct-connection plug overlay -->
+      @if (node.directConnection) {
+      <text class="mgn-dc-overlay" x="14" y="-14" text-anchor="middle" font-size="10">⚡</text>
+      }
+
+      <!-- GM visibility badge -->
+      @if (gmMode) {
+      <text class="mgn-vis-badge" [attr.x]="nodeRadius(node) - 4" [attr.y]="-nodeRadius(node) + 4"
+        text-anchor="middle" font-size="10">
+        {{ visBadge(node) }}
+      </text>
+      }
+
+      <!-- Name label -->
+      @if (node.visibility !== 'running-silent' || gmMode) {
+      <text class="mgn-node-label" [attr.y]="nodeRadius(node) + 14"
+        text-anchor="middle">
+        {{ node.label }}
+      </text>
+      } @else {
+      <text class="mgn-node-label mgn-label-ghost" [attr.y]="nodeRadius(node) + 14"
+        text-anchor="middle">■ Unknown</text>
+      }
+
+      <!-- Sub-label (type / visibility) -->
+      @if (node.subLabel) {
+      <text class="mgn-node-sublabel" [attr.y]="nodeRadius(node) + 25"
+        text-anchor="middle">
+        {{ node.subLabel }}
+      </text>
+      }
+
+      <!-- Mark dots -->
+      @if (markDots(node.marks)) {
+      <text class="mgn-mark-dots" [attr.y]="nodeRadius(node) + 36"
+        text-anchor="middle">
+        {{ markDots(node.marks) }}
+      </text>
+      }
+
+    </g>
+    }
+
+  </svg>
+  }
+
+  <!-- ── Legend ──────────────────────────────────────────────────────── -->
+  <div class="mgn-legend">
+    <span class="mgn-leg mgn-leg-persona-me">◉ Decker</span>
+    <span class="mgn-leg mgn-leg-host">⬛ Host</span>
+    <span class="mgn-leg mgn-leg-device">⬡ Device</span>
+    <span class="mgn-leg mgn-leg-file">▣ File</span>
+    <span class="mgn-leg mgn-leg-ic">◆ IC</span>
+    <span class="mgn-leg mgn-leg-unknown">■ Unknown</span>
+    @if (gmMode) {
+    <span class="mgn-leg">👁=Active 👻=Silent ✕=Hidden</span>
+    }
+  </div>
+
+</div>

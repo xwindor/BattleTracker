@@ -209,17 +209,34 @@ export const ALL_MATRIX_ACTION_NAMES: ReadonlySet<string> = new Set(
  * This is a subset of CYBERDECK_REQUIRED_ACTIONS — legal deck actions (Load
  * Program, Switch Attributes, etc.) are not in this map.
  */
-export const ILLEGAL_OS_ACTIONS: Record<string, number> = {
-  "Hack on the Fly":  1,
-  "Brute Force":      2,
-  "Snoop":            1,
-  "Crack File":       1,
-  "Spoof Command":    1,
-  "Format Device":    1,
-  "Data Spike":       1,
-  "Control Device":   1,
-  "Erase Mark":       1,
-};
+/**
+ * Matrix actions that generate Overwatch Score - i.e. the Attack and Sleaze
+ * actions (p. 244 groups them by limit).
+ *
+ * Deliberately a **set, not a table of amounts.** There is no per-action OS
+ * cost in SR5: one rule covers every illegal action - "When you perform an
+ * Attack or Sleaze action, your OS increases by the number of hits the target
+ * gets on its defense test" (p. 232). The amount therefore depends on the
+ * defender's roll, which this app never makes, so no number can be stored
+ * here. This was previously a `Record<string, number>` whose values (Hack on
+ * the Fly 1, Brute Force 2) implied a fixed per-action cost that does not
+ * exist; nothing ever read them except a `> 0` test. See
+ * `briefs/matrix-rules-verification.md` items 6-8.
+ *
+ * Used only to decide whether to remind the GM that Overwatch is owed once
+ * defense is resolved.
+ */
+export const ILLEGAL_OS_ACTIONS: ReadonlySet<string> = new Set([
+  "Hack on the Fly",
+  "Brute Force",
+  "Snoop",
+  "Crack File",
+  "Spoof Command",
+  "Format Device",
+  "Data Spike",
+  "Control Device",
+  "Erase Mark",
+]);
 
 export const DECLARED_ACTION_DESCRIPTIONS: Record<string, string> = {
   "Call a Shot": "Declare a called shot before attacking a vulnerable area. Must be combined with a Fire Weapon, Throw Weapon, or Melee Attack action.",

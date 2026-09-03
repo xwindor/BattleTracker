@@ -41,6 +41,25 @@ class CombatManager {
     this._combatTurn = val;
   }
 
+  /**
+   * A counter incremented every `endCombat()`, giving each combat encounter
+   * a session identity distinct from `combatTurn`'s bare number (round-5
+   * defect D-6). `combatTurn` resets to 1 whenever a combat ends, so on its
+   * own it cannot tell "Combat Turn 1 of this encounter" apart from "Combat
+   * Turn 1 of the next encounter, after this one ended". The Matrix module's
+   * `ICParticipant.spawnedInCombatGeneration` stamps the generation an IC was
+   * launched in alongside the turn number, so a host's `icActive` left over
+   * from a previous, already-ended combat does not produce a false
+   * "already launched this turn" warning the moment a brand-new combat
+   * reaches its own turn 1 (see `ICSpawnerComponent.sameTurnIC`). No public
+   * setter - only `endCombat()` advances it.
+   */
+  private _combatGeneration = 0;
+
+  get combatGeneration(): number {
+    return this._combatGeneration;
+  }
+
   private _initiativePass: number;
 
   get initiativePass(): number {
@@ -73,6 +92,7 @@ class CombatManager {
 
   endCombat() {
     this.combatTurn = 1;
+    this._combatGeneration++;
     this.currentActors.clear();
     if (this.started) {
       this.started = false;
