@@ -222,6 +222,16 @@ export interface SharedCombatState {
   // shared types are stable from Phase 1 onward).
   matrixTargets?: SharedMatrixTarget[];
   currentHostName?: string;
+  /**
+   * Per-decker mark count on the current host icon itself, keyed by decker
+   * name — the host icon's own marks, distinct from any `SharedMatrixTarget`
+   * inside it (p. 236). Consumed by
+   * `MatrixPlayerViewComponent.hostMarksRecord`
+   * (briefs/matrix-port-rules-correctness-spec.md appendix D). Purely
+   * additive: no producer exists yet, so this key is never present on the
+   * wire today.
+   */
+  currentHostMarks?: Record<string, number>;
 }
 
 /**

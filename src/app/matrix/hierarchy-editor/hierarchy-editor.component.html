@@ -1,5 +1,17 @@
 <div class="hier-editor">
 
+  <!-- ── Matrix Noise (GM-set reminder, round-4 D-13) ─────────────────────
+       Never applied to any dice pool — display only (SCOPE.md, Scope
+       Question B, briefs/matrix-port-rules-correctness-spec.md). -->
+  <div class="hier-noise-row">
+    <label class="hier-form-label" for="hier-noise-input">
+      <i class="fas fa-wave-square me-1"></i>Matrix Noise
+    </label>
+    <input id="hier-noise-input" type="number" class="hier-form-input hier-form-input-narrow"
+      [ngModel]="state.noise" (ngModelChange)="onNoiseChanged($event)" min="0">
+    <span class="hier-noise-hint text-muted small">Reminder only — never applied to any dice pool (pp. 231, 232).</span>
+  </div>
+
   <!-- ── Public Space ──────────────────────────────────────────────────── -->
   <div class="hier-tree-section">
     <div class="hier-section-header" (click)="togglePublicSpace()">
@@ -23,16 +35,10 @@
       @if (state.publicTargets.length === 0 && !isTargetFormForHost(null)) {
       <div class="hier-empty">No loose devices. Click "+ Loose Device" to add one.</div>
       }
-      @for (t of state.publicTargets; track t.id) {
-      <app-target-card
-        [target]="t"
-        [host]="null"
-        [activeDeckers]="activeDeckers"
-        [editing]="isEditingTarget(t)"
-        (editTarget)="openEditTarget(null, t)"
-        (deleteTarget)="deleteTarget(null, t)"
-        (cycleVisibilityRequested)="cycleVisibility(null, t)">
-      </app-target-card>
+      <!-- Nested by parentTargetId (Decision 7b) — weapons/files parented to
+           a device out on the open grid render indented beneath it. -->
+      @for (t of childrenOf(null); track t.id) {
+      <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: t, depth: 0 }"></ng-container>
       }
 
       <!-- Target form: public space -->
@@ -150,9 +156,14 @@
         <span class="hier-mark-entry">
           <span class="hier-mark-decker">{{ entry.deckerId }}</span>
           <span class="hier-mark-dots">{{ dots(entry.count) }}</span>
+          @if (host.propagatedMarks[entry.deckerId]) {
+          <i class="fas fa-link hier-propagated-badge"
+            ngbTooltip="At least one of these marks arrived by propagation from a slaved device on this host's WAN (p. 233), not a direct click here."
+            placement="top"></i>
+          }
           <button type="button" class="hier-mark-rm"
             (click)="removeHostMark(host, entry.deckerId)"
-            title="Remove 1 mark from host">×</button>
+            title="Remove 1 mark from host. If this host has a propagated mark from a slaved device, removing it here does not remove the device's own mark.">×</button>
         </span>
         }
         @if (hostAvailableDeckers(host).length > 0) {
@@ -334,5 +345,46 @@
       [disabled]="!targetForm.name.trim()">Save</button>
     <button type="button" class="hier-btn-cancel" (click)="closeTargetForm()">Cancel</button>
   </div>
+</div>
+</ng-template>
+
+<!-- ── Public-space target node (recursive — Decision 7b nesting) ────────── -->
+<ng-template #publicTargetNodeTpl let-t let-depth="depth">
+<div class="hier-public-node" [style.marginLeft.px]="depth * 18">
+  <app-target-card
+    [target]="t"
+    [host]="null"
+    [activeDeckers]="activeDeckers"
+    [editing]="isEditingTarget(t)"
+    (editTarget)="openEditTarget(null, t)"
+    (deleteTarget)="deleteTarget(null, t)"
+    (cycleVisibilityRequested)="cycleVisibility(null, t)">
+  </app-target-card>
+
+  <!-- Set/clear this target's parent — scoped to public-space targets;
+       weapons/files "parented to" a device out on the open grid
+       (Xavier, 2026-09-02). Marking a child propagates a mark up to its
+       parent, and onward up the chain (MatrixStateService.addMark()).
+       Device-only, both ends (Xavier's decision 8, 2026-09-03): only a
+       device ever propagates or receives a propagated mark, so the control
+       (and the choices it offers) only appear for a device target. -->
+  @if (canHaveParent(t)) {
+  <div class="hier-parent-row small">
+    <label class="hier-parent-label text-muted">Parent</label>
+    <select class="hier-parent-select" [ngModel]="t.parentTargetId ?? ''" (ngModelChange)="setParent(t, $event)">
+      <option value="">— None (top-level) —</option>
+      @for (opt of parentOptionsFor(t); track opt.id) {
+      <option [value]="opt.id">{{ opt.name }}</option>
+      }
+    </select>
+    @if (t.parentTargetId) {
+    <button type="button" class="hier-parent-clear-btn" (click)="clearParent(t)" title="Clear parent">✕</button>
+    }
+  </div>
+  }
+
+  @for (child of childrenOf(t.id); track child.id) {
+  <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: child, depth: depth + 1 }"></ng-container>
+  }
 </div>
 </ng-template>

@@ -47,6 +47,20 @@ export const DATA_PROCESSING_UNSET = 0;
  * in the initiative order at their Matrix initiative; the action planner is
  * what actually hides physical actions when this flag is true. We do NOT
  * touch the existing ooc flag (which would remove them from scheduling).
+ *
+ * This class carries no marks-placed record of its own. An earlier version
+ * had a `marksPlaced: Map<string, number>` field here that no production
+ * code ever wrote to — the marks a decker actually places live on the icon
+ * they mark (`MatrixHost.marks` / `MatrixTarget.marks`, both keyed by the
+ * decker's `name` — there is no separate decker id in this model), written
+ * through `MatrixStateService.addMark()` /
+ * `addMarkToHost()`. Keeping a second, always-empty mark record on the
+ * decker itself let a jack-out "clear the decker's marks" fix look
+ * implemented across several rounds while the actual mark records were
+ * untouched — deleted rather than wired up, so there is exactly one place
+ * marks live (round-4 defect D-9; see `MatrixStateService.jackOut()`, which
+ * now erases this decker's entries from every host's and target's own
+ * `marks` record instead).
  */
 export class MatrixParticipant extends Participant {
 
@@ -90,11 +104,6 @@ export class MatrixParticipant extends Participant {
   private _blocksPhysicalActions: boolean;
   get blocksPhysicalActions(): boolean { return this._blocksPhysicalActions; }
   set blocksPhysicalActions(val: boolean) { this._blocksPhysicalActions = val; }
-
-  // -- Marks placed by this decker on Matrix targets --
-  private _marksPlaced: Map<string, number>;
-  get marksPlaced(): Map<string, number> { return this._marksPlaced; }
-  set marksPlaced(val: Map<string, number>) { this._marksPlaced = val; }
 
   /**
    * The Initiative Dice count this participant had immediately before entering
@@ -144,7 +153,6 @@ export class MatrixParticipant extends Participant {
     this._overwatch = 0;
     this._jackedIn = false;
     this._blocksPhysicalActions = false;
-    this._marksPlaced = new Map<string, number>();
     this._preVrDiceCount = null;
   }
 
@@ -252,7 +260,6 @@ export class MatrixParticipant extends Participant {
     clone._overwatch = this._overwatch;
     clone._jackedIn = this._jackedIn;
     clone._blocksPhysicalActions = this._blocksPhysicalActions;
-    clone._marksPlaced = new Map(this._marksPlaced);
     clone._preVrDiceCount = this._preVrDiceCount;
 
     return clone;

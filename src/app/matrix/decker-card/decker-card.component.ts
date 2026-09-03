@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Input, OnChanges, Output } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { MatrixParticipant, VRMode } from "Matrix";
+import { osBandFor } from "app/services/os-tracking.service";
 
 @Component({
   standalone: true,
@@ -46,11 +47,16 @@ export class DeckerCardComponent implements OnChanges {
     }
   }
 
+  /**
+   * Colour band for the OS chip. Delegates to `osBandFor()`
+   * (`app/services/os-tracking.service.ts`) so this component carries no
+   * band cut-point literal of its own (RULINGS.md 2026-08-29, "Overwatch
+   * Score banding below 40 is display-only") — only `osBandFor()` decides
+   * where "low"/"building"/"high"/"convergence" begin, and only convergence
+   * (OS 40) is a printed threshold (p. 232).
+   */
   get osTierClass(): string {
-    const os = this.decker.overwatch;
-    if (os >= 40) return "os-convergence";
-    if (os >= 20) return "os-alert";
-    return "os-ok";
+    return "os-" + osBandFor(this.decker.overwatch);
   }
 
   get canSwitchMode(): boolean {

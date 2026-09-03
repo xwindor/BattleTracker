@@ -73,8 +73,15 @@
   letter-spacing: 0.03em;
 }
 
-.os-ok          { color: var(--matrix-text, #00ff9f); background: #0a1a0a; border: 1px solid #1a4a1a; }
-.os-alert       { color: #ffc107; background: #1a1200; border: 1px solid #856404; }
+/* Presentation-only Overwatch colour bands (RULINGS.md 2026-08-29,
+   "Overwatch Score banding below 40 is display-only"). The cut points
+   (15/30/40) live in exactly one place, `osBandFor()`
+   (app/services/os-tracking.service.ts) - none of the four classes below
+   carry a number of their own. Only `.os-convergence` corresponds to a
+   printed rule: 40 is the sole Overwatch threshold in SR5 (p. 232). */
+.os-low         { color: var(--matrix-text, #00ff9f); background: #0a1a0a; border: 1px solid #1a4a1a; }
+.os-building    { color: #9ec5fe; background: #031633; border: 1px solid #084298; }
+.os-high        { color: #ffc107; background: #1a1200; border: 1px solid #856404; }
 .os-convergence { color: #f8d7da; background: #2c0b0e; border: 1px solid #842029; }
 
 .os-threshold-label {
@@ -87,23 +94,6 @@
 
 .os-threshold-conv {
   color: #f8d7da;
-}
-
-.decker-conv-badge {
-  font-size: 0.58rem;
-  font-weight: 700;
-  color: #ff6b35;
-  background: #1a0500;
-  border: 1px solid #9a3900;
-  padding: 0.1rem 0.3rem;
-  border-radius: 3px;
-  letter-spacing: 0.04em;
-  animation: pulse-conv 1.2s ease-in-out infinite alternate;
-}
-
-@keyframes pulse-conv {
-  from { opacity: 0.65; }
-  to   { opacity: 1; }
 }
 
 /* ── Action row ───────────────────────────────────────────────────────────── */

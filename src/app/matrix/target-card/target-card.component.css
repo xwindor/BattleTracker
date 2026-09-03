@@ -222,3 +222,31 @@
   color: var(--matrix-text-dim, #7ab87a);
   border-color: #3a5a3a;
 }
+
+/* Round-5, Decision 9: propagation visibility (2026-09-03) */
+.tc-propagated-badge {
+  color: #ffb340;
+  font-size: 0.65rem;
+  margin-left: 0.15rem;
+  cursor: help;
+}
+
+.tc-propagation-preview {
+  color: #ffb340;
+  font-size: 0.7rem;
+  margin: 0 0.3rem;
+}
+
+/* Why the ✓ is disabled — shown inline rather than letting the button do
+   nothing when clicked. A nameless participant used to reach the picker as a
+   blank option, and confirming silently bailed on the falsy id. */
+.tc-add-mark-blocked {
+  color: #ff8a8a;
+  font-size: 0.7rem;
+  margin-left: 0.3rem;
+}
+
+.tc-confirm-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

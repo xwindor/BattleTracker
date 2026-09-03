@@ -26,6 +26,15 @@ export class MatrixPlayerViewComponent {
   /** Decker's current VR mode ('AR' | 'cold-sim' | 'hot-sim'). */
   @Input() myVrMode: string = "AR";
 
+  /**
+   * Per-decker mark count on the current host icon itself, keyed by decker
+   * name (`SharedCombatState.currentHostMarks`). `null`/missing means "no
+   * data broadcast yet" — additive wire state with no producer as of this
+   * pass (briefs/matrix-port-rules-correctness-spec.md appendix D); wiring a
+   * broadcaster is separate follow-up work.
+   */
+  @Input() hostMarksRecord: Record<string, number> | null = null;
+
   vrModeLabel(): string {
     switch (this.myVrMode) {
       case "hot-sim":   return "HOT SIM";
@@ -91,20 +100,21 @@ export class MatrixPlayerViewComponent {
   }
 
   /**
-   * Returns this decker's mark count on the current host.
-   * In SR5E marks are placed on the host, not on individual icons inside it;
-   * the per-target mark values all reflect the same host-level mark count.
-   * We take the highest value across all targets in the host so a freshly
-   * placed mark is visible even if other targets haven't been updated yet.
+   * Returns this decker's mark count on the current host icon itself.
+   *
+   * Marks are placed on individual icons — devices, personas, files, grids
+   * and hosts are each their own mark-bearing icon, up to three marks per
+   * icon (p. 236). A host icon's marks are therefore a fact about the host,
+   * not an aggregate over the targets inside it: a decker holding 2 marks on
+   * a device inside a host and 0 marks on the host itself has 0 marks on the
+   * host (pp. 236, 239), and this method must not report anything else.
+   *
+   * Reads `hostMarksRecord` (`SharedCombatState.currentHostMarks`), the
+   * host's own mark record — not `target.marks`, which belongs to the
+   * targets inside the host and says nothing about the host icon.
    */
   hostMarks(): number {
-    if (!this.myName || !this.currentHostName) return 0;
-    let max = 0;
-    for (const t of this.targets) {
-      if (t.hostName !== this.currentHostName) continue;
-      const m = t.marks[this.myName] ?? 0;
-      if (m > max) max = m;
-    }
-    return max;
+    if (!this.myName) return 0;
+    return this.hostMarksRecord?.[this.myName] ?? 0;
   }
 }

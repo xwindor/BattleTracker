@@ -26,13 +26,10 @@
   font-size: 0.9rem;
 }
 
-.os-action-delta {
+.os-prompt-help {
   font-size: 0.85rem;
-}
-
-.os-total-row {
-  font-size: 1rem;
-  color: #ccc;
+  color: #9aa8b8;
+  margin-bottom: 0.75rem;
 }
 
 .os-modify-row {
@@ -42,4 +39,10 @@
 
 .os-custom-input {
   width: 120px;
+}
+
+.os-input-error {
+  font-size: 0.8rem;
+  color: #ff6b6b;
+  margin-top: 0.35rem;
 }

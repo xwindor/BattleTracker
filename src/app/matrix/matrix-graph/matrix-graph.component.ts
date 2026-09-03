@@ -264,10 +264,44 @@ export class MatrixGraphComponent implements OnInit, OnChanges, OnDestroy {
     }
   }
 
+  /**
+   * Presentation cap on how many decker-groups this method will render,
+   * before folding the rest into a "+N" summary. Not a rule — bounds the
+   * glyph count on an icon several deckers have marked (round-4 defect D-6:
+   * an earlier version had no cap and no owner key at all — `Object.values`
+   * discarded which decker was which — so five deckers at three marks each
+   * rendered 19 unlabelled glyphs).
+   */
+  private static readonly MARK_DOT_MAX_OWNERS = 4;
+
+  /**
+   * Marks are placed per-persona, each capped at 3 on a given icon (p. 236)
+   * — they are not one pooled total. Summing across deckers before drawing
+   * dots made three deckers holding one mark each render identically to one
+   * decker holding three (round-3 defect, `matrix-graph.component.ts:267-271`
+   * in `briefs/matrix-port-rules-correctness-spec.md`'s appendix). Render one
+   * dot-group per decker instead, each prefixed with that decker's initials
+   * so the render actually says *whose* marks they are (round-4 defect D-6 —
+   * the round-3 fix grouped dots per decker but discarded the owner key
+   * entirely, `Object.values(marks)` rather than `Object.entries`), capped at
+   * `MARK_DOT_MAX_OWNERS` groups with a "+N" overflow count rather than
+   * growing unbounded.
+   */
   markDots(marks: Record<string, number>): string {
-    const total = Object.values(marks).reduce((s, v) => s + v, 0);
-    if (!total) return "";
-    return "●".repeat(Math.min(3, total));
+    const entries = Object.entries(marks).filter(([, count]) => count > 0);
+    const shown = entries.slice(0, MatrixGraphComponent.MARK_DOT_MAX_OWNERS).map(
+      ([owner, count]) => `${this.ownerInitials(owner)}${"●".repeat(Math.min(3, count))}`
+    );
+    const overflow = entries.length - shown.length;
+    return shown.join(" · ") + (overflow > 0 ? ` +${overflow}` : "");
+  }
+
+  /** Up to two initials from an owner key (a decker's `name`), for `markDots()`. */
+  private ownerInitials(owner: string): string {
+    const parts = owner.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "?";
+    const initials = parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[1][0];
+    return initials.toUpperCase();
   }
 
   private mapTargetKind(type: string): GraphNode["kind"] {

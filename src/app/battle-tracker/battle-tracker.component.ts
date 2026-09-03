@@ -36,6 +36,7 @@ import {
 } from "Grunts";
 import type { GruntDamageType, GruntMergeResult, GruntStatblock } from "Grunts";
 import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
+import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
 import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
 import { getInterruptLabel, getInterruptDescription, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
@@ -481,6 +482,7 @@ const GM_LOG_TEXT = {
     ConditionMonitorComponent,
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
+    MatrixRunPanelComponent,
     AstralBadgeComponent
   ]
 })
@@ -1207,6 +1209,59 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   isMatrix(p: IParticipant): p is MatrixParticipant {
     return p instanceof MatrixParticipant;
+  }
+
+  /**
+   * Whether the Matrix run panel is shown. Off by default.
+   *
+   * The Matrix module is still parked (`CLAUDE.md`, "Current focus") and this
+   * is the first and only thing that mounts it — `<app-matrix-run-panel>` had
+   * no consumer anywhere in the app, so the hierarchy editor, access-host
+   * panel, matrix graph and decker cards were all compiled, type-checked and
+   * unit-tested but unreachable at runtime. This toggle exists so the module
+   * can be exercised by hand; it is deliberately not the finished GM workflow
+   * (see `docs/MATRIX_MODULE_PLAN.md`).
+   */
+  showMatrixPanel = false;
+
+  toggleMatrixPanel(): void {
+    this.showMatrixPanel = !this.showMatrixPanel;
+  }
+
+  /**
+   * Every Matrix-capable participant that can actually hold a mark, for the
+   * run panel's decker cards and the hierarchy editor's mark controls.
+   *
+   * **Nameless participants are excluded.** `MatrixHost.marks` and
+   * `MatrixTarget.marks` are keyed by `decker.name` (a string), so a
+   * participant with no name cannot be a mark key at all. The constructor
+   * seeds one untouched blank row on every tab load (see
+   * `isUnusedPlaceholder()`), which without this filter reached the +Mark
+   * picker as an option with an empty label and an empty value — the picker
+   * rendered blank and its confirm button silently did nothing, because
+   * `TargetCardComponent.confirmAddMark()` bails on a falsy id.
+   *
+   * Filtering here rather than in the card keeps the rule in one place: a
+   * participant with no name is not addressable by any Matrix record, so it
+   * is not a decker as far as this module is concerned.
+   */
+  get matrixActiveDeckers(): MatrixParticipant[] {
+    return CombatManager.participants.items
+      .filter((p): p is MatrixParticipant => this.isMatrix(p) && (p.name ?? "").trim() !== "");
+  }
+
+  /**
+   * Routes the run panel's jack-in request through the same funnel the GM's
+   * own row button uses, so the dice-count and Initiative handling stay in one
+   * place rather than being duplicated for the panel.
+   */
+  onMatrixJackInRequested(event: { decker: MatrixParticipant; mode: VRMode }): void {
+    this.setPendingVrMode(event.decker, event.mode);
+    this.gmJackIn(event.decker);
+  }
+
+  onMatrixJackOutRequested(decker: MatrixParticipant): void {
+    this.gmJackOut(decker);
   }
 
   /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
@@ -7759,21 +7814,30 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sort();
   }
 
+  /**
+   * Jack Out: clear VR mode, restore physical initiative, reboot the device
+   * you're using — reset OS to zero and erase this decker's marks (p. 242).
+   *
+   * Round-5 defect D-3: an earlier version of this method zeroed OS inline
+   * (`this.osTracking.resetOS(mp)`) and never touched any mark record at
+   * all, so `MatrixStateService.jackOut()`'s mark erasure (D-9) lived only
+   * in a service method this, the actual GM-facing jack-out button, never
+   * called. Routed through that service method instead of duplicating its
+   * logic, so there is exactly one place "jacking out" is defined.
+   *
+   * `vrMode`/`jackedIn`/`blocksPhysicalActions` and the OS reset are all now
+   * `matrixState.jackOut()`'s responsibility — see that method's doc comment
+   * for the `VRMode.None` (not `VRMode.AR`) reconciliation between this
+   * button and the service method.
+   */
   gmJackOut(p: IParticipant): void {
     if (!this.isMatrix(p)) return;
     const mp = p as MatrixParticipant;
-    // Jack Out: clear VR mode, restore physical initiative.
-    mp.vrMode = VRMode.None;
-    mp.jackedIn = false;
-    mp.blocksPhysicalActions = false;
+    this.matrixState.jackOut(mp);
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.getParticipantIntuition(mp);
     mp.baseIni = reaction + intuition;
     this.pendingVrModes.set(p, VRMode.AR);
-    // Jacking out reboots the device you are using (p. 240), and a reboot
-    // "resets your OS to zero and all of your marks ... are erased" (p. 242).
-    // No cooldown and no residual OS (RULINGS.md, 2026-08-29).
-    this.osTracking.resetOS(mp);
     // Mid-combat jack out — base stat delta automatic via baseIni; the dice
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
     // 8, p. 160). Outside a running combat the funnel just writes the count.

@@ -11,7 +11,7 @@
     <label class="form-label fw-semibold">IC Type</label>
     <select class="form-select" [(ngModel)]="selectedType">
       @for (type of icTypes; track type) {
-      <option [value]="type" [disabled]="isTypeRunning(type)">
+      <option [value]="type">
         {{ type }}{{ isTypeRunning(type) ? ' (running)' : '' }}
       </option>
       }
@@ -20,11 +20,23 @@
 
   <div class="ic-preview">
     <div class="ic-preview-row">
+      <span class="ic-preview-label">Host Data Processing</span>
+      <span class="ic-preview-value" [class.text-danger]="!hostDataProcessingSet">
+        {{ hostDataProcessingSet ? host.dataProcessing : 'not set' }}
+      </span>
+    </div>
+    <div class="ic-preview-row">
       <span class="ic-preview-label">Initiative</span>
+      @if (hostDataProcessingSet) {
       <span class="ic-preview-value">
         {{ initiativeBase }} + {{ initiativeDice }}d6
         &nbsp;<span class="text-muted">({{ initiativeMin }}–{{ initiativeMax }})</span>
       </span>
+      } @else {
+      <span class="ic-preview-value text-danger">
+        Needs host Data Processing — formula is host Data Processing + Host Rating (+4D6, p. 247)
+      </span>
+      }
     </div>
     <div class="ic-preview-row">
       <span class="ic-preview-label">Matrix CM</span>
@@ -44,14 +56,28 @@
   </div>
   }
 
+  @if (selectedType === 'Patrol') {
+  <div class="mt-2 text-muted small">
+    <i class="fas fa-info-circle me-1"></i>Patrol IC prints "Attack: n/a" (p. 248) — it never makes an
+    Attack action and so never takes the failed-Attack damage other IC risk. That is unrelated to its
+    Initiative: Patrol still rolls the same 4D6 as every other IC type (p. 247).
+  </div>
+  }
+
   <div class="mt-2 text-muted small">
     <i class="fas fa-info-circle me-1"></i>IC spawns at start of Combat Turn only (SR5E p.247).
+    @if (turnKnown) {
+    Current Combat Turn: {{ combatTurn }}.
+    } @else {
+    Combat hasn't started (or this panel wasn't told the current turn) — the one-IC-per-Combat-Turn
+    check above can't run without it.
+    }
   </div>
 </div>
 
 <div class="modal-footer">
   <button type="button" class="btn btn-outline-secondary" (click)="onCancel()">Cancel</button>
-  <button type="button" class="btn btn-danger" (click)="onSpawn()" [disabled]="!canSpawn">
+  <button type="button" class="btn btn-danger" (click)="onSpawn()">
     <i class="fas fa-shield-alt me-1"></i>Spawn {{ selectedType }} IC
   </button>
 </div>

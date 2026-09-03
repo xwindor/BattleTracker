@@ -90,21 +90,27 @@ export class OsTrackingService {
   }
 
   /**
-   * Reset a decker's Overwatch Score to zero and erase the marks they placed.
+   * Reset a decker's Overwatch Score to zero.
    *
-   * Both halves are printed: "When you reboot the device your persona is on,
-   * your OS is reset to zero and all of your marks, as well as the ones others
-   * may have put on your icon, are erased" (p. 242); "you're as pure and
-   * innocent as the driven snow" (p. 232). Jack Out reboots the device you are
-   * using (p. 240) and so resets in the same way.
+   * "When you start using the Matrix after a fresh boot, you're as pure and
+   * innocent as the driven snow" (p. 232). There is deliberately **no
+   * cooldown, minimum offline duration or residual OS** (RULINGS.md,
+   * 2026-08-29).
    *
-   * There is deliberately **no cooldown, minimum offline duration or residual
-   * OS** (RULINGS.md, 2026-08-29). Marks are per-persona, so this clears only
-   * this decker's marks; a teammate's marks on the same icon are untouched.
+   * This service has no access to the Matrix run state (hosts, targets), so
+   * it cannot erase marks itself — a reboot/jack-out also erases "all of
+   * your marks, as well as the ones others may have put on your icon"
+   * (p. 242), but that erasure has to walk every host's and target's own
+   * `marks` record, which only `MatrixStateService` can reach. Callers that
+   * need the *full* reboot/jack-out reset (OS **and** marks) should use
+   * `MatrixStateService.jackOut()`, which calls this method for the OS half
+   * and does the marks erasure itself (round-4 defect D-9 — an earlier
+   * version of this method cleared a `MatrixParticipant.marksPlaced` Map
+   * that no production code ever wrote marks into, which left the decker's
+   * real marks, on `MatrixHost.marks` / `MatrixTarget.marks`, untouched).
    */
   resetOS(decker: MatrixParticipant): void {
     decker.overwatch = 0;
-    decker.marksPlaced.clear();
   }
 
   getOSAlert(decker: MatrixParticipant): OsAlertLevel {

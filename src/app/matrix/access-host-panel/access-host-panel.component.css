@@ -160,22 +160,7 @@
   flex: 1 1 auto;
 }
 
-/* ── Dice area ─────────────────────────────────────────────────────── */
-
-.ahp-dice-area {
-  margin-bottom: 8px;
-  border: 1px solid #1e2d3d;
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-/* ── Post-roll ─────────────────────────────────────────────────────── */
-
-.ahp-hits-summary {
-  margin-bottom: 8px;
-  font-size: 0.82rem;
-  color: #c8d6e5;
-}
+/* ── Marks placed ──────────────────────────────────────────────────── */
 
 .ahp-marks-row {
   margin-bottom: 6px;
@@ -205,17 +190,11 @@
   border-color: #00c8ff;
 }
 
-.ahp-os-preview {
-  font-size: 0.8rem;
-  color: #c8d6e5;
-  margin-bottom: 10px;
-}
-
-.ahp-roll-prompt {
-  font-size: 0.78rem;
+.ahp-marks-penalty-hint {
+  font-size: 0.72rem;
   color: #5b8fa8;
   font-style: italic;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 /* ── Action buttons ────────────────────────────────────────────────── */

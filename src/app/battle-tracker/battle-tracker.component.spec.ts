@@ -7,6 +7,8 @@ import { IParticipant } from 'Combat/Participants/IParticipant';
 import { SharedCombatState } from 'app/services/session-sync.service';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
+import { MatrixHost } from 'Matrix/MatrixHost';
+import { MatrixTarget } from 'Matrix/MatrixTarget';
 import { AstralParticipant } from 'Magic';
 import { LogHandler } from 'Logging';
 import { interruptTable } from 'InterruptTable';
@@ -786,7 +788,7 @@ describe('BattleTrackerComponent', () => {
   });
 
   describe('Overwatch Score resets on jack-out (pp. 240, 242)', () => {
-    it('zeroes OS and erases the decker\'s marks when jacking out', () => {
+    it('zeroes OS when jacking out', () => {
       const mp = new MatrixParticipant();
       mp.name = 'Decker';
       mp.dataProcessing = 7;
@@ -798,24 +800,80 @@ describe('BattleTrackerComponent', () => {
       component.setPendingVrMode(mp, VRMode.HotSim);
       component.gmJackIn(mp);
       component.osTracking.addOS(mp, 22, 'test');
-      mp.marksPlaced.set('camera-1', 2);
       expect(mp.overwatch).toBe(22);
 
       component.gmJackOut(mp);
 
       expect(mp.overwatch).toBe(0);
-      expect(mp.marksPlaced.size).toBe(0);
     });
 
-    it('resetOS clears marks as well as the score', () => {
+    it('resetOS clears the score', () => {
       const mp = new MatrixParticipant();
       mp.overwatch = 31;
-      mp.marksPlaced.set('host-a', 3);
 
       component.osTracking.resetOS(mp);
 
       expect(mp.overwatch).toBe(0);
-      expect(mp.marksPlaced.size).toBe(0);
+    });
+
+    // Round-5 defect D-3: `gmJackOut()` called `this.osTracking.resetOS(mp)`
+    // directly and never called `MatrixStateService.jackOut()`, so the mark
+    // erasure that method implements (D-9) lived only in a service method
+    // this, the actual GM-facing jack-out button, never invoked. These two
+    // assertions were removed from this describe block in an earlier round
+    // with the (at-the-time accurate, but now stale) justification that
+    // `battle-tracker` doesn't wire in any hosts/targets — restored here,
+    // strengthened to assert against the real records
+    // (`MatrixHost.marks` / `MatrixTarget.marks`) rather than the deleted
+    // `MatrixParticipant.marksPlaced` Map, now that `gmJackOut()` is routed
+    // through `MatrixStateService.jackOut()` and so has something real to
+    // erase.
+    it('erases the decker\'s marks on a host and on a target inside it', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+
+      const host = new MatrixHost({ id: 'h1', name: 'TestHost', rating: 4 });
+      host.marks['Decker'] = 2;
+      const target = new MatrixTarget({ id: 't1', type: 'device', context: 'host', linkedHostId: 'h1' });
+      target.marks['Decker'] = 3;
+      host.targets.push(target);
+      component.matrixState.addHost(host);
+
+      component.gmJackOut(mp);
+
+      expect(host.marks['Decker']).toBeUndefined();
+      expect(target.marks['Decker']).toBeUndefined();
+    });
+
+    it('erases marks another decker or IC placed on this decker\'s own persona icon (p. 242, "as well as the ones others may have put on your icon")', () => {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(mp);
+      component['participantReactions'].set(mp, 4);
+      component['participantIntuitions'].set(mp, 5);
+      CombatManager.started = false;
+      component.setPendingVrMode(mp, VRMode.HotSim);
+      component.gmJackIn(mp);
+
+      const persona = new MatrixTarget({
+        id: 'persona-decker', type: 'persona', context: 'public', personaOwner: 'Decker'
+      });
+      persona.marks['KillerIC-1'] = 2;
+      component.matrixState.addTarget(null, persona);
+
+      component.gmJackOut(mp);
+
+      expect(persona.marks['KillerIC-1']).toBeUndefined();
     });
   });
 

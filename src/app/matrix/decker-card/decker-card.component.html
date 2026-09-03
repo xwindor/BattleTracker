@@ -15,16 +15,10 @@
     @if (decker.jackedIn) {
     <span class="decker-os" [ngClass]="osTierClass">
       OS {{ decker.overwatch }}
-      @if (decker.overwatchAlert === 'ic-alert') {
-      <span class="os-threshold-label">IC ALERT</span>
-      } @else if (decker.overwatchAlert === 'convergence') {
+      @if (decker.overwatchAlert === 'convergence') {
       <span class="os-threshold-label os-threshold-conv">CONV</span>
       }
     </span>
-    }
-
-    @if (decker.hostConverged) {
-    <span class="decker-conv-badge">HOST CONV</span>
     }
   </div>
 

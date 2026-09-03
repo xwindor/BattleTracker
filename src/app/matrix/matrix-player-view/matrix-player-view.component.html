@@ -1,6 +1,10 @@
 <div class="mpv-wrap">
 
-  <!-- Decker status: VR mode chip only (OS requires Baby Monitor program — out of scope) -->
+  <!-- Decker status: VR mode chip only. Overwatch Score is a secret the GM
+       keeps (p. 232); the only ways a player learns their own current value
+       are the Check Overwatch Score action (p. 238) and the Baby Monitor
+       program (p. 245) — this tracker plays neither for the decker, so no
+       Overwatch renders here under any state. -->
   <div class="mpv-decker-status">
     <span class="mpv-vr-chip" [class]="vrModeClass()">{{ vrModeLabel() }}</span>
     <span class="mpv-vr-label">VR Mode</span>
@@ -43,14 +47,24 @@
     <span class="mpv-type-badge">{{ typeLabel(target.type) }}</span>
     }
 
-    <!-- Matrix CM: always shown as damage / max -->
+    <!-- Matrix CM: damage only, never the maximum. Matrix Perception can
+         reveal an icon's damage boxes, but capacity is not on that list
+         (p. 235), and RULINGS.md 2026-08-13 bars Condition Monitor maximums
+         from any log or shared view - the maximum is exactly the "how many
+         more hits" figure that ruling withheld. (Scope Question C,
+         briefs/matrix-port-rules-correctness-spec.md, approved 2026-09-01.)
+
+         Type guard: hosts and files have no Matrix Condition Monitor at all
+         (p. 229) - they cannot be attacked with Matrix damage, so there is no
+         track to show a number for. Rendering "0" here for a host or file
+         would imply a track that does not exist (brief defect 7). -->
+    @if (target.type !== 'host' && target.type !== 'file') {
     <span class="mpv-cm"
-      [ngbTooltip]="'Matrix CM: ' + target.matrixDamage + ' / ' + target.matrixHealth"
+      [ngbTooltip]="'Matrix damage: ' + target.matrixDamage"
       placement="top">
       <span [class.mpv-cm-dmg]="target.matrixDamage > 0">{{ target.matrixDamage }}</span>
-      <span class="mpv-cm-sep">/</span>
-      <span class="mpv-cm-max">{{ target.matrixHealth }}</span>
     </span>
+    }
 
   </div>
   }

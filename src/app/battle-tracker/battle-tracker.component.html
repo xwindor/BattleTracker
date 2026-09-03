@@ -99,6 +99,30 @@
     </div>
   </div>
   <br>
+  <!-- Matrix run panel. Off by default and deliberately behind a toggle: the
+       Matrix module is still parked (CLAUDE.md, "Current focus"), and this is
+       the only place in the app that mounts <app-matrix-run-panel>. Before
+       this, the hierarchy editor, access-host panel, matrix graph and decker
+       cards were compiled and unit-tested but unreachable at runtime, so none
+       of the module could be exercised by hand. This is not the finished GM
+       workflow - see docs/MATRIX_MODULE_PLAN.md. -->
+  <div class="row mb-2">
+    <div class="col-12">
+      <button type="button" class="btn btn-sm btn-outline-info"
+              (click)="toggleMatrixPanel()">
+        <i class="fas fa-microchip me-1"></i>{{ showMatrixPanel ? "Hide" : "Show" }} Matrix panel
+      </button>
+      @if (showMatrixPanel) {
+      <div class="mt-2">
+        <app-matrix-run-panel
+          [activeDeckers]="matrixActiveDeckers"
+          (jackInRequested)="onMatrixJackInRequested($event)"
+          (jackOutRequested)="onMatrixJackOutRequested($event)">
+        </app-matrix-run-panel>
+      </div>
+      }
+    </div>
+  </div>
   <div class="row">
     <!-- Open Decision 2: the 9/12 main column applies only while the details
          panel is actually open. With nothing selected it used to waste 25% of

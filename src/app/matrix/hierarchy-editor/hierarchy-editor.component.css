@@ -727,3 +727,67 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--matrix-text-dim, #7ab87a);
   border-color: #3a5a3a;
 }
+
+/* ── Noise (round-4 D-13) ─────────────────────────────────────────────────── */
+
+.hier-noise-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #0d1f0d;
+}
+
+.hier-noise-hint {
+  flex: 1 1 auto;
+}
+
+/* ── Open-grid parent/child (Decision 7b) ────────────────────────────────── */
+
+.hier-public-node {
+  border-left: 1px solid #1a3a1a;
+  padding-left: 0.35rem;
+}
+
+.hier-parent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.35rem 0.3rem;
+}
+
+.hier-parent-label {
+  font-size: 0.68rem;
+  min-width: auto;
+}
+
+.hier-parent-select {
+  font-size: 0.68rem;
+  font-family: inherit;
+  padding: 0.05rem 0.2rem;
+  background: #0a1a0a;
+  border: 1px solid #1a4a1a;
+  color: var(--matrix-text, #00ff9f);
+  border-radius: 2px;
+  max-width: 10rem;
+}
+
+.hier-parent-clear-btn {
+  background: transparent;
+  border: none;
+  color: #4a5a4a;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.hier-parent-clear-btn:hover { color: #cc4444; }
+
+/* Round-5, Decision 9: propagation visibility (2026-09-03) */
+.hier-propagated-badge {
+  color: #ffb340;
+  font-size: 0.65rem;
+  margin-left: 0.15rem;
+  cursor: help;
+}

@@ -221,7 +221,17 @@ turn boundary — `isOver()` is.
 There is also `endCombat()`, a manual teardown the turn loop never calls:
 `combatTurn` and `initiativePass` back to 1, `currentActors` cleared,
 `started` false, `softReset()` on everyone. It does **not** fire
-`onCombatTurnEnded`.
+`onCombatTurnEnded`. It also increments `combatGeneration`, a read-only
+counter (get-only, no setter — only `endCombat()` advances it) added in the
+Matrix rules-correctness pass (round-5 defect D-6) to give each combat
+encounter a session identity distinct from `combatTurn`'s bare number:
+`combatTurn` resets to 1 on every `endCombat()`, so on its own it cannot tell
+"turn 1 of this encounter" apart from "turn 1 of the next encounter, after
+this one ended". The Matrix module stamps `ICParticipant` with both
+`spawnedOnCombatTurn` and `spawnedInCombatGeneration` when an IC launches, so
+an IC left in a host's `icActive` list from a previous, already-ended combat
+does not falsely read as "already launched this turn" the moment a brand-new
+combat also reaches turn 1 (`ICSpawnerComponent.sameTurnIC`).
 
 **What resets at a turn boundary** (via `softReset()`): `diceIni` → 0,
 `currentInitiativeScore` → back to the bare Initiative attribute (the old
@@ -571,8 +581,52 @@ plus a UI-gating flag:
   lose.
   `MatrixParticipant`'s per-mode counts are still absolute and have the same
   modelling limitation; that is a deferred Matrix-module concern.
-- `ICParticipant` sets `baseIni = hostRating * 2` and `dices` to 2 (Patrol IC)
-  or 4 (everything else) in its constructor, both through the no-roll paths.
+- `ICParticipant` sets `baseIni = hostDataProcessing + hostRating` (Table
+  Ruling 1, RULINGS.md 2026-08-28 "IC Initiative Attribute = Host Data
+  Processing + Host Rating", restored 2026-09-01 — a house rule, not a
+  printed value; `baseIni` stays an ordinary editable field afterwards) and
+  `dices` to a flat 4 for every IC type, including Patrol (p. 247 states no
+  exception), both through the no-roll paths. An earlier version of this
+  class set `baseIni = hostRating * 2` (that number is the IC attack dice
+  pool printed elsewhere on p. 247, an unrelated quantity) and gave
+  Patrol only 2 dice, citing a "Table 4 / Table 24" that does not exist in
+  print; corrected in `briefs/matrix-port-rules-correctness-spec.md`. Its
+  `hostRating`/`hostDataProcessing` setters recompute `baseIni` **and**
+  `physicalHealth` (IC's Matrix Condition Monitor, reused from the inherited
+  slot — see below) through a shared `recomputeFromHost()`, so a GM
+  correcting a host's Rating post-spawn does not leave the IC on stale
+  values (round-4 defect D-4). `recomputeFromHost()` now recomputes each
+  field only while it has never been hand-edited (round-5 defect D-8):
+  `ICParticipant` overrides the `baseIni`/`physicalHealth` accessors purely
+  to flag a direct write from outside the class, and `recomputeFromHost()`
+  writes through `super.baseIni =`/`super.physicalHealth =` so its own
+  writes never trip that flag — a GM who types a real Initiative Score for a
+  boss IC no longer loses it the moment they fix a typo in the host's
+  Rating. The flag survives `clone()`.
+- `ICParticipant` overrides three more `Participant` members to keep IC's
+  Matrix-only damage model from leaking meat-body semantics (round-4,
+  Xavier's decision 4 and "missed interaction 4"):
+  - `wm` always returns `0` — Matrix damage carries no dice-pool or
+    Initiative penalty below a completely full monitor (p. 228; `RULINGS.md`
+    restored 2026-09-02, "Matrix damage applies no penalty until the monitor
+    is full"), so the base `Participant.wm` formula (which derives a wound
+    modifier from `physicalDamage`/`physicalHealth`) must not run for IC.
+  - `ooc` depends only on `physicalDamage >= physicalHealth` (the reused
+    Matrix Condition Monitor slot) plus the shared `manualOoc` "bench this
+    participant" flag — never on the inherited Stun fields. IC has "its own
+    Condition Monitor" (singular, p. 247) and no printed Stun track;
+    `stunHealth`/`stunDamage` stay declared (removing them would touch
+    shared `Participant` plumbing) but are inert for IC (`RULINGS.md`
+    2026-09-02, "IC has a Matrix Condition Monitor only; the inherited Stun
+    track is dropped").
+  - `overflowHealth` is pinned to `0` — Matrix damage has no overflow phase;
+    an IC's monitor filling crashes it outright (p. 247) rather than
+    starting an overflow track the way a meat Physical Condition Monitor
+    does. The inherited `overflowHealth` (default 4, `Participant.ts`) is a
+    meat-only concept with no IC reader today, but the override forces an
+    explicit "not applicable" signal for any future caller (round-4,
+    "missed interaction 4"; same reasoning as the `wm`/`ooc` overrides
+    above, addended onto the same `RULINGS.md` 2026-09-02 entry).
 
 `blocksPhysicalActions` is explicitly *not* the same as `ooc` — per the
 in-code comment on `MatrixParticipant`, a jacked-in decker stays fully

@@ -7,7 +7,8 @@ import {
   MatrixHost,
   MatrixTarget,
   MatrixTargetType,
-  MatrixTargetVisibility
+  MatrixTargetVisibility,
+  matrixConditionMonitor
 } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { TargetCardComponent } from "app/matrix/target-card/target-card.component";
@@ -50,11 +51,33 @@ const BLANK_TARGET_FORM: TargetFormState = {
   deviceRating: 4, linkedParticipantId: ""
 };
 
-function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, rating: number): number {
+/**
+ * Matrix Condition Monitor for a target being saved from this form, or
+ * `undefined` when the type has none at all.
+ *
+ * - `device` and `persona`: 8 + ceil(Device Rating / 2) (p. 228). A persona's
+ *   damage lands on the device it runs on, not on a monitor of its own
+ *   (p. 228), so it is sized off the same Device Rating field the GM enters
+ *   for a device — never the hard-coded rating of 1 the port used to pass.
+ * - `ic`: 8 + ceil(Host Rating / 2) — IC borrows its host's rating, it has no
+ *   Device Rating of its own (p. 247; size per Table Ruling 2, RULINGS.md
+ *   2026-08-29).
+ * - `file` and `host`: no Matrix Condition Monitor at all — hosts and files
+ *   cannot be attacked with Matrix damage (p. 229). No `default` branch: an
+ *   unhandled `MatrixTargetType` is a compile error here, not a silent 9
+ *   (choke point — see briefs/matrix-port-rules-correctness-spec.md
+ *   appendix G1).
+ */
+function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, hostRating: number): number | undefined {
   switch (type) {
-    case "file": return 8;
-    case "device": return 8 + Math.ceil(deviceRating / 2);
-    default:       return 8 + Math.ceil(rating / 2);
+    case "device":
+    case "persona":
+      return matrixConditionMonitor(deviceRating);
+    case "ic":
+      return matrixConditionMonitor(hostRating);
+    case "file":
+    case "host":
+      return undefined;
   }
 }
 
@@ -115,6 +138,9 @@ export class HierarchyEditorComponent {
   }
 
   private suggestAsdfForForm(rating: number): void {
+    // "The ratings of these attributes are usually (Host Rating), (Host
+    // Rating + 1), (Host Rating + 2), and (Host Rating + 3), in any order"
+    // (p. 247, `rules/pages/p0249.txt:36-40`) — round-4 citation, D-12.
     const vals = [rating, rating + 1, rating + 2, rating + 3];
     for (let i = vals.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -128,14 +154,13 @@ export class HierarchyEditorComponent {
     if (!f.name.trim()) return;
 
     const rating = Math.max(1, Math.min(12, f.rating));
-    const health = 8 + Math.ceil(rating / 2);
+    // No matrixHealth here: hosts have no Matrix Condition Monitor (p. 229).
 
     if (f.isEditing && f.host) {
       this.matrixState.updateHost(f.host, {
         name: f.name.trim(), rating,
         attack: f.attack, sleaze: f.sleaze,
-        dataProcessing: f.dataProcessing, firewall: f.firewall,
-        matrixHealth: health
+        dataProcessing: f.dataProcessing, firewall: f.firewall
       });
       this.expandedHosts.add(f.host.id);
     } else {
@@ -143,8 +168,7 @@ export class HierarchyEditorComponent {
         id: this.matrixState.generateTargetId().replace("t-", "h-"),
         name: f.name.trim(), rating,
         attack: f.attack, sleaze: f.sleaze,
-        dataProcessing: f.dataProcessing, firewall: f.firewall,
-        matrixHealth: health
+        dataProcessing: f.dataProcessing, firewall: f.firewall
       });
       this.matrixState.addHost(host);
       if (f.setActive) {
@@ -205,7 +229,13 @@ export class HierarchyEditorComponent {
     if (!f.name.trim()) return;
 
     const host = f.hostId ? (this.state.hosts.find(h => h.id === f.hostId) ?? null) : null;
-    const health = calcMatrixHealth(f.type, Math.max(1, f.deviceRating), 1);
+    const deviceRating = Math.max(1, f.deviceRating);
+    // "ic" targets have no Device Rating of their own — they borrow the
+    // containing host's Rating (p. 247); fall back to deviceRating only for
+    // an "ic" target sitting in public space, which should not happen from
+    // this form (IC Target is only offered when a host is selected) but
+    // leaves no undefined rating if it ever does.
+    const health = calcMatrixHealth(f.type, deviceRating, host?.rating ?? deviceRating) ?? 0;
 
     if (f.isEditing && f.target) {
       this.matrixState.updateTarget(f.target, {
@@ -233,7 +263,34 @@ export class HierarchyEditorComponent {
     this.targetForm = { ...BLANK_TARGET_FORM };
   }
 
+  /**
+   * Removes a target. Round-5 defect D-4: an open-grid target that is
+   * itself a parent left its children pointing at a now-deleted
+   * `parentTargetId` — `childrenOf()` filters on the parent's id, so those
+   * children simply stopped rendering anywhere, while still counting toward
+   * the "Public Space" header count and still broadcasting to the player
+   * view. Direct children are re-homed to top level (their `parentTargetId`
+   * cleared) rather than deleted with the parent — deleting a GM's tracked
+   * icons as a side effect of deleting an unrelated one is a bigger surprise
+   * than un-nesting them. Made explicit rather than silent: if the target
+   * being deleted has children, the GM is told how many and asked to
+   * confirm before anything happens.
+   */
   deleteTarget(host: MatrixHost | null, target: MatrixTarget): void {
+    if (!host) {
+      const children = this.childrenOf(target.id);
+      if (children.length > 0) {
+        const names = children.map(c => c.name).join(", ");
+        const ok = window.confirm(
+          `"${target.name}" has ${children.length} item(s) parented to it (${names}). ` +
+          `Deleting it will move them to top level, not delete them. Continue?`
+        );
+        if (!ok) return;
+        for (const child of children) {
+          this.matrixState.updateTarget(child, { parentTargetId: undefined });
+        }
+      }
+    }
     this.matrixState.removeTarget(host, target);
     if (this.targetForm.target === target) this.targetForm = { ...BLANK_TARGET_FORM };
   }
@@ -369,5 +426,96 @@ export class HierarchyEditorComponent {
 
   removeHostMark(host: MatrixHost, deckerId: string): void {
     this.matrixState.removeMarkFromHost(host, deckerId);
+  }
+
+  // ── Noise (GM-set reminder, round-4 D-13) ───────────────────────────────
+
+  /**
+   * The Hierarchy editor is the natural home for the noise reminder — it is
+   * the GM's one screen for scene-level Matrix state that isn't a decker or
+   * a host. `MatrixRunState.noise` initialises to 0 and, before this, had no
+   * editor anywhere: `access-host-panel.component.html` only ever *reads*
+   * it (`matrixState.state.noise > 0`), so the reminder could never actually
+   * appear (brief round-4 defect D-13). Never applied to any dice pool —
+   * display only (`SCOPE.md`, Scope Question B).
+   */
+  onNoiseChanged(value: number): void {
+    this.matrixState.setNoise(Number(value) || 0);
+  }
+
+  // ── Open-grid parent/child targets (Decision 7b, 2026-09-02) ────────────
+
+  /**
+   * Every public-space target directly parented under `parentId` (`null` for
+   * the top-level, unparented targets). Used to render public space as a
+   * nested tree instead of a flat list, so "a weapon parented to a device"
+   * is visibly nested under that device (Xavier, 2026-09-02: "devices on
+   * the open grid have other devices like weapons and files parented to
+   * it"). Host-contained targets are unaffected — `parentTargetId` is scoped
+   * to `context === "public"` targets only; a host-contained target's
+   * containment is `linkedHostId`, a different mechanism (Decision 7a).
+   */
+  childrenOf(parentId: string | null): MatrixTarget[] {
+    return this.state.publicTargets.filter(t => (t.parentTargetId ?? null) === parentId);
+  }
+
+  /** All ids reachable by walking down from `id` (used to keep the parent picker acyclic). */
+  private descendantIds(id: string): Set<string> {
+    const result = new Set<string>();
+    const stack = [id];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      for (const child of this.childrenOf(current)) {
+        if (!result.has(child.id)) {
+          result.add(child.id);
+          stack.push(child.id);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Valid parent choices for `target`: every other public-space **device**,
+   * excluding `target` itself and anything already beneath it — picking a
+   * descendant as your own parent would create a cycle
+   * `MatrixStateService.addMark()`'s propagation walk guards against at
+   * runtime, but there is no reason to let the GM create one from this form
+   * in the first place.
+   *
+   * Device-only (Xavier's decision 8, 2026-09-03): a mark only ever
+   * propagates onto a device or a host — never a file, persona, IC, or
+   * nested host — so offering one of those as a parent choice would build a
+   * link `MatrixStateService.propagateMarkUp()` will never actually walk
+   * through. See `MatrixTarget.parentTargetId`'s doc comment for the full
+   * citation.
+   */
+  parentOptionsFor(target: MatrixTarget): MatrixTarget[] {
+    const excluded = this.descendantIds(target.id);
+    excluded.add(target.id);
+    return this.state.publicTargets.filter(t => !excluded.has(t.id) && t.type === "device");
+  }
+
+  /**
+   * Whether `target` should offer a "Parent" control at all — device-only
+   * (Xavier's decision 8, 2026-09-03): only a device ever propagates a mark
+   * it receives, so parenting a file/persona/IC/nested-host under something
+   * else would be a control that can never do anything.
+   */
+  canHaveParent(target: MatrixTarget): boolean {
+    return target.type === "device";
+  }
+
+  setParent(target: MatrixTarget, parentId: string): void {
+    if (!parentId) {
+      this.clearParent(target);
+      return;
+    }
+    if (!this.parentOptionsFor(target).some(t => t.id === parentId)) return; // self/descendant guard
+    this.matrixState.updateTarget(target, { parentTargetId: parentId });
+  }
+
+  clearParent(target: MatrixTarget): void {
+    this.matrixState.updateTarget(target, { parentTargetId: undefined });
   }
 }

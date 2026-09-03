@@ -20,19 +20,19 @@
     <button type="button" class="ahp-btn-method ahp-btn-hotf"
       (click)="startFlow('hack-on-fly')"
       [disabled]="activeDeckers.length === 0"
-      ngbTooltip="Cracking + Logic [DP] vs Firewall + Data Processing. OS +2 per mark." placement="top">
+      ngbTooltip="Hacking + Logic [Sleaze] v. Intuition + Firewall (p. 240)." placement="top">
       <i class="fas fa-bolt me-1"></i>Hack on the Fly
     </button>
     <button type="button" class="ahp-btn-method ahp-btn-bf"
       (click)="startFlow('brute-force')"
       [disabled]="activeDeckers.length === 0"
-      ngbTooltip="Cracking + Logic [ATK] vs Firewall + Intuition. OS marks × 4." placement="top">
+      ngbTooltip="Cybercombat + Logic [Attack] v. Willpower + Firewall (p. 238)." placement="top">
       <i class="fas fa-hammer me-1"></i>Brute Force
     </button>
     <button type="button" class="ahp-btn-method ahp-btn-dc"
       (click)="toggleDirectPanel()"
       [disabled]="activeDeckers.length === 0"
-      ngbTooltip="Physical access — 1 mark on host, 0 OS." placement="top">
+      ngbTooltip="Physical cable connection. Sets access method; places no marks (pp. 232, 236)." placement="top">
       <i class="fas fa-plug me-1"></i>Direct Connection
     </button>
   </div>
@@ -43,8 +43,16 @@
   <div class="ahp-flow-panel ahp-flow-dc">
     <div class="ahp-flow-title"><i class="fas fa-plug me-1"></i>Direct Connection</div>
     <div class="ahp-flow-hint">
-      Physical access to a device on the host network. Grants 1 mark on the host automatically.
-      <br>No test needed. 0 OS.
+      Physical access to a device on the host's network — no test, and no marks placed automatically
+      (pp. 232, 236). A direct connection ignores all noise modifiers and all modifiers from being on a
+      different grid or the public grid (pp. 231, 232). A slaved device attacked this way loses access
+      to its master's ratings and must defend on its own (p. 233).
+      <br>0 OS — connecting a cable is not an Attack or Sleaze action, so it accrues no Overwatch (p. 232).
+      <br>If the decker goes on to Brute Force or Hack on the Fly this device and succeeds, a mark on the
+      device also marks the host — even through this direct connection (p. 233) — but that still takes a
+      successful test. Mark the device in the Hierarchy editor (Targets → +Mark) and the host mark is
+      placed automatically (Decision 7a, RULINGS.md 2026-08-29 restored 2026-09-02) — nothing left to
+      place by hand.
     </div>
 
     @if (activeDeckers.length > 1) {
@@ -60,7 +68,7 @@
 
     <div class="ahp-flow-actions">
       <button type="button" class="ahp-btn-apply" (click)="applyDirectConnection()">
-        <i class="fas fa-check me-1"></i>Apply (1 Mark, 0 OS)
+        <i class="fas fa-check me-1"></i>Apply — 0 Marks, 0 OS
       </button>
       <button type="button" class="ahp-btn-cancel" (click)="toggleDirectPanel()">Cancel</button>
     </div>
@@ -88,12 +96,14 @@
 
     <div class="ahp-flow-hint">
       @if (flow === 'hack-on-fly') {
-      Roll: <strong>Cracking + Logic [DP]</strong> vs <strong>Firewall + Data Processing</strong>
+      Test: <strong>Hacking + Logic [Sleaze]</strong> v. <strong>Intuition + Firewall</strong> (p. 240)
       } @else {
-      Roll: <strong>Cracking + Logic [ATK]</strong> vs <strong>Firewall + Intuition</strong>
+      Test: <strong>Cybercombat + Logic [Attack]</strong> v. <strong>Willpower + Firewall</strong> (p. 238)
       }
+      — rolled at the table or with the battle tracker's own dice roller elsewhere; this panel does not
+      roll it for you.
       @if (matrixState.state.noise > 0) {
-      <span class="ahp-noise-warn"> — Noise penalty: −{{ matrixState.state.noise }}</span>
+      <span class="ahp-noise-warn"> — Noise (reminder only, never applied to any roll): −{{ matrixState.state.noise }}</span>
       }
     </div>
 
@@ -109,51 +119,41 @@
     </div>
     }
 
-    <!-- Dice roller -->
-    <div class="ahp-dice-area">
-      <app-dice-roller (rolledEvent)="onRolled($event)"></app-dice-roller>
+    <!-- Round-5 validator defect 10: currentHostMarksForSelectedDecker was
+         computed and used by marksThatWillLand/applyLabel but never rendered
+         on its own, so the GM could only learn the current count indirectly
+         by picking a number and reading the Apply label. -->
+    <div class="ahp-field-row ahp-current-marks-row">
+      <label class="ahp-field-label">Current marks on host</label>
+      <span class="ahp-current-marks-value">{{ currentHostMarksForSelectedDecker }} / 3</span>
     </div>
 
-    <!-- Post-roll: marks and OS -->
-    @if (rolled) {
-    <div class="ahp-post-roll">
-      <div class="ahp-hits-summary">
-        Hits: <strong>{{ hitCount }}</strong> / {{ lastRollValues.length }} dice
-      </div>
-
-      <div class="ahp-field-row ahp-marks-row">
-        <label class="ahp-field-label">Marks gained</label>
-        <div class="ahp-marks-btns">
-          @for (n of [0, 1, 2, 3]; track n) {
-          <button type="button" class="ahp-mark-btn" [class.selected]="marksGained === n"
-            (click)="marksGained = n">{{ n }}</button>
-          }
-        </div>
-      </div>
-
-      <div class="ahp-os-preview">
-        @if (flow === 'hack-on-fly') {
-        Suggested OS: <strong class="text-danger">+{{ suggestedOS }}</strong>
-        ({{ marksGained }} mark{{ marksGained !== 1 ? 's' : '' }} × 2)
-        } @else {
-        Suggested OS: <strong class="text-danger">+{{ suggestedOS }}</strong>
-        ({{ marksGained }} mark{{ marksGained !== 1 ? 's' : '' }} × 4)
+    <!-- Marks placed this attempt — recorded from an outcome already resolved
+         at the table, not declared here and not derived from any roll (marks
+         are just recorded and tracked, never rolled or compared here). 0 is a
+         valid, deliberately-chosen entry for a failed attempt that still
+         accrued Overwatch — but nothing is pre-selected, so the GM must pick
+         one explicitly before Apply is enabled (Decision 6, 2026-09-02). -->
+    <div class="ahp-field-row ahp-marks-row">
+      <label class="ahp-field-label">Marks placed this attempt</label>
+      <div class="ahp-marks-btns">
+        @for (n of [0, 1, 2, 3]; track n) {
+        <button type="button" class="ahp-mark-btn" [class.selected]="marksThisAttempt === n"
+          (click)="marksThisAttempt = n">{{ n }}</button>
         }
       </div>
-
-      <div class="ahp-flow-actions">
-        <button type="button" class="ahp-btn-apply" (click)="confirmAccess()">
-          Apply OS &amp; Set Access
-        </button>
-        <button type="button" class="ahp-btn-cancel" (click)="cancelFlow()">Cancel</button>
-      </div>
     </div>
-    } @else {
-    <div class="ahp-roll-prompt">Roll above, then set marks gained below.</div>
+    <div class="ahp-marks-penalty-hint">
+      Reminder for the GM assembling their own dice pool at the table (not applied by this app) —
+      going for 2 marks costs −4 dice, 3 marks costs −10 dice; 1 mark costs nothing (pp. 238, 240).
+    </div>
+
     <div class="ahp-flow-actions">
+      <button type="button" class="ahp-btn-apply" [disabled]="!canApply" (click)="confirmAccess()">
+        {{ applyLabel }}
+      </button>
       <button type="button" class="ahp-btn-cancel" (click)="cancelFlow()">Cancel</button>
     </div>
-    }
 
   </div>
   }
