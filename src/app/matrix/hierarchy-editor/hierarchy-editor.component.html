@@ -69,13 +69,13 @@
   <div class="hier-form">
     <div class="hier-form-title">New Host</div>
     <div class="hier-form-row">
-      <label class="hier-form-label">Name</label>
-      <input type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
-        placeholder="Host name" maxlength="60" autofocus>
+      <label class="hier-form-label" for="hier-add-host-name">Name</label>
+      <input #hostNameInput id="hier-add-host-name" type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
+        placeholder="Host name" maxlength="60">
     </div>
     <div class="hier-form-row">
-      <label class="hier-form-label">Rating</label>
-      <input type="number" class="hier-form-input hier-form-input-narrow"
+      <label class="hier-form-label" for="hier-add-host-rating">Rating</label>
+      <input id="hier-add-host-rating" type="number" class="hier-form-input hier-form-input-narrow"
         [(ngModel)]="hostForm.rating" [min]="1" [max]="12">
       <button type="button" class="hier-suggest-btn" (click)="suggestAsdf()"
         ngbTooltip="Shuffle A/S/D/F from Rating" placement="top">
@@ -83,8 +83,8 @@
       </button>
     </div>
     <div class="hier-form-row hier-asdf-row">
-      <label class="hier-form-label">A/S/D/F</label>
-      <input type="number" class="hier-form-input hier-form-input-stat"
+      <label class="hier-form-label" for="hier-add-host-attack">A/S/D/F</label>
+      <input id="hier-add-host-attack" type="number" class="hier-form-input hier-form-input-stat"
         [(ngModel)]="hostForm.attack" min="1" max="20" placeholder="A">
       <input type="number" class="hier-form-input hier-form-input-stat"
         [(ngModel)]="hostForm.sleaze" min="1" max="20" placeholder="S">
@@ -189,13 +189,13 @@
       <div class="hier-form hier-form-inset">
         <div class="hier-form-title">Edit Host</div>
         <div class="hier-form-row">
-          <label class="hier-form-label">Name</label>
-          <input type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
+          <label class="hier-form-label" for="hier-edit-host-name">Name</label>
+          <input id="hier-edit-host-name" type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
             placeholder="Host name" maxlength="60">
         </div>
         <div class="hier-form-row">
-          <label class="hier-form-label">Rating</label>
-          <input type="number" class="hier-form-input hier-form-input-narrow"
+          <label class="hier-form-label" for="hier-edit-host-rating">Rating</label>
+          <input id="hier-edit-host-rating" type="number" class="hier-form-input hier-form-input-narrow"
             [(ngModel)]="hostForm.rating" [min]="1" [max]="12">
           <button type="button" class="hier-suggest-btn" (click)="suggestAsdf()"
             ngbTooltip="Shuffle A/S/D/F from Rating" placement="top">
@@ -203,8 +203,8 @@
           </button>
         </div>
         <div class="hier-form-row hier-asdf-row">
-          <label class="hier-form-label">A/S/D/F</label>
-          <input type="number" class="hier-form-input hier-form-input-stat"
+          <label class="hier-form-label" for="hier-edit-host-attack">A/S/D/F</label>
+          <input id="hier-edit-host-attack" type="number" class="hier-form-input hier-form-input-stat"
             [(ngModel)]="hostForm.attack" min="1" max="20" placeholder="A">
           <input type="number" class="hier-form-input hier-form-input-stat"
             [(ngModel)]="hostForm.sleaze" min="1" max="20" placeholder="S">
@@ -294,14 +294,14 @@
   </div>
 
   <div class="hier-form-row">
-    <label class="hier-form-label">Name</label>
-    <input type="text" class="hier-form-input" [(ngModel)]="targetForm.name"
+    <label class="hier-form-label" for="hier-target-name">Name</label>
+    <input id="hier-target-name" type="text" class="hier-form-input" [(ngModel)]="targetForm.name"
       placeholder="Target name" maxlength="60">
   </div>
 
   <div class="hier-form-row">
-    <label class="hier-form-label">Type</label>
-    <select class="hier-form-select" [(ngModel)]="targetForm.type">
+    <label class="hier-form-label" for="hier-target-type">Type</label>
+    <select id="hier-target-type" class="hier-form-select" [(ngModel)]="targetForm.type">
       <option value="device">Device</option>
       <option value="file">File</option>
       <option value="persona">Persona</option>
@@ -313,16 +313,16 @@
 
   @if (targetForm.type === 'device') {
   <div class="hier-form-row">
-    <label class="hier-form-label">Device Rating</label>
-    <input type="number" class="hier-form-input hier-form-input-narrow"
+    <label class="hier-form-label" for="hier-target-device-rating">Device Rating</label>
+    <input id="hier-target-device-rating" type="number" class="hier-form-input hier-form-input-narrow"
       [(ngModel)]="targetForm.deviceRating" [min]="1" [max]="12">
   </div>
   }
 
   @if (targetForm.type === 'persona') {
   <div class="hier-form-row">
-    <label class="hier-form-label">Decker Link</label>
-    <select class="hier-form-select" [(ngModel)]="targetForm.linkedParticipantId">
+    <label class="hier-form-label" for="hier-target-decker-link">Decker Link</label>
+    <select id="hier-target-decker-link" class="hier-form-select" [(ngModel)]="targetForm.linkedParticipantId">
       <option value="">— None —</option>
       @for (d of activeDeckers; track d.name) {
       <option [value]="d.name">{{ d.name }}</option>
@@ -332,8 +332,8 @@
   }
 
   <div class="hier-form-row">
-    <label class="hier-form-label">Visibility</label>
-    <select class="hier-form-select" [(ngModel)]="targetForm.visibility">
+    <label class="hier-form-label" for="hier-target-visibility">Visibility</label>
+    <select id="hier-target-visibility" class="hier-form-select" [(ngModel)]="targetForm.visibility">
       <option value="hidden">HIDDEN — GM prep, not on the Matrix yet</option>
       <option value="running-silent">RUNNING SILENT — broadcasting covertly; needs Matrix Perception to spot</option>
       <option value="active">ACTIVE — broadcasting normally; player sees full detail</option>
@@ -370,8 +370,8 @@
        (and the choices it offers) only appear for a device target. -->
   @if (canHaveParent(t)) {
   <div class="hier-parent-row small">
-    <label class="hier-parent-label text-muted">Parent</label>
-    <select class="hier-parent-select" [ngModel]="t.parentTargetId ?? ''" (ngModelChange)="setParent(t, $event)">
+    <label class="hier-parent-label text-muted" [attr.for]="'hier-parent-' + t.id">Parent</label>
+    <select [attr.id]="'hier-parent-' + t.id" class="hier-parent-select" [ngModel]="t.parentTargetId ?? ''" (ngModelChange)="setParent(t, $event)">
       <option value="">— None (top-level) —</option>
       @for (opt of parentOptionsFor(t); track opt.id) {
       <option [value]="opt.id">{{ opt.name }}</option>

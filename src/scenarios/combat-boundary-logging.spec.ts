@@ -615,7 +615,7 @@ describe('Action Log entries for combat structural boundaries', () => {
   // `nextIniPass()` produced.
   describe('AC4 - no phantom pass-start line on a turn-ending Next Pass click', () => {
     it('produces End Combat Turn N and no Start/End Initiative Pass line for the phantom pass', async () => {
-      const a = makeScored('A', 5, 5); // Score 10, sole participant
+      makeScored('A', 5, 5); // Score 10, sole participant
 
       await component.btnStartRound_Click();
       actCurrent(); // A acts -> pass 1 ends (Score unchanged, still > 0)

@@ -21,7 +21,7 @@ export class ICSpawnerComponent implements OnInit {
    * is, rather than this component reaching into the `CombatManager`
    * singleton itself (Xavier's decision 5, 2026-09-02). `null` means "not
    * supplied" — this component has **no consumer anywhere in the app** as of
-   * round-4 (verified: `spawn`/`cancel` are never subscribed to), so nothing
+   * round-4 (verified: `spawn`/`cancelled` are never subscribed to), so nothing
    * currently passes a value here. The future parent that wires this
    * component in must bind `[combatTurn]="combatManager.combatTurn"`
    * alongside `[combatStarted]="combatManager.started"` and
@@ -53,8 +53,11 @@ export class ICSpawnerComponent implements OnInit {
   /** Emits the chosen ICType when the GM confirms spawn. */
   @Output() readonly spawn = new EventEmitter<ICType>();
 
-  /** Emits when the GM cancels. */
-  @Output() readonly cancel = new EventEmitter<void>();
+  /**
+   * Emits when the GM cancels. Named `cancelled`, not `cancel`: an output
+   * named for a standard DOM event shadows it for any parent that binds one.
+   */
+  @Output() readonly cancelled = new EventEmitter<void>();
 
   selectedType: ICType = ICType.Patrol;
 
@@ -250,6 +253,6 @@ export class ICSpawnerComponent implements OnInit {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.cancelled.emit();
   }
 }

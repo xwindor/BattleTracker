@@ -3,7 +3,7 @@ import {
 } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { Subscription } from "rxjs";
-import { MatrixParticipant, MatrixRunState } from "Matrix";
+import { MatrixParticipant } from "Matrix";
 import { MatrixStateService } from "app/services/matrix-state.service";
 import { SharedMatrixTarget } from "app/services/session-sync.service";
 

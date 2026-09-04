@@ -3,13 +3,13 @@
     <i class="fas fa-shield-alt me-2"></i>Spawn IC
     <span class="host-info">{{ host.name }} &mdash; Rating {{ host.rating }}</span>
   </h5>
-  <button type="button" class="btn-close btn-close-white" (click)="onCancel()"></button>
+  <button type="button" class="btn-close btn-close-white" aria-label="Close" (click)="onCancel()"></button>
 </div>
 
 <div class="modal-body">
   <div class="mb-3">
-    <label class="form-label fw-semibold">IC Type</label>
-    <select class="form-select" [(ngModel)]="selectedType">
+    <label class="form-label fw-semibold" for="ic-spawner-type">IC Type</label>
+    <select id="ic-spawner-type" class="form-select" [(ngModel)]="selectedType">
       @for (type of icTypes; track type) {
       <option [value]="type">
         {{ type }}{{ isTypeRunning(type) ? ' (running)' : '' }}

@@ -129,7 +129,6 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     let fixture: ComponentFixture<AccessHostPanelComponent>;
     let component: AccessHostPanelComponent;
     let matrixState: MatrixStateService;
-    let osTracking: OsTrackingService;
     let modal: NgbModal;
     let host: MatrixHost;
     let decker: MatrixParticipant;
@@ -143,7 +142,6 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       fixture = TestBed.createComponent(AccessHostPanelComponent);
       component = fixture.componentInstance;
       matrixState = TestBed.inject(MatrixStateService);
-      osTracking = TestBed.inject(OsTrackingService);
       modal = TestBed.inject(NgbModal);
 
       host = new MatrixHost({

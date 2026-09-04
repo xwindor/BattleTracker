@@ -24,7 +24,7 @@ export class MatrixPlayerViewComponent {
   @Input() currentHostName: string | undefined = undefined;
 
   /** Decker's current VR mode ('AR' | 'cold-sim' | 'hot-sim'). */
-  @Input() myVrMode: string = "AR";
+  @Input() myVrMode = "AR";
 
   /**
    * Per-decker mark count on the current host icon itself, keyed by decker

@@ -1053,7 +1053,7 @@ describe('Grunt naming on add, and grunts from CRB statblocks (briefs/grunt-nami
   });
 
   it('D9 regression - opening then cancelling any add dialog writes no entry to the local Action Log', () => {
-    const openers: Array<() => void> = [
+    const openers: (() => void)[] = [
       () => component.btnAddParticipant_Click(),
       () => component.btnAddGrunt_Click(),
       () => component.btnAddNpcRow_Click(),
@@ -1109,7 +1109,7 @@ describe('Grunt naming on add, and grunts from CRB statblocks (briefs/grunt-nami
   });
 
   it('defect 10 (fix round 2) - the "Lieutenant of" dropdown is offered for a grunt, not for a player character', () => {
-    const row = commitRowAdd('Ancients', 2, { statblockId: 'pr1-grunt' });
+    commitRowAdd('Ancients', 2, { statblockId: 'pr1-grunt' });
     const boss = commitGruntAdd('Boss', { statblockId: 'pr1-lieutenant' });
     const pc = commitParticipantAdd('Cayman');
 

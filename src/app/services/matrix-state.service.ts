@@ -126,7 +126,6 @@ export class MatrixStateService {
   }
 
   setCurrentHost(id: string | null): void {
-    const previous = this.state.currentHostId;
     this.state.currentHostId = id; 
     this.stateChange$.next();
   }
@@ -150,8 +149,6 @@ export class MatrixStateService {
   createOrSetHost(name: string, rating: number): MatrixHost {
     const existing = this.getCurrentHost();
     if (existing) {
-      const prevName = existing.name;
-      const prevRating = existing.rating;
       existing.name = name;
       existing.rating = rating;
       // No matrixHealth write: hosts have no Matrix Condition Monitor
@@ -270,7 +267,7 @@ export class MatrixStateService {
   /** Applies a partial field update to a MatrixTarget (name, type, rating, etc.). */
   updateTarget(target: MatrixTarget, fields: Partial<MatrixTarget>): void {
     const prev: Partial<MatrixTarget> = {};
-    for (const k of Object.keys(fields) as Array<keyof MatrixTarget>) {
+    for (const k of Object.keys(fields) as (keyof MatrixTarget)[]) {
       (prev as Record<string, unknown>)[k] = target[k];
     }
     Object.assign(target, fields); 
@@ -291,7 +288,7 @@ export class MatrixStateService {
     fields: Partial<Pick<MatrixHost, "name" | "rating" | "attack" | "sleaze" | "dataProcessing" | "firewall">>
   ): void {
     const prev: typeof fields = {};
-    for (const k of Object.keys(fields) as Array<keyof typeof fields>) {
+    for (const k of Object.keys(fields) as (keyof typeof fields)[]) {
       (prev as Record<string, unknown>)[k] = host[k];
     }
     Object.assign(host, fields); 

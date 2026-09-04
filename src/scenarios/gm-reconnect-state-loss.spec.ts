@@ -14,7 +14,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BattleTrackerComponent } from 'app/battle-tracker/battle-tracker.component';
 import { appConfig } from 'app/app.config';
-import { CombatManager, StatusEnum, IParticipant } from 'Combat';
+import { CombatManager, StatusEnum } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
 import { AstralParticipant } from 'Magic';
 import { interruptTable } from 'InterruptTable';

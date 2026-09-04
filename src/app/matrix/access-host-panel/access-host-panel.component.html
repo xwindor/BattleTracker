@@ -57,8 +57,8 @@
 
     @if (activeDeckers.length > 1) {
     <div class="ahp-field-row">
-      <label class="ahp-field-label">Decker</label>
-      <select class="ahp-select" [(ngModel)]="directDeckerId">
+      <label class="ahp-field-label" for="ahp-direct-decker">Decker</label>
+      <select id="ahp-direct-decker" class="ahp-select" [(ngModel)]="directDeckerId">
         @for (d of activeDeckers; track d.name) {
         <option [value]="d.name">{{ d.name }}</option>
         }
@@ -110,8 +110,8 @@
     <!-- Decker selector -->
     @if (activeDeckers.length > 1) {
     <div class="ahp-field-row">
-      <label class="ahp-field-label">Decker</label>
-      <select class="ahp-select" [(ngModel)]="selectedDeckerId">
+      <label class="ahp-field-label" for="ahp-decker">Decker</label>
+      <select id="ahp-decker" class="ahp-select" [(ngModel)]="selectedDeckerId">
         @for (d of activeDeckers; track d.name) {
         <option [value]="d.name">{{ d.name }}</option>
         }
@@ -124,7 +124,7 @@
          on its own, so the GM could only learn the current count indirectly
          by picking a number and reading the Apply label. -->
     <div class="ahp-field-row ahp-current-marks-row">
-      <label class="ahp-field-label">Current marks on host</label>
+      <span class="ahp-field-label">Current marks on host</span>
       <span class="ahp-current-marks-value">{{ currentHostMarksForSelectedDecker }} / 3</span>
     </div>
 
@@ -135,8 +135,8 @@
          accrued Overwatch — but nothing is pre-selected, so the GM must pick
          one explicitly before Apply is enabled (Decision 6, 2026-09-02). -->
     <div class="ahp-field-row ahp-marks-row">
-      <label class="ahp-field-label">Marks placed this attempt</label>
-      <div class="ahp-marks-btns">
+      <span class="ahp-field-label" id="ahp-marks-caption">Marks placed this attempt</span>
+      <div class="ahp-marks-btns" role="group" aria-labelledby="ahp-marks-caption">
         @for (n of [0, 1, 2, 3]; track n) {
         <button type="button" class="ahp-mark-btn" [class.selected]="marksThisAttempt === n"
           (click)="marksThisAttempt = n">{{ n }}</button>

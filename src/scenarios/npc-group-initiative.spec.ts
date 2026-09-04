@@ -267,7 +267,7 @@ describe('S3 - mid-Combat-Turn wound: the house rule under test (Decision 1)', (
 
   it('applies the change immediately, within the same Initiative Pass', () => {
     const row = makeRolledRow('Gangers', 7, 2, 8, ['G1']);
-    const rival = makeRolledParticipant('Rival', 8, 1, 6); // 14, below the row
+    makeRolledParticipant('Rival', 8, 1, 6); // 14, below the row
     CombatManager.started = true;
     expect(actingOrder()).toEqual(['Gangers', 'Rival']);
 

@@ -28,7 +28,7 @@ import { NgbActiveModal } from '@ng-bootstrap/ng-bootstrap';
 })
 export class OsPromptComponent {
   /** Action name(s) this Overwatch entry is for — display only, no numbers. */
-  @Input() actionEntries: Array<{ name: string }> = [];
+  @Input() actionEntries: { name: string }[] = [];
   @Input() deckerName = '';
 
   /** Starts empty — there is no suggested value to pre-fill (p. 232). */

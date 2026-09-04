@@ -4,8 +4,8 @@
     <div class="card-body">
       <div class="row g-2">
         <div class="col-12 col-sm-6 col-md-3">
-          <label class="form-label">Room</label>
-          <input type="text" class="form-control" [(ngModel)]="room" placeholder="Room code">
+          <label for="pv-room" class="form-label">Room</label>
+          <input id="pv-room" type="text" class="form-control" [(ngModel)]="room" placeholder="Room code">
         </div>
         <div class="col-12 col-sm-6 col-md-3 d-flex align-items-end">
           <button type="button" class="btn btn-primary w-100" (click)="join()" [disabled]="!room">
@@ -62,9 +62,9 @@
       @if (joinChoice === 'claim') {
       <div data-testid="player-claim-panel">
         <div class="mb-2 cli-claim-panel">
-          <label class="form-label">Claim existing unclaimed character</label>
+          <label for="pv-claim-character" class="form-label">Claim existing unclaimed character</label>
           <div class="d-flex gap-2 cli-claim-row">
-            <select class="form-select" [(ngModel)]="selectedClaimParticipantId">
+            <select id="pv-claim-character" class="form-select" [(ngModel)]="selectedClaimParticipantId">
               <option value="">Select character</option>
               @for (participant of unclaimedParticipants; track participant.id) {
               <!-- `<option>` cannot hold a child badge element, so a downed
@@ -95,38 +95,38 @@
         <div class="cli-create-grid mb-2">
           <div class="row g-0 mb-0 cli-create-row">
             <div class="col-12 col-sm-6 col-md-3 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-character">Character</label>
-              <input type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
+              <label for="pv-character" class="form-label cli-field-label cli-label-character">Character</label>
+              <input id="pv-character" type="text" class="form-control" [(ngModel)]="characterName" placeholder="Character name">
             </div>
             <div class="col-6 col-sm-3 col-md-1 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-initdice">Init Dice</label>
-              <input type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
+              <label for="pv-init-dice" class="form-label cli-field-label cli-label-initdice">Init Dice</label>
+              <input id="pv-init-dice" type="number" class="form-control" [(ngModel)]="initiativeDice" min="1">
             </div>
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-overflow">Overflow</label>
-              <input type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
+              <label for="pv-overflow" class="form-label cli-field-label cli-label-overflow">Overflow</label>
+              <input id="pv-overflow" type="number" class="form-control" [(ngModel)]="overflowHealth" min="1">
             </div>
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-reaction">Reaction</label>
-              <input type="number" class="form-control" [(ngModel)]="reaction" min="0">
+              <label for="pv-reaction" class="form-label cli-field-label cli-label-reaction">Reaction</label>
+              <input id="pv-reaction" type="number" class="form-control" [(ngModel)]="reaction" min="0">
             </div>
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-intuition">Intuition</label>
-              <input type="number" class="form-control" [(ngModel)]="intuition" min="0">
+              <label for="pv-intuition" class="form-label cli-field-label cli-label-intuition">Intuition</label>
+              <input id="pv-intuition" type="number" class="form-control" [(ngModel)]="intuition" min="0">
             </div>
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-edge">Edge</label>
-              <input type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
+              <label for="pv-edge" class="form-label cli-field-label cli-label-edge">Edge</label>
+              <input id="pv-edge" type="number" class="form-control" [(ngModel)]="edgeRating" min="0">
             </div>
           </div>
           <div class="row g-0 mb-0 cli-create-row">
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-physical">Physical CM</label>
-              <input type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
+              <label for="pv-physical-cm" class="form-label cli-field-label cli-label-physical">Physical CM</label>
+              <input id="pv-physical-cm" type="number" class="form-control" [(ngModel)]="physicalHealth" min="1">
             </div>
             <div class="col-6 col-sm-3 col-md-2 cli-create-cell">
-              <label class="form-label cli-field-label cli-label-stun">Stun CM</label>
-              <input type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
+              <label for="pv-stun-cm" class="form-label cli-field-label cli-label-stun">Stun CM</label>
+              <input id="pv-stun-cm" type="number" class="form-control" [(ngModel)]="stunHealth" min="1">
             </div>
           </div>
         </div>
@@ -391,28 +391,28 @@
         <!-- Deck stats — always editable, auto-sync while jacked in -->
         <div class="row g-2 mb-3">
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">Data Processing</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="dataProcessing"
+            <label for="pv-deck-dp" class="form-label form-label-sm mb-0">Data Processing</label>
+            <input id="pv-deck-dp" type="number" class="form-control form-control-sm" [(ngModel)]="dataProcessing"
               (ngModelChange)="onDeckStatChange()" min="1">
           </div>
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">Attack</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="attack"
+            <label for="pv-deck-attack" class="form-label form-label-sm mb-0">Attack</label>
+            <input id="pv-deck-attack" type="number" class="form-control form-control-sm" [(ngModel)]="attack"
               (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">Sleaze</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="sleaze"
+            <label for="pv-deck-sleaze" class="form-label form-label-sm mb-0">Sleaze</label>
+            <input id="pv-deck-sleaze" type="number" class="form-control form-control-sm" [(ngModel)]="sleaze"
               (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">Firewall</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="firewall"
+            <label for="pv-deck-firewall" class="form-label form-label-sm mb-0">Firewall</label>
+            <input id="pv-deck-firewall" type="number" class="form-control form-control-sm" [(ngModel)]="firewall"
               (ngModelChange)="onDeckStatChange()" min="0">
           </div>
           <div class="col-6 col-md-2">
-            <label class="form-label form-label-sm mb-0">Device Rating</label>
-            <input type="number" class="form-control form-control-sm" [(ngModel)]="deviceRating"
+            <label for="pv-deck-device-rating" class="form-label form-label-sm mb-0">Device Rating</label>
+            <input id="pv-deck-device-rating" type="number" class="form-control form-control-sm" [(ngModel)]="deviceRating"
               (ngModelChange)="onDeckStatChange()" min="0">
           </div>
         </div>

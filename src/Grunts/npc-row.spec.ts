@@ -32,6 +32,26 @@ import {
 import { PlayerViewComponent } from 'app/player-view/player-view.component';
 import { SharedCombatState, SharedLogEntry } from 'app/services/session-sync.service';
 import { DeclaredActionItem } from 'app/shared/declared-actions';
+import { TemplateRef } from '@angular/core';
+import { NgbModalRef } from '@ng-bootstrap/ng-bootstrap';
+
+/**
+ * A modal reference that never settles: the cases below drive the Act modal's
+ * state directly and never let it close, so only `close`/`dismiss`/`result`
+ * have to exist.
+ */
+function stubModalRef(): NgbModalRef {
+  return {
+    close: () => undefined,
+    dismiss: () => undefined,
+    result: new Promise<unknown>(() => undefined)
+  } as unknown as NgbModalRef;
+}
+
+/** The template argument is never rendered in these cases - only forwarded. */
+function stubTemplateRef(): TemplateRef<unknown> {
+  return {} as TemplateRef<unknown>;
+}
 
 const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 const PARRY = interruptTable.find(a => a.key === 'parry')!;
@@ -1162,7 +1182,7 @@ describe('NPC group initiative - GM workflow', () => {
   });
 
   it('never offers a row an Interrupt Action in the shared state (criterion 17)', () => {
-    const row = gmRow('Gangers', 9, 8, ['G1']); // 17
+    gmRow('Gangers', 9, 8, ['G1']); // 17
     const pete = makeRolledParticipant('Pete', 8, 1, 6);
     CombatManager.started = true;
 
@@ -2682,9 +2702,9 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       CombatManager.passEnded = false;
       CombatManager.goToNextActors();
       spyOn(component['modalService'], 'open').and.returnValue(
-        { close: () => {}, dismiss: () => {}, result: new Promise(() => {}) } as any);
+        stubModalRef());
 
-      component.btnRowMemberAct_Click(row, row.members[0], null as any);
+      component.btnRowMemberAct_Click(row, row.members[0], stubTemplateRef());
 
       expect(component.actModalParticipant).toBe(row);
       expect(component.actModalRowMember).toBe(row.members[0]);

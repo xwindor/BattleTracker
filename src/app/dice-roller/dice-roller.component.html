@@ -2,8 +2,9 @@
 
   <!-- Controls -->
   <div class="dice-roller-controls">
-    <label class="dice-roller-label">Dice (d6)</label>
+    <label class="dice-roller-label" for="dice-roller-count">Dice (d6)</label>
     <input
+      id="dice-roller-count"
       type="number"
       class="form-control form-control-sm dice-count-input"
       [(ngModel)]="diceCount"

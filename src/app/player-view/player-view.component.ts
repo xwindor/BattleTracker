@@ -7,7 +7,7 @@ import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, 
 import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
 import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
-import { buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
+import { buildDecodeFrame, randomMatrixChar, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
 import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
 
 @Component({

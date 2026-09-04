@@ -12,6 +12,14 @@ module.exports = tseslint.config(
       ...tseslint.configs.stylistic,
       ...angular.configs.tsRecommended,
     ],
+    languageOptions: {
+      parserOptions: {
+        // `@typescript-eslint/no-deprecated` is a type-aware rule, so the
+        // parser has to build a program for each linted file.
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
+    },
     processor: angular.processInlineTemplates,
     rules: {
       "@angular-eslint/directive-selector": [
@@ -28,6 +36,17 @@ module.exports = tseslint.config(
           type: "element",
           prefix: "app",
           style: "kebab-case",
+        },
+      ],
+      // `_name` marks a parameter or binding kept deliberately for its
+      // position or its documentation value, not used in the body.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
         },
       ],
       "@typescript-eslint/no-deprecated": "error"

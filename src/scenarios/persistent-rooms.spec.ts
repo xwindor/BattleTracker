@@ -705,7 +705,7 @@ describe('Durable rooms - review defects D1, D2 (server guards)', () => {
     });
 
     it('D1: 40 spoofed origins behind one proxy are refused after the cap, not waved through', () => {
-      let clock = 0;
+      const clock = 0;
       const limiter = createRoomCreationLimiter({ now: () => clock });
       let allowed = 0;
 
@@ -771,7 +771,7 @@ describe('Durable rooms - review defects D1, D2 (server guards)', () => {
         // was really appending an entry. Reached directly there is no appended
         // entry, so the rightmost value was the caller's again - 40 "origins",
         // 120 rooms, zero refusals.
-        let clock = 0;
+        const clock = 0;
         const limiter = createRoomCreationLimiter({ now: () => clock });
         let allowed = 0;
 
@@ -1215,7 +1215,7 @@ describe('Durable rooms - the room cap has a recovery path (round-3 fix 4)', () 
     return session({ lastActivity });
   }
 
-  function rooms(entries: Array<[string, number]>) {
+  function rooms(entries: [string, number][]) {
     return new Map<string, PersistedSession>(entries.map(([ room, at ]) => [ room, sessionAt(at) ]));
   }
 
@@ -3656,7 +3656,7 @@ describe('Round 4 - D2 & D4: a departing player\'s claim is always releasable', 
     }
 
     it('D2: releases a lone player\'s claim exactly once, and clears their socket data afterwards', () => {
-      const releases: Array<[string, string]> = [];
+      const releases: [string, string][] = [];
       const sockets: EvacSocket[] = [
         { id: 'pl-1', data: { room: 'AAAAAA', role: 'player', playerName: 'tok-1' } }
       ];
@@ -3673,7 +3673,7 @@ describe('Round 4 - D2 & D4: a departing player\'s claim is always releasable', 
     });
 
     it('D2: two different players in the room are each released once', () => {
-      const releases: Array<[string, string]> = [];
+      const releases: [string, string][] = [];
       const sockets: EvacSocket[] = [
         { id: 'pl-1', data: { room: 'AAAAAA', role: 'player', playerName: 'tok-1' } },
         { id: 'pl-2', data: { room: 'AAAAAA', role: 'player', playerName: 'tok-2' } }
@@ -3687,7 +3687,7 @@ describe('Round 4 - D2 & D4: a departing player\'s claim is always releasable', 
     });
 
     it('D2: a GM socket in the room triggers no claim release', () => {
-      const releases: Array<[string, string]> = [];
+      const releases: [string, string][] = [];
       const sockets: EvacSocket[] = [ { id: 'gm-1', data: { room: 'AAAAAA', role: 'gm' } } ];
 
       evacuate(sockets, 'AAAAAA', (r, p) => releases.push([r, p]));
@@ -3696,7 +3696,7 @@ describe('Round 4 - D2 & D4: a departing player\'s claim is always releasable', 
     });
 
     it('D2: a player in a different room is untouched', () => {
-      const releases: Array<[string, string]> = [];
+      const releases: [string, string][] = [];
       const sockets: EvacSocket[] = [
         { id: 'pl-1', data: { room: 'BBBBBB', role: 'player', playerName: 'tok-1' } }
       ];
@@ -4934,7 +4934,33 @@ describe('Round 4 - D7: capacity eviction leaves a tombstone; End Room leaves no
  * ten minutes.
  */
 describe('releaseAllClaimsOnBoot', () => {
-  function roomWith(participants: any[], oocOwnership?: any[]): any {
+  /** Only the fields these cases actually read off a restored room. */
+  interface FixtureParticipant {
+    id?: string;
+    name?: string;
+    claimable?: boolean;
+    ownerName?: string;
+    physicalDamage?: number;
+    ooc?: boolean;
+  }
+  interface FixtureRoom {
+    state: {
+      round: number; pass: number; started: boolean; passEnded: boolean;
+      currentInitiative: number;
+      participants: (FixtureParticipant | null)[];
+      oocOwnership?: FixtureParticipant[];
+    } | null;
+    log: unknown[];
+    lastActivity: number;
+  }
+
+  const roomState = (sessions: Map<string, FixtureRoom>, code: string) =>
+    sessions.get(code)!.state!;
+
+  function roomWith(
+    participants: (FixtureParticipant | null)[],
+    oocOwnership?: FixtureParticipant[]
+  ): FixtureRoom {
     return {
       state: {
         round: 1, pass: 1, started: true, passEnded: false, currentInitiative: 0,
@@ -4947,18 +4973,18 @@ describe('releaseAllClaimsOnBoot', () => {
   }
 
   it('QA step 6: a claim held when the server died does not survive the restart', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['ABC123', roomWith([{ id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old' }])]
     ]);
 
     const rooms = releaseAllClaimsOnBoot(sessions);
 
     expect(rooms).toBe(1);
-    expect(sessions.get('ABC123').state.participants[0].ownerName).toBeUndefined();
+    expect(roomState(sessions, 'ABC123').participants[0]!.ownerName).toBeUndefined();
   });
 
   it('clears the GM-only OOC ownership shadow too, so a revived character is claimable', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['ABC123', roomWith(
         [{ id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old' }],
         [{ id: 'p2', ownerName: 'pl-old', claimable: true }]
@@ -4967,11 +4993,11 @@ describe('releaseAllClaimsOnBoot', () => {
 
     releaseAllClaimsOnBoot(sessions);
 
-    expect(sessions.get('ABC123').state.oocOwnership[0].ownerName).toBeUndefined();
+    expect(roomState(sessions, 'ABC123').oocOwnership![0].ownerName).toBeUndefined();
   });
 
   it('leaves everything except ownership alone', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['ABC123', roomWith([
         { id: 'p1', name: 'Wraith', claimable: true, ownerName: 'pl-old', physicalDamage: 5, ooc: true }
       ])]
@@ -4979,16 +5005,16 @@ describe('releaseAllClaimsOnBoot', () => {
 
     releaseAllClaimsOnBoot(sessions);
 
-    const p = sessions.get('ABC123').state.participants[0];
+    const p = roomState(sessions, 'ABC123').participants[0]!;
     expect(p.name).toBe('Wraith');
     expect(p.claimable).toBeTrue();
     expect(p.physicalDamage).toBe(5);
     expect(p.ooc).toBeTrue();
-    expect(sessions.get('ABC123').state.round).toBe(1);
+    expect(roomState(sessions, 'ABC123').round).toBe(1);
   });
 
   it('reports only the rooms it actually changed', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['AAAAAA', roomWith([{ id: 'p1', claimable: true, ownerName: 'pl-old' }])],
       ['BBBBBB', roomWith([{ id: 'p1', claimable: true }])],
       ['CCCCCC', roomWith([{ id: 'p1', claimable: false }])]
@@ -4998,18 +5024,18 @@ describe('releaseAllClaimsOnBoot', () => {
   });
 
   it('survives rooms with no state, no participants, or a null entry', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['AAAAAA', { state: null, log: [], lastActivity: 1 }],
       ['BBBBBB', roomWith([])],
-      ['CCCCCC', roomWith([null as any, { id: 'p1', claimable: true, ownerName: 'pl-old' }])]
+      ['CCCCCC', roomWith([null, { id: 'p1', claimable: true, ownerName: 'pl-old' }])]
     ]);
 
     expect(() => releaseAllClaimsOnBoot(sessions)).not.toThrow();
-    expect(sessions.get('CCCCCC').state.participants[1].ownerName).toBeUndefined();
+    expect(roomState(sessions, 'CCCCCC').participants[1]!.ownerName).toBeUndefined();
   });
 
   it('is a no-op on a second boot with nothing left to release', () => {
-    const sessions = new Map<string, any>([
+    const sessions = new Map<string, FixtureRoom>([
       ['ABC123', roomWith([{ id: 'p1', claimable: true, ownerName: 'pl-old' }])]
     ]);
 

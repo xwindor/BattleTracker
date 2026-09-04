@@ -20,8 +20,8 @@
   </p>
 
   <div class="os-modify-row mt-2">
-    <label class="form-label mb-1">Defender's hits:</label>
-    <input type="number" class="form-control os-custom-input" [(ngModel)]="customDelta" min="0" step="1" autofocus />
+    <label class="form-label mb-1" for="os-prompt-hits">Defender's hits:</label>
+    <input id="os-prompt-hits" type="number" class="form-control os-custom-input" [(ngModel)]="customDelta" min="0" step="1" ngbAutofocus />
     @if (customDelta !== null && !canApply) {
     <div class="os-input-error">Enter a whole number of hits, 0 or higher — no fractions, negatives, or unreasonably large numbers.</div>
     }

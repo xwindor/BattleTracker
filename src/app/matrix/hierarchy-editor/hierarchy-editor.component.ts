@@ -1,4 +1,4 @@
-import { Component, Input } from "@angular/core";
+import { Component, ElementRef, Input, ViewChild } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
@@ -91,6 +91,12 @@ function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, hostRati
 export class HierarchyEditorComponent {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];
 
+  /**
+   * The new-host name box. Focused from `openAddHost()` rather than with the
+   * `autofocus` attribute, which the template a11y rules forbid.
+   */
+  @ViewChild("hostNameInput") hostNameInput?: ElementRef<HTMLInputElement>;
+
   publicSpaceExpanded = true;
   expandedHosts = new Set<string>();
 
@@ -116,6 +122,8 @@ export class HierarchyEditorComponent {
     };
     this.suggestAsdfForForm(r);
     this.targetForm = { ...BLANK_TARGET_FORM };
+    // The input does not exist until the @if block renders it.
+    setTimeout(() => this.hostNameInput?.nativeElement.focus());
   }
 
   openEditHost(host: MatrixHost): void {

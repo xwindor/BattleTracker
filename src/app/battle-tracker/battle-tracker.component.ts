@@ -42,13 +42,13 @@ import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, 
 import { getInterruptLabel, getInterruptDescription, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
 import {
-  buildDecodeFrame, randomMatrixChar, escapeHtml, formatLogText, getLogTextClass,
+  formatLogText, getLogTextClass,
   formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
   formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference,
   formatGroupWoundLogText, formatTurnStartLogText, formatTurnEndLogText,
   formatPassEndLogText, COMBAT_STARTED_LOG_TEXT, COMBAT_ENDED_LOG_TEXT
 } from "app/shared/log-formatter";
-import { getInitiativeRollMax, clampInitiativeRoll, classifyRoll } from "app/shared/roll-utils";
+import { classifyRoll } from "app/shared/roll-utils";
 
 /**
  * Options for `changeParticipantDiceCount`. `rollGainedDice: false` is the
@@ -5336,9 +5336,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   getDeclaredActionDetails(action: DeclaredActionItem): string {
-    const description = DECLARED_ACTION_DESCRIPTIONS[action.name] || "No details available yet.";
-    const label = action.economy.charAt(0).toUpperCase() + action.economy.slice(1);
-    return `${description}`;
+    return DECLARED_ACTION_DESCRIPTIONS[action.name] || "No details available yet.";
   }
 
   getDeclaredActionStateText(sender: IParticipant): string {
