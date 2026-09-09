@@ -516,6 +516,72 @@
   padding-right: 0;
 }
 
+/* Cyberpunk name generator (briefs/cyberpunk-name-generator-spec.md, item
+   12): the same square icon-button geometry as `.gm-trailing-icon` above,
+   sized off the same control tokens rather than a hand-tuned pixel value.
+   Full-size tokens here are correct for the Add dialog, where this button
+   sits in an ordinary (non-`-sm`) input-group beside a full-size input. */
+.gm-name-generate-btn {
+  flex: 0 0 auto;
+  width: var(--ui-icon-btn-w);
+  min-width: var(--ui-icon-btn-w);
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Defect 5 (validator round): the row-member box's other controls (Name,
+   B/W, DV) all size off `--ui-control-h-sm` / `--ui-icon-btn-w-sm` (25.6px -
+   see `.action-item-twirl` above, and the `input-group-sm` wrappers those
+   controls sit in). The rule above hard-sets `height`/`width` (not just
+   `min-*`), which an ordinary `.btn-sm` class cannot override on its own -
+   without this, the button sat at the full-size 28px token, taller and
+   ~1.75rem wider than the row's other controls and a wrap risk at 1024px.
+   Scoped by the row-member container class rather than `.input-group-sm`
+   (defect 4 moved this button out of the Name input-group and it is not
+   itself wrapped in one any more), so the Add dialog's full-size use is
+   untouched. */
+.npc-row-member .gm-name-generate-btn {
+  width: var(--ui-icon-btn-w-sm);
+  min-width: var(--ui-icon-btn-w-sm);
+  height: var(--ui-control-h-sm);
+  min-height: var(--ui-control-h-sm);
+}
+
+/* Defect 4 (second validator round): `.npc-row-member` is a plain flex row
+   (`d-flex`, HTML), so without an explicit `order` every child paints in
+   DOM order - which is exactly the ambiguity D4 flags: the generate button
+   sits, visually, between the B/W group and the CM readout, nowhere near
+   the Name box it acts on. `order` is a paint-order-only property; it does
+   not affect DOM position or keyboard Tab order (which browsers derive from
+   DOM position, not `order`), so this restores the visual adjacency the
+   brief asks for without touching the Tab fix directly above this button in
+   the template (Name -> Body stays a direct Tab; the generate button stays
+   reachable by continuing to Tab past Body/Willpower, exactly as before
+   this rule was added).
+
+   Two buckets are enough: `order: 1` on the generate button paints it right
+   after the (unset-order, so implicitly `0`) Act button and Name box;
+   `order: 2` on every control from the B/W group onward keeps that whole
+   tail in its existing relative sequence (ties within one `order` value are
+   broken by DOM position, which this second selector list preserves
+   unchanged) - it only has to move as a block behind the first bucket, not
+   be individually reordered. */
+.npc-row-member .gm-name-generate-btn {
+  order: 1;
+}
+
+.npc-row-bw-group,
+.npc-row-cm,
+.npc-row-wm,
+.npc-row-damage,
+.npc-row-detach,
+.npc-row-remove,
+.npc-row-down-badge {
+  order: 2;
+}
+
 /* Collapsed summary: caret + `E2 R5 I4 D2`. A button rather than a span so the
    numbers are the click target, but it must not look or size like a normal
    `.btn` — it is a readout first and a control second, so the chrome is

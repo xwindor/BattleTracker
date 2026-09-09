@@ -1,9 +1,17 @@
 <div class="tc-wrap" [class.tc-editing]="editing">
 
   <!-- ── Main info row ──────────────────────────────────────────────────── -->
-  <div class="tc-info-row">
+  <div class="tc-info-row"
+    [class.tc-prop-landing]="propagationDestination === 'landing'"
+    [class.tc-prop-capped]="propagationDestination === 'capped'">
     <i class="tc-type-icon" [class]="typeIcon(target.type)"
       [ngbTooltip]="typeLabel(target.type)" placement="right"></i>
+    @if (propagationDestination) {
+    <span class="tc-prop-marker" role="img"
+      [class.tc-prop-marker-capped]="propagationDestination === 'capped'"
+      [attr.aria-label]="propagationMarkerLabel"
+      [title]="propagationMarkerLabel">{{ propagationMarkerGlyph }}</span>
+    }
     <span class="tc-name">{{ target.name }}</span>
     @if (target.type === 'device') {
     <span class="tc-dr">DR{{ target.deviceRating }}</span>
@@ -43,8 +51,8 @@
       }
       <button type="button" class="tc-mark-rm"
         (click)="removeMark(entry.deckerId)"
-        [title]="propagationPreview
-          ? 'Remove 1 mark from ' + deckerLabel(entry.deckerId) + ' — any mark this propagated upstream (' + propagationPreview + ') stays; remove it there if wrong'
+        [title]="propagationDestinationNames()
+          ? 'Remove 1 mark from ' + deckerLabel(entry.deckerId) + ' — any mark this propagated upstream (' + propagationDestinationNames() + ') stays; remove it there if wrong'
           : 'Remove 1 mark from ' + deckerLabel(entry.deckerId)">×</button>
     </span>
     }
@@ -56,19 +64,16 @@
         +Mark
       </button>
       } @else {
-      <select class="tc-decker-select" [(ngModel)]="selectedDeckerId">
+      <select class="tc-decker-select" [ngModel]="selectedDeckerId" (ngModelChange)="onSelectedDeckerChange($event)">
         @for (d of availableDeckers; track d.name) {
         <option [value]="d.name">{{ d.name }}</option>
         }
       </select>
-      @if (propagationPreview) {
-      <span class="tc-propagation-preview">{{ propagationPreview }}</span>
-      }
       <button type="button" class="tc-confirm-btn"
         (click)="confirmAddMark()"
         [disabled]="!canConfirmAddMark"
         [title]="addMarkBlockedReason ?? 'Place 1 mark'">✓</button>
-      <button type="button" class="tc-cancel-btn" (click)="addMarkOpen = false">✕</button>
+      <button type="button" class="tc-cancel-btn" (click)="cancelAddMark()">✕</button>
       @if (addMarkBlockedReason) {
       <span class="tc-add-mark-blocked">{{ addMarkBlockedReason }}</span>
       }

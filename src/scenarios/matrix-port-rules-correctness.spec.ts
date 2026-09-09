@@ -46,7 +46,7 @@
 // its glyph count and adds an owner key (D-6); `MatrixHost.marks`' comment no
 // longer cites p. 247 for the wrong direction of mark sharing (D-8).
 
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { NgbActiveModal, NgbModal } from '@ng-bootstrap/ng-bootstrap';
 import { appConfig } from 'app/app.config';
@@ -60,7 +60,7 @@ import { ICSpawnerComponent } from 'app/matrix/ic-spawner/ic-spawner.component';
 import { MatrixPlayerViewComponent } from 'app/matrix/matrix-player-view/matrix-player-view.component';
 import { MatrixRunPanelComponent } from 'app/matrix/matrix-run-panel/matrix-run-panel.component';
 import { MatrixGraphComponent } from 'app/matrix/matrix-graph/matrix-graph.component';
-import { TargetCardComponent } from 'app/matrix/target-card/target-card.component';
+import { TargetCardComponent, MarkHighlightRequest } from 'app/matrix/target-card/target-card.component';
 
 import { MatrixStateService } from 'app/services/matrix-state.service';
 import { OsTrackingService, osBandFor } from 'app/services/os-tracking.service';
@@ -119,6 +119,61 @@ function cssDefinesSelector(fragment: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Round-8 review, Defect D-1: `:hover` pseudo-class matching cannot be
+ * forced from page-level test code — a synthetic `dispatchEvent(new
+ * MouseEvent('mouseover'/'mouseenter'))` never runs through the browser's
+ * real hit-testing and never changes what `:hover` matches (the same reason
+ * Testing-Library's own `hover()` helper documents that it does not trigger
+ * CSS `:hover`). The only thing that does is real OS-level pointer input
+ * (or WebDriver-style remote input), neither available from inside a Karma
+ * spec.
+ *
+ * To measure the REAL cascade decision — the actual rule, actual
+ * specificity (including whatever Angular's emulated-encapsulation
+ * `[_ngcontent-*]` attribute adds to every compound selector segment,
+ * equally on both sides of this comparison), actual source order — this
+ * finds the loaded `:hover` rule matching `fragment` and temporarily
+ * rewrites its selector text, swapping `:hover` for a toggleable class of
+ * identical specificity weight (a pseudo-class and a plain class both add
+ * exactly one unit to CSS specificity's "class" bucket, so this changes
+ * nothing about the numbers this defect is about). The original selector
+ * text is restored in `finally` so no other test in this run ever sees the
+ * mutation, no matter how the callback exits.
+ */
+function withSimulatedHover(fragment: string, run: (hoverClass: string) => void): void {
+  const HOVER_CLASS = 'sr5-test-simulated-hover';
+  let targetRule: CSSStyleRule | undefined;
+  let originalSelectorText = '';
+  find:
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // cross-origin sheet - not one of ours
+    }
+    if (!rules) continue;
+    for (const rule of Array.from(rules)) {
+      const r = rule as CSSStyleRule;
+      if (r.selectorText && r.selectorText.includes(fragment) && r.selectorText.includes(':hover')) {
+        targetRule = r;
+        originalSelectorText = r.selectorText;
+        break find;
+      }
+    }
+  }
+  if (!targetRule) {
+    throw new Error(`withSimulatedHover: no loaded stylesheet rule matches "${fragment}:hover" - has it been renamed or removed?`);
+  }
+  targetRule.selectorText = originalSelectorText.replace(':hover', `.${HOVER_CLASS}`);
+  try {
+    run(HOVER_CLASS);
+  } finally {
+    targetRule.selectorText = originalSelectorText;
+  }
 }
 
 describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-spec.md)', () => {
@@ -1565,6 +1620,44 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(jackIns.length).toBe(1);
       expect(jackOuts.length).toBe(1);
     });
+
+    // ── N-6 (round-7 review): Lifecycle table path 9 — the whole Matrix
+    //    panel collapsed while a card inside the nested hierarchy editor has
+    //    its own picker open — had no test. Reachable: `@if (!collapsed)`
+    //    (matrix-run-panel.component.html) destroys the entire
+    //    `<app-hierarchy-editor>` subtree, including any open card. ──
+
+    it('Lifecycle path 9: collapsing the whole Matrix panel while a card inside the hierarchy editor has its own picker open clears the highlight cleanly, with no NG0100', fakeAsync(() => {
+      const matrixState = TestBed.inject(MatrixStateService);
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.activeDeckers = [decker]; // beforeEach leaves this []; openAddMark() needs a decker to seed, or it stays blocked and no highlight ever shows
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'dr' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const gunCard = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'gn')!;
+      gunCard.openAddMark();
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelectorAll('.hier-prop-landing, .hier-prop-capped').length).toBe(1);
+
+      expect(() => {
+        component.toggleCollapse(); // destroys the whole editor subtree, including gun's own card
+        fixture.detectChanges(); // the pass that used to throw NG0100
+      }).not.toThrow();
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(fixture.debugElement.query(By.directive(HierarchyEditorComponent))).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('.hier-prop-landing, .hier-prop-capped').length).toBe(0);
+    }));
   });
 
   // ── Defect 11 — addMarkToHost must not write the intruder's marks into
@@ -1627,49 +1720,6 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       matrixState.addHost(host);
     });
 
-    it('propagationPreview names the host a device-in-host target will also mark, before the GM commits', () => {
-      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
-      component.target = device;
-      component.host = host;
-      component.activeDeckers = [];
-      fixture.detectChanges();
-
-      expect(component.propagationPreview).toBe('Also marks Host: Ares-7');
-    });
-
-    it('propagationPreview names the device parent an open-grid device will also mark', () => {
-      const mount = new MatrixTarget({ id: 'm1', name: 'Weapon Mount', type: 'device', context: 'public' });
-      const rifle = new MatrixTarget({ id: 'r1', type: 'device', context: 'public', parentTargetId: 'm1' });
-      matrixState.addTarget(null, mount);
-      matrixState.addTarget(null, rifle);
-      component.target = rifle;
-      component.host = null;
-      component.activeDeckers = [];
-      fixture.detectChanges();
-
-      expect(component.propagationPreview).toBe('Also marks: Weapon Mount');
-    });
-
-    it('propagationPreview is null for a file, even inside a host (Decision 8 — files do not propagate)', () => {
-      const file = new MatrixTarget({ id: 'f1', type: 'file', context: 'host', linkedHostId: host.id });
-      component.target = file;
-      component.host = host;
-      component.activeDeckers = [];
-      fixture.detectChanges();
-
-      expect(component.propagationPreview).toBeNull();
-    });
-
-    it('propagationPreview is null for a device with nothing to propagate to', () => {
-      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'public' });
-      component.target = device;
-      component.host = null;
-      component.activeDeckers = [];
-      fixture.detectChanges();
-
-      expect(component.propagationPreview).toBeNull();
-    });
-
     it('hasPropagatedMark reflects the target\'s propagatedMarks record', () => {
       const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
       component.target = device;
@@ -1680,21 +1730,6 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
 
       device.propagatedMarks['Tesseract'] = true;
       expect(component.hasPropagatedMark('Tesseract')).toBeTrue();
-    });
-
-    it('the +Mark confirm step shows the propagation preview text in the rendered template', () => {
-      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
-      const decker = new MatrixParticipant();
-      decker.name = 'Tesseract';
-      component.target = device;
-      component.host = host;
-      component.activeDeckers = [decker];
-      fixture.detectChanges();
-
-      component.openAddMark();
-      fixture.detectChanges();
-
-      expect(textContains(fixture, 'Also marks Host: Ares-7')).toBeTrue();
     });
 
     it("the remove-mark button's tooltip warns that an upstream propagated mark stays, for a target that can propagate", () => {
@@ -1710,6 +1745,43 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       const removeBtn = fixture.debugElement.query(By.css('.tc-mark-rm')).nativeElement as HTMLButtonElement;
       expect(removeBtn.title).toContain('Ares-7');
       expect(removeBtn.title.toLowerCase()).toContain('stays');
+      // Tightened: locks in the tense fix. propagationDestinationNames()
+      // (backward-looking, "this already happened") now feeds this tooltip
+      // instead of propagationPreview (forward-looking, "this is about to
+      // happen") - the old string spliced a present-tense "Also marks: ..."
+      // into a past-tense sentence about a mark that already landed.
+      expect(removeBtn.title).not.toContain('Also marks');
+    });
+
+    it("the remove-mark button's tooltip names BOTH destinations of a two-hop chain, with no cap wording (AC-10, scenario S3)", () => {
+      // The single-host test above only ever exercises the one-destination
+      // case. Nothing previously asserted the multi-destination form - if
+      // the tooltip only ever names one of two upstream icons, the GM has
+      // no way to find the second one to correct by hand (this app has no
+      // undo; hand-correction is the only path, mark-propagation-preview.md
+      // scenario S3).
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      gun.marks['Tesseract'] = 1;
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.target = gun;
+      component.host = null;
+      component.activeDeckers = [decker];
+      fixture.detectChanges();
+
+      const removeBtn = fixture.debugElement.query(By.css('.tc-mark-rm')).nativeElement as HTMLButtonElement;
+      expect(removeBtn.title).toBe(
+        'Remove 1 mark from Tesseract — any mark this propagated upstream (Weapon Mount, MCT Roto-Drone) stays; remove it there if wrong'
+      );
+      expect(removeBtn.title).not.toContain('Also marks');
+      expect(removeBtn.title).not.toContain('at 3');
+      expect(removeBtn.title).not.toContain('none added');
+      expect(removeBtn.title).not.toContain('already');
     });
 
     it("the remove-mark button's tooltip is the plain message for a target that cannot propagate (a file)", () => {
@@ -1725,7 +1797,1569 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       const removeBtn = fixture.debugElement.query(By.css('.tc-mark-rm')).nativeElement as HTMLButtonElement;
       expect(removeBtn.title).toBe('Remove 1 mark from Tesseract');
     });
+
+    // ── The retired text preview is gone from the DOM under every condition ──
+
+    it('.tc-propagation-preview does not exist in the rendered DOM (AC-12) - the getters, formatters and span were deleted, not merely hidden', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.target = gun;
+      component.host = null;
+      component.activeDeckers = [decker];
+      component.selectedDeckerId = 'Tesseract';
+      fixture.detectChanges();
+      component.openAddMark();
+      fixture.detectChanges();
+
+      expect(fixture.debugElement.query(By.css('.tc-propagation-preview'))).toBeNull();
+      expect((component as unknown as Record<string, unknown>)['propagationPreview']).toBeUndefined();
+      expect((component as unknown as Record<string, unknown>)['propagationPreviewFull']).toBeUndefined();
+    });
+
+    // Fix round 2, N4: `HierarchyEditorComponent`'s nested public-target tree
+    // indents 18px per level (`hier-public-node`,
+    // `hierarchy-editor.component.html`, `marginLeft.px="depth * 18"`),
+    // so real available width shrinks as chain depth grows — depth and lost
+    // width move together. The reviewer's worst measured case was a chain 4
+    // deep in a ~426px left pane (matrix-run-panel.component.css
+    // `.matrix-left-pane`, the narrow two-column layout just above the
+    // 900px single-column breakpoint). This constant models that lost width
+    // so the narrow-case test below reproduces the real worst case rather
+    // than an arbitrary number close to its own boundary. Kept verbatim
+    // across the highlight change (spec "Test changes required": "KEEP the
+    // constants and the fixture builder").
+    const HIER_TREE_INDENT_PER_LEVEL_PX = 18;
+    const CHAIN_DEPTH_FOR_LAYOUT_TEST = 4;
+    const NARROW_LEFT_PANE_WIDTH_PX = 426;
+    const EFFECTIVE_NARROW_WIDTH_PX =
+      NARROW_LEFT_PANE_WIDTH_PX - HIER_TREE_INDENT_PER_LEVEL_PX * CHAIN_DEPTH_FOR_LAYOUT_TEST; // 354px
+
+    // mark-propagation-highlight-spec.md (2026-09-05): the text preview -
+    // Option A, then Option B, then the "+N more above it" abbreviation -
+    // is gone entirely, replaced with a highlight on the tree. There is no
+    // longer any inline string whose width depends on chain depth or name
+    // length, so the truncation problem this constant used to reproduce
+    // cannot recur structurally: `.tc-propagation-preview` no longer
+    // exists in the template at all (see the test above). This fixture
+    // still exists to prove that at the same real worst-case narrow pane
+    // width, the confirm/cancel buttons render in-pane on one line -
+    // AC-12's positive half.
+    const LONG_NEAREST_NAME_LENGTH = 50; // chars
+
+    function buildFourDeepChainFixture(): { clicked: MatrixTarget; nearestName: string } {
+      const nearestName = 'N'.repeat(LONG_NEAREST_NAME_LENGTH);
+      const names = ['Rooftop-Node', 'Relay-Station', 'Signal-Booster', nearestName];
+      const chain = names.map((name, i) => new MatrixTarget({
+        id: `layout-t${i}`, name, type: 'device', context: 'public',
+        parentTargetId: i > 0 ? `layout-t${i - 1}` : undefined
+      }));
+      chain.forEach(t => matrixState.addTarget(null, t));
+      const clicked = new MatrixTarget({
+        id: 'layout-clicked', name: 'Clicked Device', type: 'device', context: 'public',
+        parentTargetId: chain[chain.length - 1].id
+      });
+      matrixState.addTarget(null, clicked);
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.target = clicked;
+      component.host = null;
+      component.activeDeckers = [decker];
+      component.selectedDeckerId = 'Tesseract';
+      fixture.detectChanges();
+      component.openAddMark();
+      fixture.detectChanges();
+      return { clicked, nearestName };
+    }
+
+    it('AC-12: a chain whose nearest icon has a long name renders no propagation text and keeps the ✓/✕ buttons in-pane on one line, at the real worst-case narrow-pane width (real ChromeHeadless layout)', () => {
+      buildFourDeepChainFixture();
+
+      // Constrain to the reviewer's measured worst-case width: the narrow
+      // two-column left pane (matrix-run-panel.component.css
+      // .matrix-left-pane) minus the hierarchy tree's own indent at this
+      // chain's depth (N4).
+      const wrap = fixture.nativeElement.querySelector('.tc-wrap') as HTMLElement;
+      wrap.style.width = `${EFFECTIVE_NARROW_WIDTH_PX}px`;
+      wrap.style.overflow = 'hidden';
+      fixture.detectChanges();
+
+      const row = wrap.querySelector('.tc-marks-row') as HTMLElement;
+      const confirmBtn = wrap.querySelector('.tc-confirm-btn') as HTMLElement;
+      const cancelBtn = wrap.querySelector('.tc-cancel-btn') as HTMLElement;
+
+      // No text preview exists anywhere to truncate or overflow.
+      expect(wrap.querySelector('.tc-propagation-preview')).toBeNull();
+
+      expect(confirmBtn).not.toBeNull();
+      expect(cancelBtn).not.toBeNull();
+      // The row stays a single line (does not wrap the buttons underneath),
+      // and both buttons render inside the constrained pane, not clipped
+      // out of view by .matrix-left-pane's overflow: hidden.
+      expect(row.getBoundingClientRect().height).toBeLessThan(40);
+      const wrapRight = wrap.getBoundingClientRect().right;
+      expect(confirmBtn.getBoundingClientRect().right).toBeLessThanOrEqual(wrapRight + 1);
+      expect(cancelBtn.getBoundingClientRect().right).toBeLessThanOrEqual(wrapRight + 1);
+      expect(confirmBtn.getBoundingClientRect().width).toBeGreaterThan(0); // actually rendered, not zero-width/clipped
+      expect(cancelBtn.getBoundingClientRect().width).toBeGreaterThan(0);
+    });
+
+    // ── The emit contract (new test #9, "How the highlight is tested" §7) ──
+
+    it('propagationHighlightChange emits the request/null sequence open -> decker change -> cancel -> open -> confirm -> destroy, and only from event handlers/lifecycle hooks', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'dr' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, gun);
+      const tesseract = new MatrixParticipant();
+      tesseract.name = 'Tesseract';
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.target = gun;
+      component.host = null;
+      component.activeDeckers = [tesseract, slamm];
+      fixture.detectChanges();
+
+      const emitted: (MarkHighlightRequest | null)[] = [];
+      component.propagationHighlightChange.subscribe(req => emitted.push(req));
+
+      component.openAddMark(); // 1: seeds Tesseract, emits a request
+      component.onSelectedDeckerChange('Slamm-0'); // 2: emits a request for Slamm-0
+      component.cancelAddMark(); // 3: emits null
+      component.openAddMark(); // 4: emits a request again
+      component.confirmAddMark(); // 5: writes the mark, then emits null
+
+      expect(emitted.length).toBe(5);
+      expect(emitted[0]).toEqual({ target: gun, deckerId: 'Tesseract' });
+      expect(emitted[1]).toEqual({ target: gun, deckerId: 'Slamm-0' });
+      expect(emitted[2]).toBeNull();
+      expect(emitted[3]).toEqual({ target: gun, deckerId: 'Slamm-0' });
+      expect(emitted[4]).toBeNull();
+
+      // ngOnDestroy: addMarkOpen is already false after confirmAddMark(), so
+      // destroying the fixture must not emit a redundant extra null (the
+      // ngOnDestroy guard is keyed on addMarkOpen, spec Lifecycle table).
+      fixture.destroy();
+      expect(emitted.length).toBe(5);
+    });
+
+    it('ngOnDestroy emits lifecycleClear (round-6 review, defects 1-3) when the card is destroyed while its own picker is still open (spec Lifecycle table, paths 5-9)', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'public' });
+      matrixState.addTarget(null, device);
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.target = device;
+      component.host = null;
+      component.activeDeckers = [decker];
+      fixture.detectChanges();
+
+      const emitted: (MarkHighlightRequest | null)[] = [];
+      component.propagationHighlightChange.subscribe(req => emitted.push(req));
+      let lifecycleClearCount = 0;
+      component.lifecycleClear.subscribe(() => lifecycleClearCount++);
+      component.openAddMark();
+      expect(emitted.length).toBe(1);
+
+      // `lifecycleClear` — not `propagationHighlightChange` — is the event
+      // `ngOnDestroy()` fires (round-6 review): it is emitted synchronously
+      // (its subscriber must still be alive when it fires; deferring the
+      // EMIT itself, an earlier version of this fix, found the parent's
+      // subscription already torn down by the time a later microtask ran),
+      // but carries no payload — it is `HierarchyEditorComponent.onLifecycleClear()`
+      // that defers the actual state mutation this event triggers.
+      fixture.destroy();
+      expect(lifecycleClearCount).toBe(1);
+      expect(emitted.length).toBe(1); // propagationHighlightChange itself never fires here
+    });
+
+    it('ngOnChanges closes the picker and emits lifecycleClear (round-6 review) when availableDeckers empties while the picker is open (path 10 - the non-obvious clear path)', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'public' });
+      matrixState.addTarget(null, device);
+      const tesseract = new MatrixParticipant();
+      tesseract.name = 'Tesseract';
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.target = device;
+      component.host = null;
+      component.activeDeckers = [tesseract, slamm];
+      fixture.detectChanges();
+
+      const emitted: (MarkHighlightRequest | null)[] = [];
+      component.propagationHighlightChange.subscribe(req => emitted.push(req));
+      let lifecycleClearCount = 0;
+      component.lifecycleClear.subscribe(() => lifecycleClearCount++);
+      component.openAddMark();
+      expect(component.addMarkOpen).toBeTrue();
+
+      // Both deckers cap out on this icon elsewhere (e.g. session sync /
+      // another GM action) - activeDeckers itself does not need to change,
+      // only the marks record availableDeckers filters on. `ngOnChanges` is
+      // called directly, exactly as Angular would call it from a REAL
+      // `@Input` reassignment on a parent template's binding — this bare
+      // `ComponentFixture<TargetCardComponent>` has no such parent, so it
+      // can only verify the emit CONTRACT (spec "How the highlight is
+      // tested" §7). The REAL rendered-DOM coverage for this exact defect —
+      // driven by an actual `@Input` reassignment through
+      // `HierarchyEditorComponent`'s own template binding, with real change
+      // detection and no NG0100 — is
+      // 'Defect 2: activeDeckers emptying while the picker is open clears
+      // the highlight cleanly, with no NG0100' below.
+      device.marks['Tesseract'] = 3;
+      device.marks['Slamm-0'] = 3;
+      component.ngOnChanges({});
+
+      expect(component.addMarkOpen).toBeFalse();
+      // `lifecycleClear`, not `propagationHighlightChange`, is what this
+      // path fires (round-6 review) — its consumer, not this card, decides
+      // when the resulting state mutation actually lands.
+      expect(lifecycleClearCount).toBe(1);
+      expect(emitted.length).toBe(1); // only the original openAddMark() emit
+    });
+
+    // ── N-6 (round-7 review): lifecycle path 11 — `target` @Input replaced
+    //    on a reused card instance — had no test at all. ──
+
+    // Round-8 review, Defect D-9: this test drives `ngOnChanges({ target: {}
+    // } as never)` by hand on a bare `ComponentFixture<TargetCardComponent>`
+    // with no parent binding — the same candid limitation path 10's test
+    // carries above. It verifies the emit CONTRACT only (spec "How the
+    // highlight is tested" §7): that `ngOnChanges()` reacts correctly to a
+    // `changes['target']` entry, exactly as Angular would call it from a
+    // REAL `@Input` reassignment on a parent template's binding. It is not
+    // rendered-DOM coverage of a real reused-instance scenario (e.g.
+    // `@for (t of host.targets; track t.id)` recycling a component
+    // instance) — there is no existing rendered-DOM test for that scenario
+    // in this suite.
+    it('ngOnChanges closes the picker and emits lifecycleClear when the target @Input is replaced on a reused card instance (path 11)', () => {
+      const deviceA = new MatrixTarget({ id: 'd1', type: 'device', context: 'public' });
+      const deviceB = new MatrixTarget({ id: 'd2', type: 'device', context: 'public' });
+      matrixState.addTarget(null, deviceA);
+      matrixState.addTarget(null, deviceB);
+      const tesseract = new MatrixParticipant();
+      tesseract.name = 'Tesseract';
+      component.target = deviceA;
+      component.host = null;
+      component.activeDeckers = [tesseract];
+      fixture.detectChanges();
+
+      const emitted: (MarkHighlightRequest | null)[] = [];
+      component.propagationHighlightChange.subscribe(req => emitted.push(req));
+      let lifecycleClearCount = 0;
+      component.lifecycleClear.subscribe(() => lifecycleClearCount++);
+      component.openAddMark();
+      expect(component.addMarkOpen).toBeTrue();
+
+      // Simulate Angular reusing this exact component instance for a
+      // DIFFERENT target — e.g. `@for (t of host.targets; track t.id)`
+      // reusing a slot because two different `MatrixTarget` objects share an
+      // id across a change-detection cycle. `availableDeckers` alone would
+      // not close this picker (deviceB has the same room as deviceA), so
+      // this exercises the `changes['target']` branch specifically, not the
+      // path-10 `availableDeckers.length === 0` branch above.
+      component.target = deviceB;
+      component.ngOnChanges({ target: {} } as never);
+
+      expect(component.addMarkOpen).toBeFalse();
+      expect(lifecycleClearCount).toBe(1);
+      expect(emitted.length).toBe(1); // only the original openAddMark() emit
+    });
   });
+
+  // ── Decision 9 + mark-propagation-highlight-spec.md — the highlight itself ──
+
+  describe('HierarchyEditorComponent propagation highlight (mark-propagation-highlight-spec.md, 2026-09-05)', () => {
+    let fixture: ComponentFixture<HierarchyEditorComponent>;
+    let component: HierarchyEditorComponent;
+    let matrixState: MatrixStateService;
+    let host: MatrixHost;
+    let decker: MatrixParticipant;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [HierarchyEditorComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(HierarchyEditorComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.activeDeckers = [decker];
+
+      host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      fixture.detectChanges();
+    });
+
+    /** Opens a public target's +Mark control by driving the card directly, the same way the DOM click would. */
+    function openPickerOn(targetId: string): TargetCardComponent {
+      const card = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === targetId)!;
+      card.openAddMark();
+      fixture.detectChanges();
+      return card;
+    }
+
+    function highlightClasses(): Element[] {
+      return Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('.hier-prop-landing, .hier-prop-capped')
+      );
+    }
+
+    // ── S1 — Ordinary: smartgun -> mount -> drone chain (AC-1, AC-2, AC-10, AC-11) ──
+
+    it('S1: opening +Mark on the smartgun highlights the mount and the drone, landing, with distinct rails and no highlight on the clicked icon itself', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const card = openPickerOn('gn');
+
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      const drNode = fixture.nativeElement.querySelector("[data-target-id='dr']") as HTMLElement;
+      const gnNode = fixture.nativeElement.querySelector("[data-target-id='gn']") as HTMLElement;
+
+      expect(mtNode.classList).toContain('hier-prop-landing');
+      expect(drNode.classList).toContain('hier-prop-landing');
+      expect(gnNode.classList).not.toContain('hier-prop-landing');
+      expect(gnNode.classList).not.toContain('hier-prop-capped');
+
+      // AC-1/AC-2: highlighted count equals the number of records addMark()
+      // will change (mount + drone = 2), and the highlighted ids match.
+      expect(component.highlightStateFor('mt')).toBe('landing');
+      expect(component.highlightStateFor('dr')).toBe('landing');
+      expect(component.highlightStateFor('gn')).toBeNull();
+
+      // AC-11: marker glyph and accessible name, no reference to colour.
+      const markers = fixture.nativeElement.querySelectorAll('.tc-prop-marker');
+      expect(markers.length).toBe(2);
+      for (const marker of Array.from(markers) as HTMLElement[]) {
+        expect(marker.textContent?.trim()).toBe('▲');
+        expect(marker.getAttribute('aria-label')).toBeTruthy();
+      }
+      expect(fixture.nativeElement.querySelector("[data-target-id='gn'] .tc-prop-marker")).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('.tc-propagation-preview').length).toBe(0);
+
+      // AC-10: geometry - each ancestor's node rect vertically contains the
+      // clicked card's marks-row rect, at a distinct x each.
+      const gnMarksRow = gnNode.querySelector('.tc-marks-row') as HTMLElement;
+      const gnRect = gnMarksRow.getBoundingClientRect();
+      const mtRect = mtNode.getBoundingClientRect();
+      const drRect = drNode.getBoundingClientRect();
+      expect(mtRect.top).toBeLessThanOrEqual(gnRect.top);
+      expect(mtRect.bottom).toBeGreaterThanOrEqual(gnRect.bottom);
+      expect(drRect.top).toBeLessThanOrEqual(gnRect.top);
+      expect(drRect.bottom).toBeGreaterThanOrEqual(gnRect.bottom);
+      expect(drRect.left).toBeLessThan(mtRect.left);
+      expect(mtRect.left).toBeLessThan(gnNode.getBoundingClientRect().left);
+
+      // Confirm: the write path is untouched (AC-17's choke point).
+      card.confirmAddMark();
+      fixture.detectChanges();
+
+      expect(gun.marks['Tesseract']).toBe(1);
+      expect(mount.marks['Tesseract']).toBe(1);
+      expect(drone.marks['Tesseract']).toBe(1);
+      expect(mount.propagatedMarks['Tesseract']).toBeTrue();
+      expect(drone.propagatedMarks['Tesseract']).toBeTrue();
+      expect(gun.propagatedMarks['Tesseract']).toBeUndefined();
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    // ── S2 — capped ancestor mid-chain does not end the chain (AC-3, AC-11) ──
+
+    it('S2: a capped ancestor mid-chain renders capped/dashed, and the chain still highlights the reachable ancestor beyond it', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      mount.marks['Tesseract'] = 3;
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const card = openPickerOn('gn');
+
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      const drNode = fixture.nativeElement.querySelector("[data-target-id='dr']") as HTMLElement;
+
+      expect(mtNode.classList).toContain('hier-prop-capped');
+      expect(mtNode.classList).not.toContain('hier-prop-landing');
+      expect(drNode.classList).toContain('hier-prop-landing');
+      expect(drNode.classList).not.toContain('hier-prop-capped');
+
+      const mtMarker = mtNode.querySelector('.tc-prop-marker') as HTMLElement;
+      const drMarker = drNode.querySelector('.tc-prop-marker') as HTMLElement;
+      expect(mtMarker.textContent?.trim()).toBe('△');
+      expect(drMarker.textContent?.trim()).toBe('▲');
+
+      expect(getComputedStyle(mtNode).borderLeftStyle).toBe('dashed');
+      expect(getComputedStyle(drNode).borderLeftStyle).toBe('solid');
+      // Only the landing state carries the extra inset box-shadow (spec
+      // "Rendering" §4) — the capped rail's non-colour cue is the
+      // border-left-style/colour change asserted above, not a shadow.
+      expect(getComputedStyle(mtNode).boxShadow).toBe('none');
+      expect(getComputedStyle(drNode).boxShadow).toContain('255, 179, 64');
+
+      card.confirmAddMark();
+      fixture.detectChanges();
+
+      expect(gun.marks['Tesseract']).toBe(1);
+      expect(mount.marks['Tesseract']).toBe(3); // absorbed, unchanged
+      expect(drone.marks['Tesseract']).toBe(1); // still reached — the cap is not a stop
+    });
+
+    // ── Round-8 review, Defect D-1: hovering a highlighted icon must not
+    //    erase its tint. `.tc-wrap:hover .tc-info-row` (specificity 0,3,0)
+    //    used to beat a bare `.tc-info-row.tc-prop-*` (0,2,0) outright,
+    //    which is why a real Chrome measurement found a hovered landing row
+    //    computing `rgb(10, 26, 10)` (the hover colour) instead of the
+    //    amber tint, and a hovered capped row losing its tint while its
+    //    dashed outline (a property `:hover` never sets) survived. ──
+
+    it('D-1: hovering a highlighted device row does not erase its landing or capped tint', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      mount.marks['Tesseract'] = 3; // capped, so this fixture covers both states at once
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+
+      const mtWrap = (fixture.nativeElement.querySelector("[data-target-id='mt'] .tc-wrap")) as HTMLElement;
+      const drWrap = (fixture.nativeElement.querySelector("[data-target-id='dr'] .tc-wrap")) as HTMLElement;
+      const mtRow = mtWrap.querySelector('.tc-info-row') as HTMLElement;
+      const drRow = drWrap.querySelector('.tc-info-row') as HTMLElement;
+
+      // Unhovered: the tint is present (sanity, not the point of this test).
+      expect(getComputedStyle(drRow).backgroundColor).toBe('rgba(255, 179, 64, 0.14)');
+      expect(getComputedStyle(mtRow).backgroundColor).toBe('rgba(255, 179, 64, 0.06)');
+      expect(getComputedStyle(mtRow).outlineStyle).toBe('dashed');
+
+      withSimulatedHover('.tc-wrap', hoverClass => {
+        drWrap.classList.add(hoverClass);
+        mtWrap.classList.add(hoverClass);
+
+        expect(getComputedStyle(drRow).backgroundColor).toBe('rgba(255, 179, 64, 0.14)'); // landing survives hover
+        expect(getComputedStyle(mtRow).backgroundColor).toBe('rgba(255, 179, 64, 0.06)'); // capped survives hover
+        expect(getComputedStyle(mtRow).outlineStyle).toBe('dashed'); // was already surviving; still does
+
+        drWrap.classList.remove(hoverClass);
+        mtWrap.classList.remove(hoverClass);
+      });
+    });
+
+    it('D-1: hovering a highlighted host header does not erase its landing or capped tint', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      const hostHeader = fixture.nativeElement.querySelector('.hier-host-header') as HTMLElement;
+      expect(getComputedStyle(hostHeader).backgroundColor).toBe('rgba(255, 179, 64, 0.14)');
+
+      withSimulatedHover('.hier-host-header', hoverClass => {
+        hostHeader.classList.add(hoverClass);
+        expect(getComputedStyle(hostHeader).backgroundColor).toBe('rgba(255, 179, 64, 0.14)');
+        hostHeader.classList.remove(hoverClass);
+      });
+    });
+
+    // ── AC-4 — every destination capped ──
+
+    it('AC-4: when every destination is capped, both render capped and neither renders landing', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      mount.marks['Tesseract'] = 3;
+      drone.marks['Tesseract'] = 3;
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+
+      expect(component.highlightStateFor('mt')).toBe('capped');
+      expect(component.highlightStateFor('dr')).toBe('capped');
+      const anyLanding = fixture.nativeElement.querySelectorAll('.hier-prop-landing');
+      expect(anyLanding.length).toBe(0);
+    });
+
+    // ── AC-5 — decker switch changes the rendered states live ──
+
+    it('AC-5: switching the selected decker in the picker changes the rendered highlight states with no further GM action', () => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      mount.marks['Tesseract'] = 3; // capped for Tesseract, open for Slamm-0
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      const card = openPickerOn('gn');
+      expect(component.highlightStateFor('mt')).toBe('capped');
+
+      card.onSelectedDeckerChange('Slamm-0');
+      fixture.detectChanges();
+
+      expect(component.highlightStateFor('mt')).toBe('landing');
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      expect(mtNode.classList).toContain('hier-prop-landing');
+    });
+
+    // ── AC-8 — non-device targets never highlight ──
+
+    it('AC-8: no highlight is produced for a file, even inside a host, with a decker selected and unblocked', () => {
+      const file = new MatrixTarget({ id: 'f1', type: 'file', context: 'host', linkedHostId: host.id });
+      host.targets.push(file);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      const card = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'f1')!;
+      // A decker must actually be selected and unblocked, or this would
+      // pass vacuously without ever reaching previewPropagation() (the
+      // same "wrong reason" trap flagged at the retired test's
+      // :1673-1680 comment - kept here verbatim in spirit).
+      card.selectedDeckerId = 'Tesseract';
+      card.openAddMark();
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelectorAll('.tc-prop-marker').length).toBe(0);
+    });
+
+    // ── AC-9 — device with nothing to propagate to, both halves ──
+
+    it('AC-9: no highlight is produced for a device with no linkedHostId and no parent', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'public' });
+      matrixState.addTarget(null, device);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    it('AC-9 (second half): no highlight is produced for a device parented to a resolvable non-device (file) parent', () => {
+      const fileParent = new MatrixTarget({ id: 'fp1', name: 'Some File', type: 'file', context: 'public' });
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'public', parentTargetId: 'fp1' });
+      matrixState.addTarget(null, fileParent);
+      matrixState.addTarget(null, device);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    // ── AC-6 — nothing highlighted while blocked ──
+
+    it('AC-6: while addMarkBlockedReason is non-null (single decker, already capped), no element carries a highlight class and no marker renders', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      const card = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'd1')!;
+      for (let i = 0; i < 3; i++) {
+        card.openAddMark();
+        card.confirmAddMark();
+      }
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(3);
+
+      card.openAddMark(); // openAddMark() does not reseed selectedDeckerId — it is already truthy
+      fixture.detectChanges();
+
+      expect(card.selectedDeckerId).toBe('Tesseract');
+      expect(card.addMarkBlockedReason).not.toBeNull();
+      // NOTE (carried over from the retired test's review-defect-3 comment):
+      // with only one decker, availableDeckers is now empty, so
+      // `@if (availableDeckers.length > 0)` removes the whole +Mark group
+      // from this card's own DOM — the assertion below is therefore true
+      // for the wrong reason on ITS OWN card (nothing to click at all).
+      // The real guard for "the highlight specifically is suppressed while
+      // the control stays visible" is the two-decker test below (S4).
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelectorAll('.tc-prop-marker').length).toBe(0);
+    });
+
+    // ── S4 — the four-tap capped-decker sequence, mid-combat (AC-6, AC-7) ──
+
+    it('S4: a capped decker suppresses the highlight; selecting the decker with room reveals it', () => {
+      const doorController = new MatrixTarget({ id: 'dc', name: 'Door Controller', type: 'device', context: 'public' });
+      const maglock = new MatrixTarget({ id: 'ml', name: 'Maglock', type: 'device', context: 'public', parentTargetId: 'dc' });
+      maglock.marks['Tesseract'] = 3;
+      matrixState.addTarget(null, doorController);
+      matrixState.addTarget(null, maglock);
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      const card = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'ml')!;
+      card.selectedDeckerId = 'Tesseract'; // still selected from a previous placement
+      card.openAddMark();
+      fixture.detectChanges();
+
+      expect(card.availableDeckers.map(d => d.name)).toEqual(['Slamm-0']);
+      expect(card.addMarkBlockedReason).toBe('Tesseract already holds the maximum 3 marks on this icon (p. 236)');
+      expect(card.canConfirmAddMark).toBeFalse();
+      // The group is genuinely still rendered — a second decker has room —
+      // so these DOM assertions are real, unlike the single-decker AC-6
+      // test above.
+      const mlNode = fixture.nativeElement.querySelector("[data-target-id='ml']") as HTMLElement;
+      expect(mlNode.querySelector('.tc-add-mark-group')).not.toBeNull();
+      expect(mlNode.querySelector('.tc-add-mark-blocked')).not.toBeNull();
+      // No highlight promising a propagation that cannot occur.
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelectorAll('.tc-prop-marker').length).toBe(0);
+
+      card.onSelectedDeckerChange('Slamm-0');
+      fixture.detectChanges();
+
+      const dcNode = fixture.nativeElement.querySelector("[data-target-id='dc']") as HTMLElement;
+      expect(dcNode.classList).toContain('hier-prop-landing');
+      expect(card.canConfirmAddMark).toBeTrue();
+
+      card.confirmAddMark();
+      fixture.detectChanges();
+
+      expect(maglock.marks['Slamm-0']).toBe(1);
+      expect(doorController.marks['Slamm-0']).toBe(1);
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    // ── AC-7 — host destination, landing and capped ──
+
+    it('AC-7: a device inside a host highlights the host header, landing; the target row itself is never highlighted', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      const hostHeader = fixture.nativeElement.querySelector('.hier-host-header') as HTMLElement;
+      const hostNode = fixture.nativeElement.querySelector('.hier-host-node') as HTMLElement;
+      expect(hostHeader.classList).toContain('hier-prop-landing');
+      expect(hostNode.classList).toContain('hier-prop-landing');
+      const marker = hostHeader.querySelector('.hier-prop-marker') as HTMLElement;
+      expect(marker.textContent?.trim()).toBe('▲');
+      expect(marker.getAttribute('aria-label')).toBeTruthy();
+      expect(getComputedStyle(hostNode).boxShadow).toContain('255, 179, 64');
+      // A host target is never itself a destination (branch (b) only ever
+      // emits public targets, branch (a) only ever emits hosts) — the
+      // binding exists on it anyway (spec "Reachability finding"), but it
+      // must never actually light up.
+      const targetCardRow = fixture.nativeElement.querySelector("app-target-card .tc-info-row") as HTMLElement;
+      expect(targetCardRow.classList).not.toContain('hier-prop-landing');
+      expect(targetCardRow.classList).not.toContain('tc-prop-landing');
+    });
+
+    it('AC-7: a capped host renders the capped state, not landing', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      host.marks['Tesseract'] = 3;
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      const hostHeader = fixture.nativeElement.querySelector('.hier-host-header') as HTMLElement;
+      const hostNode = fixture.nativeElement.querySelector('.hier-host-node') as HTMLElement;
+      expect(hostHeader.classList).toContain('hier-prop-capped');
+      expect(hostHeader.classList).not.toContain('hier-prop-landing');
+      expect(hostNode.classList).toContain('hier-prop-capped');
+      expect(hostNode.classList).not.toContain('hier-prop-landing');
+      const marker = hostHeader.querySelector('.hier-prop-marker') as HTMLElement;
+      expect(marker.textContent?.trim()).toBe('△');
+
+      // Round-8 review, Defect D-4b: N-10's dashed host rail
+      // (`.hier-host-node.hier-prop-capped::before`) had no computed-style
+      // assertion anywhere in the suite — only its class name was checked.
+      // Mirrors the device rail's own capped/landing computed-style pair
+      // (S2, above: `getComputedStyle(mtNode).borderLeftStyle` /
+      // `.boxShadow`). The capped host rail is a `::before` pseudo-element
+      // (`hierarchy-editor.component.css`, N-10's comment), not the node's
+      // own border, because `border-left` on `.hier-host-node` is reserved
+      // for `.hier-host-active`.
+      expect(getComputedStyle(hostNode).boxShadow).toBe('none');
+      const cappedRail = getComputedStyle(hostNode, '::before');
+      expect(cappedRail.borderLeftStyle).toBe('dashed');
+      expect(cappedRail.borderLeftColor).toContain('255, 179, 64');
+    });
+
+    // ── Round-8 review, Defect D-5 ────────────────────────────────────────
+
+    it('D-5: clicking the host marker glyph does not collapse the host (N-8\'s stopPropagation guard)', () => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+
+      const marker = fixture.nativeElement.querySelector('.hier-host-header .hier-prop-marker') as HTMLElement;
+      expect(marker).not.toBeNull();
+      expect(component.isHostExpanded(host.id)).toBeTrue();
+
+      // The marker sits inside `.hier-host-header`, whose own (click)
+      // handler collapses the host (`toggleHost()`). Without N-8's
+      // `(click)="$event.stopPropagation()"` on the marker itself, a tap
+      // meant to read the marker's tooltip would bubble to the header and
+      // collapse the host instead — destroying the very picker/highlight
+      // the GM was just looking at.
+      marker.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(component.isHostExpanded(host.id)).toBeTrue(); // unchanged — did not collapse
+    });
+
+    // ── S8 — the host case, collapsed and expanded ──
+
+    it('S8: a host target is not rendered while its host is collapsed; expanding and opening +Mark highlights the host; collapsing again clears it', fakeAsync(() => {
+      const cam = new MatrixTarget({ id: 'cam', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(cam);
+      fixture.detectChanges(); // expandedHosts starts empty (ts) — host starts collapsed
+
+      expect(fixture.debugElement.query(By.directive(TargetCardComponent))).toBeNull();
+      expect(highlightClasses().length).toBe(0);
+
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+      openPickerOn('cam');
+
+      const hostHeader = fixture.nativeElement.querySelector('.hier-host-header') as HTMLElement;
+      expect(hostHeader.classList).toContain('hier-prop-landing');
+      expect(hostHeader.querySelector('.tc-prop-marker, .hier-prop-marker')).not.toBeNull();
+
+      // Genuine collapse case (spec Lifecycle table path 7): this destroys
+      // `cam`'s own card, whose own `ngOnDestroy` clears the highlight,
+      // deferred past this change-detection pass (round-6 review, defects
+      // 1-3) — `toggleHost()` itself no longer touches highlight state at
+      // all (the removed Defect-3 hack).
+      expect(() => {
+        component.toggleHost(host.id); // collapse again while the picker is open
+        fixture.detectChanges();
+      }).not.toThrow(); // no NG0100
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(fixture.debugElement.query(By.directive(TargetCardComponent))).toBeNull();
+      expect(highlightClasses().length).toBe(0);
+    }));
+
+    // ── S5 (defensive, component level) — both host and parent-chain branches fire for one target ──
+
+    it('S5 (component level): both the host branch and the parent-chain branch highlight for one target; the host is not a DOM ancestor of the clicked card so the rail cue does not apply to it', () => {
+      // Not reachable through the UI today (a public target's form never
+      // sets linkedHostId), but MatrixTarget's constructor has no
+      // validation stopping this shape (e.g. via updateTarget()).
+      const rooftop = new MatrixTarget({ id: 'p1', name: 'Rooftop Node', type: 'device', context: 'public' });
+      const odd = new MatrixTarget({
+        id: 't1', name: 'Odd Device', type: 'device', context: 'public',
+        linkedHostId: host.id, parentTargetId: 'p1'
+      });
+      matrixState.addTarget(null, rooftop);
+      matrixState.addTarget(null, odd);
+      fixture.detectChanges();
+
+      component.onPropagationHighlightChange({ target: odd, deckerId: 'Tesseract' });
+      fixture.detectChanges();
+
+      expect(component.highlightStateFor(host.id)).toBe('landing');
+      expect(component.highlightStateFor('p1')).toBe('landing');
+      // The host node lives in a completely different section of the tree
+      // from `odd`'s `.hier-public-node` — there is no DOM ancestor
+      // relationship between them, so no rail visually connects the two,
+      // even though both are correctly flagged at the state level. This is
+      // residual risk 2 from the spec ("One genuinely unreachable case"),
+      // restated for the one shape that IS reachable off the happy path.
+      const hostNode = fixture.nativeElement.querySelector('.hier-host-node') as HTMLElement | null;
+      const rooftopNode = fixture.nativeElement.querySelector("[data-target-id='p1']") as HTMLElement;
+      if (hostNode) {
+        expect(hostNode.contains(rooftopNode)).toBeFalse();
+        expect(rooftopNode.contains(hostNode)).toBeFalse();
+      }
+    });
+
+    // ── AC-18 — malformed cycle terminates, component-state level ──
+
+    it('AC-18: highlightStateFor() terminates and does not throw for a node reached via a malformed parent cycle (renders nowhere in the tree, so asserted at state level)', () => {
+      const a = new MatrixTarget({ id: 'a', name: 'A-Device', type: 'device', context: 'public', parentTargetId: 'b' });
+      const b = new MatrixTarget({ id: 'b', name: 'B-Device', type: 'device', context: 'public', parentTargetId: 'a' }); // cycle
+      matrixState.addTarget(null, a);
+      matrixState.addTarget(null, b);
+
+      // childrenOf(null) matches neither a nor b (each has a parent), so
+      // this fixture renders no node at all — confirmed directly.
+      expect(component.childrenOf(null).length).toBe(0);
+
+      expect(() => component.onPropagationHighlightChange({ target: a, deckerId: 'Tesseract' })).not.toThrow();
+      expect(component.highlightStateFor('b')).toBe('landing');
+      expect(component.highlightStateFor('a')).toBeNull();
+    });
+
+    // ── AC-15 — purity: reading highlight accessors mutates nothing ──
+
+    it('AC-15: reading highlightStateFor() and propagationDestinationNames() mutates nothing and fires no stateChange$', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const card = openPickerOn('gn');
+
+      let fireCount = 0;
+      matrixState.stateChange$.subscribe(() => fireCount++);
+
+      void component.highlightStateFor('mt');
+      void component.highlightStateFor('dr');
+      void component.highlightStateFor('gn');
+      void card.propagationDestinationNames();
+
+      expect(fireCount).toBe(0);
+      expect(gun.marks['Tesseract']).toBeUndefined();
+      expect(mount.marks['Tesseract']).toBeUndefined();
+      expect(drone.marks['Tesseract']).toBeUndefined();
+      expect(mount.propagatedMarks['Tesseract']).toBeUndefined();
+      expect(drone.propagatedMarks['Tesseract']).toBeUndefined();
+    });
+
+    // ── AC-13 — layout neutrality: opening the picker changes no geometry ──
+
+    it('AC-13: opening the picker changes no .hier-public-node or .tc-info-row geometry anywhere in the tree, other than the +Mark group\'s own open/closed swap', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      // Defect 6 (round-6 review): the original version of this test had
+      // nothing rendered below `gn` in Public Space, so it passed even
+      // though its `top`-exemption logic was incoherent — a swap-driven
+      // height change on `gn`'s own row necessarily pushes down the `top`
+      // of anything that renders AFTER `gn` in document order, not just
+      // `gn` and its ancestors' `height`. `camera` (an unrelated
+      // top-level device) makes that case reachable: it renders after the
+      // whole `dr -> mt -> gn` chain, so its `.hier-public-node`'s `top`
+      // must be allowed to shift, exactly reproducing the reviewer's
+      // measured failure (`Expected 147.5... to be close to 149.5...`)
+      // without touching the feature.
+      const camera = new MatrixTarget({ id: 'cam', name: 'Camera', type: 'device', context: 'public' });
+      matrixState.addTarget(null, camera);
+      // N-5 (round-7 review): the host-destination path — the only path
+      // that puts `hier-prop-landing`/`hier-prop-capped` on a
+      // `.hier-host-node`/`.hier-host-header` rather than a card's own
+      // `.tc-info-row` — was never included in this snapshot at all, so a
+      // `padding`/`border` regression on either host cue would ship green.
+      // An expanded host with a device inside makes both elements present
+      // and non-empty in the DOM (a collapsed or empty host renders neither
+      // the header's full content nor the body).
+      const hostDevice = new MatrixTarget({ id: 'hdv', name: 'Host Device', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(hostDevice);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      const nodesBefore = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
+      ) as HTMLElement[];
+      const rectsBefore = nodesBefore.map(el => el.getBoundingClientRect());
+
+      openPickerOn('gn');
+
+      const gnNode = fixture.nativeElement.querySelector("[data-target-id='gn']") as HTMLElement;
+      const nodesAfter = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
+      ) as HTMLElement[];
+      expect(nodesAfter.length).toBe(nodesBefore.length);
+      // The coherence check for the host elements specifically: prove they
+      // are actually present and being measured, not vacuously absent.
+      expect(fixture.nativeElement.querySelector('.hier-host-node')).not.toBeNull();
+      expect(fixture.nativeElement.querySelector('.hier-host-header')).not.toBeNull();
+
+      // Document-order-coherent exemption, replacing the incoherent
+      // ancestor-only one that only happened to pass because nothing
+      // followed `gn` in the original fixture (Defect 6):
+      //  - `gn` itself, or one of its DOM ancestors (`mt`, `dr`'s
+      //    `.hier-public-node`, which structurally contain `gn`'s own
+      //    growing row): `height`/`bottom` may legitimately grow from the
+      //    +Mark group's own open/closed swap (the one change AC-13
+      //    exempts); `left`/`top`/`width` must still hold — an ancestor's
+      //    OWN top is set by where it starts, never by its children's
+      //    height.
+      //  - anything that renders strictly AFTER `gn` in document order,
+      //    including a hypothetical descendant of `gn`'s own node
+      //    (`camera`, here, is a later sibling of the whole chain): DOM
+      //    ordinal position sets both `DOCUMENT_POSITION_FOLLOWING` and, for
+      //    an actual descendant, `DOCUMENT_POSITION_CONTAINED_BY`
+      //    together, so testing `FOLLOWING` alone already covers both — its
+      //    `top` may shift down by the same swap's height delta, but its own
+      //    `height`/`left`/`width` must hold: it is pushed, not resized.
+      //  - anything strictly BEFORE `gn` (nothing in this fixture, `dr`'s
+      //    and `mt`'s own rows sit earlier in the SAME nodes as the
+      //    "ancestor" case above): every geometry field must hold exactly.
+      nodesAfter.forEach((el, i) => {
+        const before = rectsBefore[i];
+        const after = el.getBoundingClientRect();
+        const isSelfOrAncestor = el === gnNode || el.contains(gnNode);
+        const isAfterInDocumentOrder = !isSelfOrAncestor
+          && !!(gnNode.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+        expect(after.left).toBeCloseTo(before.left, 0);
+        expect(after.width).toBeCloseTo(before.width, 0);
+        if (!isSelfOrAncestor) {
+          expect(after.height).toBeCloseTo(before.height, 0);
+        }
+        if (!isAfterInDocumentOrder) {
+          expect(after.top).toBeCloseTo(before.top, 0);
+        }
+      });
+
+      // The coherence check itself: prove the "after" branch is actually
+      // exercised, not vacuously true — otherwise this test could pass
+      // again for the wrong reason if a future fixture change removed
+      // `camera`.
+      const camNode = fixture.nativeElement.querySelector("[data-target-id='cam']") as HTMLElement;
+      expect(!!(gnNode.compareDocumentPosition(camNode) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTrue();
+
+      // Round-8 review, Defect D-4a: everything above measures the `dr`/`mt`
+      // PUBLIC ancestors of `gn` — `.hier-host-node`/`.hier-host-header` are
+      // present in both snapshots (the coherence check above proves that),
+      // but `gn`'s chain never reaches the host, so those two elements never
+      // actually carry `hier-prop-landing`/`hier-prop-capped` during either
+      // measurement. A padding/border regression scoped to those two host
+      // classes specifically would still ship green. This second phase
+      // re-measures with the picker open on `hdv` (the host-contained
+      // device already in this fixture) instead, so the host cues are
+      // measured while genuinely applied.
+      function nativeElFor(targetId: string): HTMLElement {
+        return fixture.debugElement
+          .queryAll(By.directive(TargetCardComponent))
+          .find(de => (de.componentInstance as TargetCardComponent).target.id === targetId)!
+          .nativeElement as HTMLElement;
+      }
+
+      const gunCardInstance = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'gn')!;
+      gunCardInstance.cancelAddMark();
+      fixture.detectChanges();
+      expect(highlightClasses().length).toBe(0);
+
+      // A second host, added after the first, gives this phase its own
+      // "renders after in document order" element for the pushed-`top`
+      // check — mirroring what `camera` did for the `gn` phase above.
+      // `.hier-host-header` renders unconditionally regardless of
+      // expansion (`hierarchy-editor.component.html:115-145`), so it does
+      // not need targets or to be expanded to exist in the DOM.
+      const host2 = new MatrixHost({ id: 'h2', name: 'Ares-8', rating: 2 });
+      matrixState.addHost(host2);
+      fixture.detectChanges();
+
+      const nodesBefore2 = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
+      ) as HTMLElement[];
+      const rectsBefore2 = nodesBefore2.map(el => el.getBoundingClientRect());
+
+      openPickerOn('hdv');
+
+      const hdvEl = nativeElFor('hdv');
+      const hostNode = fixture.nativeElement.querySelector(`[data-host-id='${host.id}']`) as HTMLElement;
+      const hostHeader = hostNode.querySelector('.hier-host-header') as HTMLElement;
+      // The coherence check for THIS phase: prove the host is actually
+      // highlighted during the measurement, not merely present.
+      expect(hostNode.classList).toContain('hier-prop-landing');
+      expect(hostHeader.classList).toContain('hier-prop-landing');
+
+      const nodesAfter2 = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
+      ) as HTMLElement[];
+      expect(nodesAfter2.length).toBe(nodesBefore2.length);
+
+      nodesAfter2.forEach((el, i) => {
+        const before = rectsBefore2[i];
+        const after = el.getBoundingClientRect();
+        const isSelfOrAncestor = el === hdvEl || el.contains(hdvEl);
+        const isAfterInDocumentOrder = !isSelfOrAncestor
+          && !!(hdvEl.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+        expect(after.left).toBeCloseTo(before.left, 0);
+        expect(after.width).toBeCloseTo(before.width, 0);
+        if (!isSelfOrAncestor) {
+          expect(after.height).toBeCloseTo(before.height, 0);
+        }
+        if (!isAfterInDocumentOrder) {
+          expect(after.top).toBeCloseTo(before.top, 0);
+        }
+      });
+
+      // The coherence check itself for this phase: prove the "after" branch
+      // is actually exercised here too.
+      const host2Node = fixture.nativeElement.querySelector(`[data-host-id='${host2.id}']`) as HTMLElement;
+      expect(!!(hdvEl.compareDocumentPosition(host2Node) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTrue();
+    });
+
+    // ── N-9 (round-7 review): does the marker glyph truncate a highlighted
+    //    destination's OWN name at the worst-case narrow pane width? Measured
+    //    in real ChromeHeadless layout, not assumed. Result, at
+    //    EFFECTIVE_NARROW_WIDTH_PX (354px) with the destination at depth 3 of
+    //    a 4-deep chain (the same worst case AC-12 uses): a 6-character name
+    //    ("NNNNNN") is unaffected (67px available both before and after the
+    //    marker inserts) because it was ALREADY being clipped to that width
+    //    or fits within the reduced one either way; names of exactly 7-8
+    //    characters are the narrow band where the row had just enough room
+    //    (67px) before the marker but not after (55px) — the marker's own
+    //    insertion is what tips them into ellipsis. By 9+ characters the name
+    //    was already truncated at 67px before the marker ever existed, so the
+    //    marker only shortens an already-truncated name further, which is the
+    //    accepted, pre-existing cost this cue's insertion always carried
+    //    (AC-13's "Round-6 review, Defect 5" correction).
+    //
+    //    Judgement call (round-7 review, evidence-based): the newly-truncated
+    //    band is real but narrow (a two-character window, only at the single
+    //    deepest/narrowest combination already tested elsewhere in this
+    //    suite) and every fix attempted for it (moving the marker out of flex
+    //    flow onto the icon) introduced its own layout regression elsewhere
+    //    (broke AC-13 by turning the icon's fixed-width wrapper into a
+    //    shrinkable flex item) — a worse, harder-to-spot failure than the one
+    //    being fixed. Recorded and left alone rather than carrying a change
+    //    that trades a narrow, cosmetic truncation for a structural layout
+    //    risk. This test locks in the CURRENT, measured behaviour so a future
+    //    change to this row's flex composition cannot silently make it worse
+    //    (e.g. widen the newly-truncated band, or start truncating names that
+    //    fit today) without failing here first.
+    it('N-9: measured — a highlighted destination\'s own name in the 7-8 character range newly truncates when the picker opens, at the worst-case narrow pane width; shorter and much longer names are unaffected', () => {
+      const NARROW_LEFT_PANE_WIDTH_PX = 426; // matrix-run-panel.component.css .matrix-left-pane
+      const HIER_TREE_INDENT_PER_LEVEL_PX = 18; // hierarchy-editor.component.html, marginLeft.px="depth * 18"
+      const CHAIN_DEPTH_FOR_LAYOUT_TEST = 4; // same depth AC-12 uses
+      const EFFECTIVE_NARROW_WIDTH_PX =
+        NARROW_LEFT_PANE_WIDTH_PX - HIER_TREE_INDENT_PER_LEVEL_PX * CHAIN_DEPTH_FOR_LAYOUT_TEST; // 354px
+
+      /** Builds a depth-4 chain whose nearest-to-clicked ancestor (depth 3) has `nearestNameLength` characters, and returns that ancestor's `.tc-name` scrollWidth/clientWidth before and after opening the +Mark picker on the depth-4 clicked leaf. */
+      function measureNearestAncestorName(nearestNameLength: number): { before: { scroll: number; client: number }; after: { scroll: number; client: number } } {
+        const tag = `n9-${nearestNameLength}`;
+        const names = ['Rooftop-Node', 'Relay-Station', 'Signal-Booster', 'N'.repeat(nearestNameLength)];
+        const chain = names.map((name, i) => new MatrixTarget({
+          id: `${tag}-t${i}`, name, type: 'device', context: 'public',
+          parentTargetId: i > 0 ? `${tag}-t${i - 1}` : undefined
+        }));
+        chain.forEach(t => matrixState.addTarget(null, t));
+        const clicked = new MatrixTarget({
+          id: `${tag}-clicked`, name: 'Clicked Device', type: 'device', context: 'public',
+          parentTargetId: `${tag}-t${chain.length - 1}`
+        });
+        matrixState.addTarget(null, clicked);
+        fixture.detectChanges();
+
+        const editorEl = fixture.nativeElement.querySelector('.hier-editor') as HTMLElement;
+        editorEl.style.width = `${EFFECTIVE_NARROW_WIDTH_PX}px`;
+        editorEl.style.overflow = 'hidden';
+        fixture.detectChanges();
+
+        const ancestorNode = fixture.nativeElement.querySelector(`[data-target-id='${tag}-t3']`) as HTMLElement;
+        const nameBefore = ancestorNode.querySelector('.tc-name') as HTMLElement;
+        const before = { scroll: nameBefore.scrollWidth, client: nameBefore.clientWidth };
+
+        openPickerOn(`${tag}-clicked`);
+
+        const nameAfter = ancestorNode.querySelector('.tc-name') as HTMLElement;
+        const after = { scroll: nameAfter.scrollWidth, client: nameAfter.clientWidth };
+        return { before, after };
+      }
+
+      const short = measureNearestAncestorName(6);
+      expect(short.before.scroll).toBeLessThanOrEqual(short.before.client); // not truncated before
+      expect(short.after.scroll).toBeLessThanOrEqual(short.after.client); // unaffected — was already at the row's floor
+
+      const boundary = measureNearestAncestorName(7);
+      expect(boundary.before.scroll).toBeLessThanOrEqual(boundary.before.client); // fits before the picker opens
+      expect(boundary.after.scroll).toBeGreaterThan(boundary.after.client); // measured: the marker's own insertion newly truncates it
+
+      // Round-8 review, Defect D-7: the title and the CSS comment both
+      // claimed the "7-8 character range" / "by 9+ characters" boundary
+      // without measuring 8 or 9 — only 6, 7 and 10 were ever run. Measured
+      // now so the claim matches what is actually asserted.
+      const boundary8 = measureNearestAncestorName(8);
+      expect(boundary8.before.scroll).toBeLessThanOrEqual(boundary8.before.client); // fits before the picker opens
+      expect(boundary8.after.scroll).toBeGreaterThan(boundary8.after.client); // newly truncated, same as 7
+
+      const nine = measureNearestAncestorName(9);
+      expect(nine.before.scroll).toBeGreaterThan(nine.before.client); // already truncated before the marker exists
+
+      const long = measureNearestAncestorName(10);
+      expect(long.before.scroll).toBeGreaterThan(long.before.client); // already truncated before the marker exists
+      expect(long.after.scroll).toBeGreaterThan(long.after.client); // still truncated — the marker did not create this case
+    });
+
+    // ── S3 — the destination's own row is scrolled out of view ──
+
+    it('S3: an ancestor scrolled out of view still shows its rail at the clicked row, and opening the picker does not auto-scroll', () => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, mount);
+      // Forty siblings parented to `mount`, rendered before `gun`, so
+      // scrolling to `gun` pushes `mount`'s own row out of the 500px
+      // .hier-editor window.
+      for (let i = 0; i < 40; i++) {
+        const filler = new MatrixTarget({ id: `filler${i}`, name: `Filler ${i}`, type: 'device', context: 'public', parentTargetId: 'mt' });
+        matrixState.addTarget(null, filler);
+      }
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const editorEl = fixture.nativeElement.querySelector('.hier-editor') as HTMLElement;
+      const gnNode = fixture.nativeElement.querySelector("[data-target-id='gn']") as HTMLElement;
+      gnNode.scrollIntoView();
+      editorEl.scrollTop = editorEl.scrollHeight; // scroll to the bottom, past mount's row
+      const scrollTopBefore = editorEl.scrollTop;
+
+      openPickerOn('gn');
+
+      expect(editorEl.scrollTop).toBe(scrollTopBefore); // no auto-scroll (Open Decision 2, declined)
+
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      const gnMarksRow = gnNode.querySelector('.tc-marks-row') as HTMLElement;
+      // The rail still runs down past the clicked row even though mount's
+      // own header is scrolled out of the visible area above it.
+      expect(mtNode.getBoundingClientRect().bottom).toBeGreaterThan(gnMarksRow.getBoundingClientRect().top);
+      expect(getComputedStyle(mtNode).boxShadow).toContain('255, 179, 64');
+    });
+
+    // ── S6 — cancel and re-open on a different icon ──
+
+    it('S6: cancelling clears the highlight and places nothing; opening a different icon highlights only its own ancestors', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const gunCard = openPickerOn('gn');
+      expect(highlightClasses().length).toBeGreaterThan(0);
+
+      gunCard.cancelAddMark();
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      expect(gun.marks['Tesseract']).toBeUndefined();
+
+      openPickerOn('mt');
+
+      const drNode = fixture.nativeElement.querySelector("[data-target-id='dr']") as HTMLElement;
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      const gnNode = fixture.nativeElement.querySelector("[data-target-id='gn']") as HTMLElement;
+      expect(drNode.classList).toContain('hier-prop-landing');
+      expect(mtNode.classList).not.toContain('hier-prop-landing'); // it is now the source, not a destination
+      expect(mtNode.classList).not.toContain('hier-prop-capped');
+      expect(gnNode.classList).not.toContain('hier-prop-landing'); // propagation is one-way, upward only
+      expect(gnNode.classList).not.toContain('hier-prop-capped');
+    });
+
+    // ── S7 — two pickers open at once: last-opened wins the HIGHLIGHT, but
+    //        only one picker is ever OPEN (Open Decision 3, superseded
+    //        2026-09-06, Defect 4) ──
+
+    it('S7: opening a second icon\'s picker closes the first (Defect 4) - last-opened still wins the highlight, but no picker is left open and armed', () => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      const camera = new MatrixTarget({ id: 'cm', name: 'Camera', type: 'device', context: 'public' }); // parented to nothing
+      matrixState.addTarget(null, gun);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, camera);
+      fixture.detectChanges();
+
+      // Round-8 review, Defect D-2: the final `.hier-mark-confirm` assertion
+      // below used to be vacuous — this fixture never expanded the host, so
+      // the host body (and `.hier-mark-confirm` with it) could not exist
+      // under any code, correct or broken. Expanding the host and actually
+      // arming its own +Mark control here means that assertion can fail.
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).not.toBeNull();
+
+      const gunCard = openPickerOn('gn');
+      expect(fixture.nativeElement.querySelector("[data-target-id='mt']").classList).toContain('hier-prop-landing');
+      expect(gunCard.addMarkOpen).toBeTrue();
+      // Opening a card's picker must close the host's own, already-armed
+      // control too (N-1, folded into the same one-picker-at-a-time rule).
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+
+      const camCard = openPickerOn('cm'); // camera has no destinations at all
+
+      // Defect 4: opening camera's picker closes gun's — not just replaces
+      // the highlight. Last-opened-wins still governs which chain
+      // highlights (unchanged): zero elements are highlighted, because
+      // camera has no destinations.
+      expect(highlightClasses().length).toBe(0);
+      expect(gunCard.addMarkOpen).toBeFalse();
+      expect(camCard.addMarkOpen).toBeTrue();
+
+      // Defect 4's actual repro: cancelling camera's picker must not leave
+      // gun's picker rediscovered as still-armed. It's already closed.
+      camCard.cancelAddMark();
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      // Zero armed pickers anywhere — N-1 (round-7 review): this used to
+      // query only `.tc-confirm-btn` (a card's own confirm button), which
+      // cannot see the host's own +Mark control (`.hier-mark-confirm`) —
+      // a THIRD picker outside this mechanism until N-1 folded it in. Both
+      // must be queried for the comment above to mean what it says.
+      expect(fixture.nativeElement.querySelectorAll('.tc-confirm-btn').length).toBe(0);
+      expect(fixture.nativeElement.querySelectorAll('.hier-mark-confirm').length).toBe(0);
+      expect(gunCard.addMarkOpen).toBeFalse();
+      expect(camCard.addMarkOpen).toBeFalse();
+    });
+
+    // ── N-4 (round-7 review): S7 could not discriminate the hazard it
+    //    guards, because `camera` has no destinations — asserting "zero
+    //    highlights" after opening its picker is equally true if a spurious
+    //    clear from the closing FIRST picker had wiped a correct new
+    //    highlight for the second. This test opens a SECOND picker that has
+    //    its own destinations while the first is still open. ──
+
+    it('N-4: opening a second icon\'s picker that has its own destinations highlights ONLY its own chain — the first picker\'s highlight does not linger, and the second\'s is not spuriously cleared', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      const tower = new MatrixTarget({ id: 'tw', name: 'Relay Tower', type: 'device', context: 'public' });
+      const sensor = new MatrixTarget({ id: 'sn', name: 'Sensor', type: 'device', context: 'public', parentTargetId: 'tw' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      matrixState.addTarget(null, tower);
+      matrixState.addTarget(null, sensor);
+      fixture.detectChanges();
+
+      const gunCard = openPickerOn('gn');
+      expect(fixture.nativeElement.querySelector("[data-target-id='mt']").classList).toContain('hier-prop-landing');
+      expect(fixture.nativeElement.querySelector("[data-target-id='dr']").classList).toContain('hier-prop-landing');
+
+      const snCard = openPickerOn('sn'); // sensor -> tower, its OWN one-hop chain
+
+      // The discriminating assertion N-4 exists for: the second picker's own
+      // destination (tower) is highlighted...
+      expect(fixture.nativeElement.querySelector("[data-target-id='tw']").classList).toContain('hier-prop-landing');
+      // ...and the first picker's destinations do not linger, highlighted or
+      // otherwise armed.
+      expect(fixture.nativeElement.querySelector("[data-target-id='mt']").classList).not.toContain('hier-prop-landing');
+      expect(fixture.nativeElement.querySelector("[data-target-id='dr']").classList).not.toContain('hier-prop-landing');
+      expect(gunCard.addMarkOpen).toBeFalse();
+      expect(snCard.addMarkOpen).toBeTrue();
+      // Exactly one destination highlighted anywhere — the count itself
+      // proves neither a stale first-chain highlight nor a spurious clear of
+      // the second.
+      expect(highlightClasses().length).toBe(1);
+    });
+
+    // ── N-1 (round-7 review, Xavier's decision, 2026-09-06): fold the
+    //    host's own +Mark control into the one-picker-at-a-time rule ──
+
+    it('N-1: opening a card\'s +Mark picker closes the host\'s own, already-open and armed +Mark control', () => {
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public' });
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      // Round-8 review, Defect D-8: calling `openHostAddMark()` directly
+      // while the host is still collapsed drives a sequence unreachable
+      // through the UI — the +Mark button it arms lives inside the
+      // collapsed host body (`hierarchy-editor.component.html:196-210`),
+      // gated on `isHostExpanded()`. Expanding first, and asserting on the
+      // rendered DOM rather than component state alone, is what a real GM
+      // tap sequence actually produces.
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract'); // armed: a decker was seeded
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).not.toBeNull();
+
+      openPickerOn('gn');
+
+      expect(component.getHostMarkState(host.id).open).toBeFalse();
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+    });
+
+    it('N-1: opening the host\'s own +Mark control closes a card\'s already-open picker, and clears the highlight it was showing', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'dr' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const gunCard = openPickerOn('gn');
+      expect(gunCard.addMarkOpen).toBeTrue();
+      expect(highlightClasses().length).toBeGreaterThan(0); // dr is highlighted
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(gunCard.addMarkOpen).toBeFalse();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+      // The reachable hazard N-1 fixes: `closePickerSilently()` deliberately
+      // emits nothing (it is correct for a card losing to ANOTHER card,
+      // whose own emit is about to replace the highlight) — opening the
+      // host's own control replaces it with nothing, so gun's now-stale
+      // highlight must not linger with no picker left open to explain it.
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    // ── Round-6 review, Defect 1 ─────────────────────────────────────────
+
+    it('Defect 1: deleting the clicked target while its own picker is open clears the highlight cleanly, with no NG0100', fakeAsync(() => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+      expect(highlightClasses().length).toBe(2);
+
+      // `gn` has no children of its own, so deleteTarget() does not prompt
+      // via window.confirm() here — this exercises the plain delete path.
+      expect(() => {
+        component.deleteTarget(null, gun);
+        fixture.detectChanges(); // the pass that used to throw NG0100
+      }).not.toThrow();
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelector("[data-target-id='gn']")).toBeNull();
+    }));
+
+    // ── Round-6 review, Defect 2 ─────────────────────────────────────────
+
+    it('Defect 2: activeDeckers emptying while the picker is open clears the highlight cleanly, with no NG0100', fakeAsync(() => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+      expect(highlightClasses().length).toBe(1);
+
+      // The last active decker jacks out — a fresh, empty array, exactly
+      // the shape a real jack-out produces.
+      expect(() => {
+        component.activeDeckers = [];
+        fixture.detectChanges(); // the pass that used to throw NG0100
+      }).not.toThrow();
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+    }));
+
+    // ── Round-6 review, Defect 3 ─────────────────────────────────────────
+
+    it('Defect 3 regression guard: collapsing an UNRELATED host while a public-tree picker is open leaves the highlight and the picker untouched (fails against the removed toggleHost() hack)', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      const unrelatedHost = new MatrixHost({ id: 'h2', name: 'Renraku Arcology', rating: 6 });
+      matrixState.addHost(unrelatedHost);
+      fixture.detectChanges();
+
+      const gunCard = openPickerOn('gn');
+      expect(highlightClasses().length).toBe(2);
+
+      component.toggleHost(unrelatedHost.id); // expand — unrelated to the open picker
+      fixture.detectChanges();
+      component.toggleHost(unrelatedHost.id); // collapse again — the regression guard
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(2);
+      expect(gunCard.addMarkOpen).toBeTrue();
+      expect(fixture.nativeElement.querySelector("[data-target-id='mt']").classList).toContain('hier-prop-landing');
+      expect(fixture.nativeElement.querySelector("[data-target-id='dr']").classList).toContain('hier-prop-landing');
+    });
+
+    // ── Round-8 review, Defect D-3 ────────────────────────────────────────
+
+    it('D-3: collapsing a host with its own +Mark picker armed, then re-expanding, does not resurrect the picker', () => {
+      // Repro: expand a host, tap its +Mark (a decker auto-seeds), fold the
+      // host shut, re-open it — unlike a card's own picker (destroyed with
+      // its component on collapse), `hostMarkState` is a `Map` entry owned
+      // by this component, not destroyed by the `@if (isHostExpanded(...))`
+      // gate — so without this fix the `<select> ✓ ✕` re-rendered still
+      // armed with the last decker, one stray tap from placing a host mark
+      // with no undo.
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).not.toBeNull();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+
+      component.toggleHost(host.id); // collapse while armed
+      fixture.detectChanges();
+      component.toggleHost(host.id); // re-expand
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+      expect(component.getHostMarkState(host.id).open).toBeFalse();
+    });
+
+    it('Defect 3 (genuine case): collapsing Public Space while its own picker is open clears cleanly; re-expanding does not reopen the picker', fakeAsync(() => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+      expect(highlightClasses().length).toBe(1);
+
+      expect(() => {
+        component.togglePublicSpace(); // collapse — destroys gun's own card
+        fixture.detectChanges(); // the pass that used to throw NG0100
+      }).not.toThrow();
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+
+      component.togglePublicSpace(); // re-expand
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelectorAll('.tc-confirm-btn').length).toBe(0); // no picker re-opened
+    }));
+
+    // ── Round-6 review, defect-list test 6 (lifecycle path 12, "passes today; lock it in") ──
+
+    it('an external write capping an ancestor while its picker is open flips that ancestor from landing to capped live, with no error', () => {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      openPickerOn('gn');
+      const mtNode = fixture.nativeElement.querySelector("[data-target-id='mt']") as HTMLElement;
+      expect(mtNode.classList).toContain('hier-prop-landing');
+
+      // An external write - e.g. a different GM control or session sync,
+      // not this card's own confirm - caps `mount` for the same decker
+      // while `gn`'s picker is still open.
+      expect(() => {
+        matrixState.addMark(mount, 'Tesseract');
+        matrixState.addMark(mount, 'Tesseract');
+        matrixState.addMark(mount, 'Tesseract');
+        fixture.detectChanges();
+      }).not.toThrow();
+
+      expect(mtNode.classList).toContain('hier-prop-capped');
+      expect(mtNode.classList).not.toContain('hier-prop-landing');
+    });
+
+    // ── Round-6 review, Defect 7, defect-list test 7 ──────────────────────
+
+    it('Defect 7: an external write capping the LAST available decker on the open picker\'s own icon closes the picker and clears the highlight', () => {
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+
+      const gunCard = openPickerOn('gn');
+      expect(gunCard.addMarkOpen).toBeTrue();
+      expect(highlightClasses().length).toBe(1);
+
+      // Reaches the exact icon the open picker is FOR, with no `@Input`
+      // change at all — `ngOnChanges()`'s path-10 guard cannot see this;
+      // only `HierarchyEditorComponent.recomputeHighlight()`'s
+      // `stateChange$`-driven check can (Defect 7).
+      matrixState.addMark(gun, 'Tesseract');
+      matrixState.addMark(gun, 'Tesseract');
+      matrixState.addMark(gun, 'Tesseract');
+      fixture.detectChanges();
+
+      expect(gunCard.addMarkOpen).toBeFalse();
+      expect(highlightClasses().length).toBe(0);
+    });
+
+    // ── N-6 (round-7 review): Lifecycle table path 8 — host deleted while
+    //    a card inside it has its picker open — had no test. Reachable: the
+    //    host's own subtree, including the open card, is destroyed the
+    //    moment `deleteHost()` removes it from `state.hosts`. ──
+
+    it('Lifecycle path 8: deleting the host while a card inside it has its own picker open clears the highlight cleanly, with no NG0100', fakeAsync(() => {
+      const device = new MatrixTarget({ id: 'd1', type: 'device', context: 'host', linkedHostId: host.id });
+      host.targets.push(device);
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      openPickerOn('d1');
+      expect(fixture.nativeElement.querySelector('.tc-add-mark-group')).not.toBeNull();
+
+      expect(() => {
+        component.deleteHost(host);
+        fixture.detectChanges(); // the pass that used to throw NG0100
+      }).not.toThrow();
+
+      tick(); // flush the deferred clearing emit
+      fixture.detectChanges();
+
+      expect(highlightClasses().length).toBe(0);
+      expect(fixture.nativeElement.querySelector('.hier-host-node')).toBeNull();
+    }));
+  });
+
 
   // ── Decision 7 — marks propagate up the containment hierarchy ──────────
 
@@ -1971,6 +3605,112 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(() => matrixState.addMark(a, 'Tesseract')).not.toThrow();
       expect(a.marks['Tesseract']).toBe(1);
       expect(b.marks['Tesseract']).toBe(1); // reached once, not looped
+    });
+
+    // mark-propagation-preview-spec.md — the preview and the write path must
+    // walk the same nodes in the same order, since previewPropagation() and
+    // propagateMarkUp() both delegate to the same collectPropagationStops().
+    it('previewPropagation() returns stops in the same order and count as the records addMark() actually changes', () => {
+      const grandparent = new MatrixTarget({ id: 't1', name: 'Grandparent', type: 'device', context: 'public' });
+      const parent = new MatrixTarget({ id: 't2', name: 'Parent', type: 'device', context: 'public', parentTargetId: 't1' });
+      const child = new MatrixTarget({ id: 't3', name: 'Child', type: 'device', context: 'public', parentTargetId: 't2' });
+      matrixState.addTarget(null, grandparent);
+      matrixState.addTarget(null, parent);
+      matrixState.addTarget(null, child);
+
+      const stops = matrixState.previewPropagation(child, 'Tesseract');
+      expect(stops.length).toBe(2);
+      expect(stops.map(s => s.id)).toEqual(['t2', 't1']); // parent before grandparent
+
+      matrixState.addMark(child, 'Tesseract');
+
+      const changed = [parent, grandparent].filter(t => t.marks['Tesseract'] === 1);
+      expect(changed.map(t => t.id)).toEqual(stops.map(s => s.id));
+    });
+
+    // mark-propagation-preview-spec.md scenario S5 (defensive) — the preview
+    // must not `return` early on the host branch and drop the parent chain.
+    it('previewPropagation() names both the host and the parent-chain destination when both branches fire for one target (scenario S5)', () => {
+      // Not reachable through the UI today (spec "Reachability finding" — a
+      // public target's form never sets linkedHostId), but MatrixTarget's
+      // constructor has no validation stopping this shape, so it is real
+      // reachable state (e.g. via updateTarget()). Contrast with the
+      // context: 'host' fixture used elsewhere in this file, where only
+      // branch (a) fires — this one has context: 'public' AND a
+      // linkedHostId, so both (a) and (b) fire for the same node.
+      const ares7 = new MatrixHost({ id: 'h-s5', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(ares7);
+      const rooftop = new MatrixTarget({ id: 'p1', name: 'Rooftop Node', type: 'device', context: 'public' });
+      const odd = new MatrixTarget({
+        id: 't1', name: 'Odd Device', type: 'device', context: 'public',
+        linkedHostId: ares7.id, parentTargetId: 'p1'
+      });
+      matrixState.addTarget(null, rooftop);
+      matrixState.addTarget(null, odd);
+
+      const stops = matrixState.previewPropagation(odd, 'Tesseract');
+      expect(stops.map(s => s.kind)).toEqual(['host', 'target']);
+      expect(stops.map(s => s.name)).toEqual(['Ares-7', 'Rooftop Node']);
+
+      matrixState.addMark(odd, 'Tesseract');
+
+      expect(ares7.marks['Tesseract']).toBe(1);
+      expect(rooftop.marks['Tesseract']).toBe(1);
+    });
+
+    // Review defect 6 — a host with no visited-set can be reached twice in
+    // one chain if two different nodes both carry the same linkedHostId.
+    it('previewPropagation() collapses a host reached via two hops in one chain to a single stop, with willLand reflecting the true remaining capacity (review defect 6)', () => {
+      const sameHost = new MatrixHost({ id: 'h-dup', name: 'Shared-Host', rating: 4 });
+      matrixState.addHost(sameHost);
+      sameHost.marks['Tesseract'] = 2; // exactly one slot left before the 3-mark cap
+      const parent = new MatrixTarget({
+        id: 'p1', name: 'Parent Device', type: 'device', context: 'public', linkedHostId: sameHost.id
+      });
+      const child = new MatrixTarget({
+        id: 'c1', name: 'Child Device', type: 'device', context: 'public',
+        linkedHostId: sameHost.id, parentTargetId: 'p1'
+      });
+      matrixState.addTarget(null, parent);
+      matrixState.addTarget(null, child);
+
+      const stops = matrixState.previewPropagation(child, 'Tesseract');
+      const hostStops = stops.filter(s => s.kind === 'host');
+
+      // Before the fix: both hops emitted their own "Shared-Host" stop, and
+      // both independently read currentMarks = 2 (nothing writes between
+      // reads), so both said willLand: true - overpromising, since a host
+      // with one slot left can only actually take one more mark.
+      expect(hostStops.length).toBe(1);
+      expect(hostStops[0].willLand).toBeTrue();
+    });
+
+    it("does not change what propagateMarkUp() actually writes when a host is reached twice in one chain - it still lands two marks there (review defect 6)", () => {
+      const sameHost = new MatrixHost({ id: 'h-dup2', name: 'Shared-Host-2', rating: 4 });
+      matrixState.addHost(sameHost);
+      const parent = new MatrixTarget({
+        id: 'p2', name: 'Parent Device 2', type: 'device', context: 'public', linkedHostId: sameHost.id
+      });
+      const child = new MatrixTarget({
+        id: 'c2', name: 'Child Device 2', type: 'device', context: 'public',
+        linkedHostId: sameHost.id, parentTargetId: 'p2'
+      });
+      matrixState.addTarget(null, parent);
+      matrixState.addTarget(null, child);
+
+      matrixState.addMark(child, 'Tesseract');
+
+      // The preview reports this host once (test above); the write path is
+      // untouched and still lands a mark from each hop that reaches it - two
+      // real marks on one host from a single click, exactly as the pre-fix
+      // recursive code did. Deduplicating collectPropagationStops() itself
+      // (the shared enumerator) would have reduced this to one write and
+      // silently changed live behaviour; the fix deliberately dedupes only
+      // inside previewPropagation()'s returned array, never inside
+      // collectPropagationStops() or propagateMarkUp().
+      expect(sameHost.marks['Tesseract']).toBe(2);
+      expect(parent.marks['Tesseract']).toBe(1);
+      expect(child.marks['Tesseract']).toBe(1);
     });
   });
 

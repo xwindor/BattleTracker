@@ -164,6 +164,20 @@
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
+  /* Fix round 2, N1: this item sits inside `.tc-marks-row`
+     (`display: flex; flex-wrap: wrap`). Without `min-width: 0` a flex
+     item's default `min-width: auto` refuses to shrink below its
+     content's min-content size, which used to matter for the now-deleted
+     `.tc-propagation-preview` span (`white-space: nowrap`) forcing the
+     whole group (select + preview + ✓/✕) to overflow `.matrix-left-pane`'s
+     `overflow: hidden` (matrix-run-panel.component.css). The preview text is
+     gone (`briefs/mark-propagation-highlight-spec.md` — the warning is now a
+     highlight on the tree, not text in this row), but the rule stays: the
+     select and buttons alone can still overflow a narrow pane, and
+     `max-width: 100%` keeps the group itself from ever claiming more than
+     the row has to give it. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tc-add-mark-btn {
@@ -231,10 +245,100 @@
   cursor: help;
 }
 
-.tc-propagation-preview {
+/* Round-6, mark-propagation-highlight-spec.md (2026-09-05): the propagation
+   warning moved from a text sentence in this row (`.tc-propagation-preview`,
+   deleted — its N1/N2/N4 truncation history lives only in git blame now) to
+   a highlight painted on the destination icons themselves, in
+   `HierarchyEditorComponent`'s tree. `#ffb340` (amber, never red — red means
+   destructive/blocked everywhere else in this app) is unchanged; only the
+   mechanism moved. Cue 2 of 3 (the other two are the ancestor rail,
+   `hierarchy-editor.component.css`, and the marker glyph, `.tc-prop-marker`
+   below) — `background`/`outline` only, never `border`/`padding`/`margin`,
+   so THIS cue changes no element's geometry. Round-6 review, Defect 5: the
+   original comment here claimed that of all three cues, which is false of
+   cue 3 below — see that rule's comment for the correction and the measured
+   number. AC-13 in `briefs/mark-propagation-highlight-spec.md` has been
+   corrected to match: layout neutrality holds for cues 1-2 only.
+   Round-7 review, Defect D-1: `.tc-wrap:hover .tc-info-row` (three classes/
+   pseudo-classes, specificity 0,3,0) was beating a bare `.tc-info-row.tc-prop-*`
+   (0,2,0) outright, so hovering a highlighted icon erased its tint — exactly
+   the cue that says *which* icon, exactly while the GM's pointer is on it.
+   Fixed by adding the `.tc-wrap` ancestor to tie specificity at 0,3,0; with
+   equal specificity, source order decides, and these rules are declared after
+   the hover rule above, so they win. This mirrors the pattern already used
+   for `.hier-host-header.hier-prop-*` vs `.hier-host-header:hover` in
+   `hierarchy-editor.component.css` (both 0,2,0, prop-* declared later) —
+   that one already survived hover; this one now matches it. No `!important`,
+   no extra nesting beyond what ties the specificity. */
+.tc-wrap .tc-info-row.tc-prop-landing {
+  background: rgba(255, 179, 64, 0.14);
+}
+
+.tc-wrap .tc-info-row.tc-prop-capped {
+  background: rgba(255, 179, 64, 0.06);
+  outline: 1px dashed rgba(255, 179, 64, 0.5);
+  outline-offset: -1px;
+}
+
+/* Cue 3 of 3: the non-colour marker (AC-11) — a filled triangle for a
+   destination that will actually receive the mark, a hollow one for a
+   destination already at MARK_CAP that will not. Matches the app's existing
+   filled/hollow vocabulary (`dots()`, ● / ○).
+   Round-6 review, Defect 5: this cue is NOT layout-neutral, unlike cues 1-2
+   above. The marker is only present in the DOM (`@if (propagationDestination)`,
+   `target-card.component.html`) on the destination rows a picker actually
+   reaches, so opening a picker inserts a new flex item into those rows'
+   `.tc-info-row` and pushes everything after it (`.tc-name`, `.tc-dr`,
+   `.tc-spotted-btn`) right by the marker's own width plus the row's
+   `gap` — measured +12.5px (a destination host name's `left` moved from
+   15.6px to 28.1px). Considered and rejected: reserving a fixed-width
+   placeholder for this glyph on every row, always, so a picker opening never
+   changes anything's geometry. Rejected because that would add ~12.5px of
+   permanently dead space next to every icon in the tree, all the time,
+   whether or not any picker is ever opened — a worse, always-on cost to fix
+   an occasional, localised one that only affects the small number of rows a
+   given picker actually highlights. Accepted instead as the price of a
+   legible non-colour cue; `briefs/mark-propagation-highlight-spec.md`'s
+   AC-13 is corrected to say so rather than claim otherwise.
+
+   N-9 (round-7 review): does that squeeze ever newly truncate a
+   destination's own name (`.tc-name`, `flex: 1 1 auto; max-width: 120px`) —
+   one that fit before the picker opened, no longer fitting after? Measured
+   in real ChromeHeadless layout at the worst-case narrow pane width
+   (EFFECTIVE_NARROW_WIDTH_PX, 354px, `matrix-port-rules-correctness.spec.ts`)
+   with the destination at depth 3 of a 4-deep chain: yes, for names of
+   exactly 7-8 characters, where the row had just enough room (67px) before
+   the marker and not after (55px). Below that length the name already fit
+   in the reduced space too; above it the name was already being truncated
+   at the wider, pre-marker width, so the marker only shortens an
+   already-truncated name further (the accepted cost above), not a new
+   failure. A fix was attempted — moving the marker out of flex flow onto
+   the type icon via an absolutely-positioned wrapper — and rejected: it
+   turned the icon's own fixed-width flex item into a shrinkable one,
+   regressing AC-13 elsewhere in the tree (a structural, harder-to-spot
+   layout bug, worse than the narrow cosmetic truncation it was meant to
+   fix). Left as measured, locked in by a regression test
+   (`matrix-port-rules-correctness.spec.ts`, 'N-9: measured — a highlighted
+   destination's own name in the 7-8 character range newly truncates...'),
+   rather than carrying a structural change for a two-character-wide,
+   single-worst-case-only cosmetic cost.
+
+   Round-8 review, Defect D-7: the test originally measured only 6, 7 and 10
+   characters, leaving the "7-8" and "9+" boundaries above as unmeasured
+   claims. It now also measures 8 (confirms the same newly-truncated
+   behaviour as 7) and 9 (confirms it was already truncated before the
+   marker existed, same as 10+) — both boundaries are measured, not assumed.
+   Recorded in plain language for Xavier as residual risk 5,
+   `briefs/mark-propagation-highlight-spec.md` Part 0. */
+.tc-prop-marker {
   color: #ffb340;
   font-size: 0.7rem;
-  margin: 0 0.3rem;
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.tc-prop-marker-capped {
+  opacity: 0.65;
 }
 
 /* Why the ✓ is disabled — shown inline rather than letting the button do

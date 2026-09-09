@@ -690,10 +690,25 @@
                 {{ isRowMemberActed(m) ? "Acted" : "Act" }}
               </button>
               }
+              <!-- No longer wrapped in its own `.input-group` (spec
+                   correction, second validator round): that wrapper existed
+                   only because the generate button was originally going to
+                   sit inside it beside this input - once the button moved
+                   out (defect 4, first validator round), a single-child
+                   `.input-group` around just this one input was vestigial.
+                   Removing it also removes a CSS specificity tie this input
+                   was silently losing: Bootstrap's `.input-group >
+                   .form-control` (two classes) outranked this component's
+                   own `.npc-row-member-name` (one class) width/flex rule
+                   below, so the box was stretching to fill the input-group
+                   instead of sitting at its intended ~10rem. `form-control-sm`
+                   stays directly on the input, so its `-sm` height/padding
+                   are unaffected - that sizing never depended on an
+                   `.input-group-sm` ancestor. -->
               <input class="form-control form-control-sm npc-row-member-name"
                 [ngModel]="m.name" (ngModelChange)="m.name = $event; onParticipantUpdated()"
                 placeholder="NPC name">
-              <div class="input-group input-group-sm gm-inline-input-group">
+              <div class="input-group input-group-sm gm-inline-input-group npc-row-bw-group">
                 <span class="input-group-text gm-stat-chip" title="Body">B</span>
                 <input class="form-control text-center gm-stat-input" type="number" [min]="0"
                   [ngModel]="m.body" (ngModelChange)="m.body = $event; onParticipantUpdated()">
@@ -701,6 +716,42 @@
                 <input class="form-control text-center gm-stat-input" type="number" [min]="0"
                   [ngModel]="m.willpower" (ngModelChange)="m.willpower = $event; onParticipantUpdated()">
               </div>
+              <!-- Deliberately AFTER the B/W group in the DOM, not beside the
+                   Name box (defect 4, validator round): the brief kept this
+                   same button off the main combat-list row for exactly this
+                   reason - a focusable control between Name and the next
+                   field costs a Tab stop every time a GM fills several NPCs
+                   in a hurry (Decision D2). Placed here, Tab still goes
+                   straight from Name to Body; a keyboard user reaches this
+                   button by continuing to Tab (or Shift+Tab back from
+                   further down the row), so it stays reachable without
+                   sitting in that fast path.
+
+                   D4's second half (second validator round) - visually
+                   detached from the Name box and wearing the same icon as
+                   Roll Initiative (`:340-343`'s `fa-dice`, on the SAME
+                   expanded row, one line up) - is fixed two ways WITHOUT
+                   moving this button in the DOM (which would undo the Tab
+                   fix above): the icon is `fa-shuffle` (also used by the
+                   Add dialog's own generate button, so the name generator
+                   has one consistent icon everywhere), so it cannot be
+                   misread as "roll for this ganger"; and this button is
+                   given `order: 1` in the
+                   stylesheet, while the B/W group above and everything
+                   after it (`.npc-row-bw-group`, `.npc-row-cm`,
+                   `.npc-row-wm`, `.npc-row-damage`, `.npc-row-detach`,
+                   `.npc-row-remove`, `.npc-row-down-badge`) gets `order: 2`
+                   - so this button PAINTS immediately after the Name box,
+                   restoring the visual association D4 asks for, while its
+                   DOM position - and therefore Tab order, which browsers
+                   resolve from DOM position, not CSS `order` - is
+                   completely unchanged from the fix above. -->
+              <button type="button" class="btn btn-sm btn-outline-secondary gm-name-generate-btn"
+                data-testid="row-member-name-generate"
+                (click)="generateRowMemberName(asNpcRow(p), m)"
+                title="Suggest a street handle for this NPC">
+                <i class="fas fa-shuffle"></i>
+              </button>
               <!-- One combined Physical+Stun track, 8 + ceil(max(B,W)/2) boxes,
                    no overflow (criterion 7, p. 379). -->
               <span class="npc-row-cm" title="Condition Monitor: 8 + ceil(max(Body, Willpower) / 2), Physical and Stun on one track">
@@ -1484,8 +1535,17 @@
   <div class="modal-body">
     <div class="mb-2">
       <label class="form-label" for="addDraftName">Name</label>
-      <input id="addDraftName" type="text" autocomplete="off" class="form-control" data-testid="add-draft-name"
-        [(ngModel)]="pendingAddDraft.name" placeholder="Leave blank to use the default name">
+      <div class="input-group">
+        <input id="addDraftName" type="text" autocomplete="off" class="form-control" data-testid="add-draft-name"
+          [(ngModel)]="pendingAddDraft.name"
+          placeholder="Leave blank to use the default name">
+        <button type="button" class="btn btn-outline-secondary gm-name-generate-btn"
+          data-testid="add-draft-name-generate"
+          (click)="generateDraftName()"
+          title="Suggest a name for this field">
+          <i class="fas fa-shuffle"></i>
+        </button>
+      </div>
     </div>
 
     @if (pendingAddDraft.kind === 'row') {

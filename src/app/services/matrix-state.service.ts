@@ -11,6 +11,26 @@ import {
 } from "Matrix";
 import { OsTrackingService } from "./os-tracking.service";
 
+/** Maximum marks any one icon can hold per decker (p. 236). */
+export const MARK_CAP = 3; // 3-mark maximum, brief p. 236
+
+/**
+ * One destination `MatrixStateService.addMark()`'s propagation walk reaches,
+ * in traversal order — the read-only shape `previewPropagation()` returns for
+ * the GM-facing preview (`briefs/mark-propagation-preview-spec.md`, "One
+ * shared walk — the choke point"). Not written anywhere; a pure description
+ * of what `collectPropagationStops()` found.
+ */
+export interface PropagationStop {
+  kind: "host" | "target";
+  id: string;
+  name: string;
+  /** Marks this destination currently holds for the decker (0 when unknown). */
+  currentMarks: number;
+  /** Whether placeMark() will actually add one here (currentMarks < 3, p. 236). */
+  willLand: boolean;
+}
+
 /**
  * MatrixStateService
  *
@@ -205,7 +225,7 @@ export class MatrixStateService {
    */
   addMarkToHost(host: MatrixHost, deckerId: string, count = 1): void {
     const prev = host.marks[deckerId] ?? 0;
-    const next = Math.min(3, prev + count);
+    const next = Math.min(MARK_CAP, prev + count);
     if (next === prev) return;
     host.marks[deckerId] = next;
     this.stateChange$.next();
@@ -374,32 +394,165 @@ export class MatrixStateService {
     this.stateChange$.next();
   }
 
-  private propagateMarkUp(target: MatrixTarget, deckerId: string, visited: Set<string>): void {
-    // (a) Host WAN propagation. Single hop only: a host is not itself a
-    // MatrixTarget in this data model, so there is no further containment
-    // level above a host to walk here (p. 233's WAN rule is host-and-slave
-    // only; it does not chain past the host). No type gate on the
-    // destination - a host is always eligible, it has no `type` field.
+  /**
+   * Read-only preview of every destination `addMark(target, deckerId)` would
+   * reach, in the same order `propagateMarkUp()` visits them —
+   * `briefs/mark-propagation-preview-spec.md`'s "single choke point" shared
+   * by the write path and the GM-facing preview so they cannot drift apart
+   * again the way they did before this method existed. Mutates nothing and
+   * never fires `stateChange$` (enforced by delegating to the same pure
+   * `collectPropagationStops()` the write path uses, rather than a second,
+   * hand-written walk).
+   *
+   * Returns `[]` for a non-`"device"` target (decision 8 — only devices
+   * propagate) instead of walking anything.
+   *
+   * **Collapses a host visited more than once (review defect 6).**
+   * `collectPropagationStops()` has no visited-set for hosts — see that
+   * method's doc comment for why it cannot get one — so a hand-constructed
+   * chain where two different nodes both carry the same `linkedHostId`
+   * produces two stops for the same host. Reported to the GM verbatim, that
+   * reads as "Also marks: Host Ares-7, Weapon Mount, Host Ares-7" and, worse,
+   * both copies independently compute `willLand` from the host's *current*
+   * mark count, so a host with exactly one slot left is reported as able to
+   * take both of them. `dedupeHostStops()` below keeps only the first
+   * occurrence, so the preview names each host once and `willLand` reflects
+   * whether the (single, as far as the GM is told) mark on it will land.
+   * This is a preview-only correction: it runs after `collectPropagationStops()`
+   * returns, never inside it, so it has no way to change what
+   * `propagateMarkUp()` writes (see that method — it consumes the raw,
+   * undeduped stops directly).
+   */
+  previewPropagation(target: MatrixTarget, deckerId: string): PropagationStop[] {
+    if (target.type !== "device") return [];
+    const stops = this.collectPropagationStops(target, deckerId, new Set([target.id]));
+    return MatrixStateService.dedupeHostStops(stops);
+  }
+
+  /**
+   * Keeps only the first stop for any given host id, preserving order.
+   * Preview-only (see `previewPropagation()`'s doc comment) — never applied
+   * to the stops `propagateMarkUp()` writes from, so a chain that legitimately
+   * marks the same host twice still does so on the write path; only the
+   * GM-facing description of it collapses to one line.
+   */
+  private static dedupeHostStops(stops: PropagationStop[]): PropagationStop[] {
+    const seenHosts = new Set<string>();
+    const result: PropagationStop[] = [];
+    for (const stop of stops) {
+      if (stop.kind === "host") {
+        if (seenHosts.has(stop.id)) continue;
+        seenHosts.add(stop.id);
+      }
+      result.push(stop);
+    }
+    return result;
+  }
+
+  /**
+   * Pure enumeration of the propagation walk `addMark()` performs, shared by
+   * the live write path (`propagateMarkUp()`) and the read-only
+   * `previewPropagation()` so the two cannot describe different reaches of
+   * the same action (`briefs/mark-propagation-preview-spec.md`).
+   *
+   * Traversal order and rules are identical to the walk this replaced:
+   *
+   *  (a) **Host WAN propagation.** Single hop only: a host is not itself a
+   *      MatrixTarget in this data model, so there is no further
+   *      containment level above a host to walk here (p. 233's WAN rule is
+   *      host-and-slave only; it does not chain past the host). No type gate
+   *      on the destination - a host is always eligible, it has no `type`
+   *      field. **Emitting a host stop does not end the walk** - execution
+   *      always falls through to (b) for the same node (spec "Reachability
+   *      finding", scenario S5). **No visited-set for hosts** - unlike the
+   *      parent-chain guard in (b), nothing here stops the same host being
+   *      emitted twice if two different nodes in one chain both carry the
+   *      same `linkedHostId` (a hand-constructed edge case, not reachable
+   *      through the UI today). That is deliberate: `propagateMarkUp()`
+   *      below consumes these stops one-for-one to decide how many times to
+   *      write, and a host reached twice really does receive two marks
+   *      today (review defect 6) - adding a visited-set here would silently
+   *      change that write behaviour. `previewPropagation()`'s
+   *      `dedupeHostStops()` collapses the *reported* duplicate without
+   *      touching this method or its output.
+   *  (b) **Open-grid parent/child propagation**, scoped to public-space
+   *      targets per Xavier's decision 7b, and to a device parent per
+   *      decision 8 - a file/persona/IC/nested-host parent receives nothing
+   *      and the chain stops there rather than skipping past it to whatever
+   *      it is parented to. A visited-set guards against a cycle a malformed
+   *      import could produce.
+   *
+   * A destination already at the 3-mark cap is still emitted, with
+   * `willLand: false` - a capped ancestor does not stop the walk from
+   * continuing further up a longer chain (`placeMark()`'s doc comment,
+   * scenario S2). `currentMarks`/`willLand` are computed once here, before
+   * any write happens. **This is not always order-independent**: it holds
+   * only when every stop's `marks` record is a distinct object, which is
+   * true for (b) (the visited-set forbids revisiting the same target) but
+   * is NOT guaranteed for (a) - two stops that both resolve to the same host
+   * share one `marks` record, and (as above) a duplicate host stop is a
+   * real, intentional write-path behaviour, not a bug to guard against here.
+   */
+  private collectPropagationStops(
+    target: MatrixTarget,
+    deckerId: string,
+    visited: Set<string>
+  ): PropagationStop[] {
+    const stops: PropagationStop[] = [];
+
+    // (a) Host WAN propagation.
     if (target.linkedHostId) {
       const host = this.state.hosts.find(h => h.id === target.linkedHostId);
-      if (host && MatrixStateService.placeMark(host.marks, deckerId)) {
-        host.propagatedMarks[deckerId] = true;
+      if (host) {
+        const currentMarks = host.marks[deckerId] ?? 0;
+        stops.push({
+          kind: "host",
+          id: host.id,
+          name: host.name,
+          currentMarks,
+          willLand: currentMarks < MARK_CAP
+        });
       }
     }
 
-    // (b) Open-grid parent/child propagation, scoped to public-space targets
-    // per Xavier's decision 7b, and to a device parent per decision 8 - a
-    // file/persona/IC/nested-host parent receives nothing and the chain
-    // stops there rather than skipping past it to whatever it is parented
-    // to.
+    // (b) Open-grid parent/child propagation. No early return after (a) -
+    // the walk continues into the parent chain regardless of whether a host
+    // stop was just emitted.
     if (target.context === "public" && target.parentTargetId && !visited.has(target.parentTargetId)) {
       const parent = this.state.publicTargets.find(t => t.id === target.parentTargetId);
       if (parent && parent.type === "device") {
         visited.add(parent.id);
-        if (MatrixStateService.placeMark(parent.marks, deckerId)) {
-          parent.propagatedMarks[deckerId] = true;
-        }
-        this.propagateMarkUp(parent, deckerId, visited);
+        const currentMarks = parent.marks[deckerId] ?? 0;
+        stops.push({
+          kind: "target",
+          id: parent.id,
+          name: parent.name,
+          currentMarks,
+          willLand: currentMarks < MARK_CAP
+        });
+        stops.push(...this.collectPropagationStops(parent, deckerId, visited));
+      }
+    }
+
+    return stops;
+  }
+
+  /**
+   * Writes the marks `collectPropagationStops()` describes. Rewritten onto
+   * the shared enumerator (`briefs/mark-propagation-preview-spec.md`) - its
+   * observable behaviour (which marks land, which `propagatedMarks` flags get
+   * set, one `stateChange$` per `addMark()` call) is unchanged from before
+   * this refactor.
+   */
+  private propagateMarkUp(target: MatrixTarget, deckerId: string, visited: Set<string>): void {
+    for (const stop of this.collectPropagationStops(target, deckerId, visited)) {
+      const record =
+        stop.kind === "host"
+          ? this.state.hosts.find(h => h.id === stop.id)
+          : this.state.publicTargets.find(t => t.id === stop.id);
+      if (!record) continue;
+      if (MatrixStateService.placeMark(record.marks, deckerId)) {
+        record.propagatedMarks[deckerId] = true;
       }
     }
   }
@@ -426,7 +579,7 @@ export class MatrixStateService {
    */
   private static placeMark(record: Record<string, number>, deckerId: string): boolean {
     const prev = record[deckerId] ?? 0;
-    if (prev >= 3) return false;
+    if (prev >= MARK_CAP) return false;
     record[deckerId] = prev + 1;
     return true;
   }

@@ -49,6 +49,7 @@ import {
   formatPassEndLogText, COMBAT_STARTED_LOG_TEXT, COMBAT_ENDED_LOG_TEXT
 } from "app/shared/log-formatter";
 import { classifyRoll } from "app/shared/roll-utils";
+import { generateName, GeneratedNameKind, normaliseNameForComparison } from "app/shared/name-generator";
 
 /**
  * Options for `changeParticipantDiceCount`. `rollGainedDice: false` is the
@@ -706,7 +707,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * match is always "do not attribute to this name".
    */
   private isSameCombatantName(a: string, b: string): boolean {
-    return a.trim().toLowerCase() === b.trim().toLowerCase();
+    return normaliseNameForComparison(a) === normaliseNameForComparison(b);
   }
 
   /**
@@ -4990,6 +4991,93 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return this.allGruntStatblocks;
   }
 
+  /**
+   * Fill the Add dialog's Name box with a generated name (brief
+   * "cyberpunk-name-generator-spec.md", acceptance criteria 8-13). Writes
+   * `pendingAddDraft.name` only - every other draft field, and every
+   * existing participant, is untouched (AC 8), and nothing is broadcast
+   * (AC 12): the dialog has not committed. No-ops when the dialog is not
+   * open, so a stray call (e.g. a mis-timed template event) cannot throw.
+   */
+  generateDraftName(): void {
+    this.generateDraftNameWith(Math.random);
+  }
+
+  /**
+   * `generateDraftName()`'s implementation, with the RNG injectable - not
+   * part of the brief's "Module API"/"Affected paths" list, added because
+   * the brief's own scenario NS5 exercises the impersonation-avoidance retry
+   * deterministically via `component['generateDraftNameWith'](rng)`, and
+   * `generateName`'s own `random?` parameter already establishes the
+   * convention (`Participant.changeDiceCount(newDices, rollDie?)`'s
+   * injected-RNG precedent, `ARCHITECTURE.md` §3).
+   *
+   * Defect 2 (validator round): the box's *current* value is folded into the
+   * `taken` set before drawing, on top of `takenCombatantNames()`'s own scan
+   * - that scan only ever sees names already saved onto a participant or row
+   * member, and an in-progress draft's name is neither until Confirm. Without
+   * this, a press could redraw exactly what's already on screen (worst on
+   * the small Matrix corpora elsewhere, but possible here too for `ic`-sized
+   * pools if this method is ever extended to one).
+   */
+  private generateDraftNameWith(random: () => number): void {
+    if (!this.pendingAddDraft) {
+      return;
+    }
+    const kind = this.draftNameKind(this.pendingAddDraft);
+    const taken = this.takenCombatantNames();
+    if (this.pendingAddDraft.name) {
+      taken.add(normaliseNameForComparison(this.pendingAddDraft.name));
+    }
+    this.pendingAddDraft.name = generateName({ kind, random, taken });
+  }
+
+  /**
+   * Which corpus a draft's generate button should draw from (brief "Corpus
+   * kind, per call site"). A row or a merge produces a group name; every
+   * other draft kind produces one NPC's handle. Exhaustive `switch`, no
+   * `default` branch - matching `calcMatrixHealth`'s deliberate shape
+   * (`hierarchy-editor.component.ts`) - so a future `AddDraftKind` that
+   * forgets to extend this is a compile error, not a silent fallback.
+   */
+  private draftNameKind(draft: AddDraft): GeneratedNameKind {
+    switch (draft.kind) {
+      case "row":
+      case "merge":
+        return "crew";
+      case "grunt":
+      case "participant":
+      case "rowMember":
+        return "handle";
+    }
+  }
+
+  /**
+   * Every name already spoken for in this encounter, normalised - the
+   * uniqueness scope the generator checks against for a GM participant or
+   * row member (brief "Uniqueness scope"). Rows' own names come from the
+   * `combatManager.participants.items` scan; their *members'* names are a
+   * second, nested scan, because `nextRowMemberName` already treats member
+   * names as a namespace that must not collide (p. 379 attributes wounds and
+   * deaths per NPC).
+   */
+  private takenCombatantNames(): Set<string> {
+    const names = new Set<string>();
+    for (const p of this.combatManager.participants.items) {
+      if (p.name) {
+        names.add(normaliseNameForComparison(p.name));
+      }
+    }
+    for (const row of this.existingNpcRows()) {
+      for (const member of row.members) {
+        if (member.name) {
+          names.add(normaliseNameForComparison(member.name));
+        }
+      }
+    }
+    return names;
+  }
+
   /** Every existing linked NPC row, for the lieutenant team-row picker (U7). */
   existingNpcRows(): NpcRowParticipant[] {
     return this.combatManager.participants.items.filter(isNpcRow);
@@ -7030,6 +7118,36 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
+   * Fill one row member's name box with a generated street handle (brief
+   * "cyberpunk-name-generator-spec.md" acceptance criterion 14). Writes only
+   * `member.name`, then calls `onParticipantUpdated()` exactly as the
+   * template's inline `(ngModelChange)` handler for the same box does - the
+   * row's own name, `rowWoundModifier`, and every member's damage are
+   * untouched.
+   *
+   * The current box value is folded into the `taken` set before drawing, on
+   * top of `takenCombatantNames()`'s own scan - belt-and-braces here (that
+   * scan already includes every row member, `member` included, since it
+   * hasn't been overwritten yet), but kept for the same reason the other
+   * generate call sites need it explicitly (defect 2 of the validator
+   * round): a press must never redraw exactly what is already on screen.
+   *
+   * `_row` is unused: the uniqueness scope is the whole encounter
+   * (`takenCombatantNames()`), not just this row, and mirroring the
+   * template's `(asNpcRow(p), m)` call shape keeps this signature identical
+   * to what the spec and the existing tests call. See defect 9 of the
+   * validator round.
+   */
+  generateRowMemberName(_row: NpcRowParticipant, member: GruntMember): void {
+    const taken = this.takenCombatantNames();
+    if (member.name) {
+      taken.add(normaliseNameForComparison(member.name));
+    }
+    member.name = generateName({ kind: "handle", taken });
+    this.onParticipantUpdated();
+  }
+
+  /**
    * Default name for the next NPC added to a row: `"<row name> <n>"`.
    *
    * `n` is one past the **highest number already used** in the row, not
@@ -7082,6 +7200,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Score directly (Decision 7) - there is no future roll of its own to wait
    * for. `queueJoinAnnouncement` makes that immediate attempt itself, so the
    * two cases (row already rolled / row still unrolled) need no branch here.
+   *
+   * Cyberpunk name generator, defect 5 (second validator round) - a known,
+   * documented gap, not fixed here: when the row has ALREADY rolled and this
+   * is called with no `name` (the Add dialog committed with the box left
+   * blank/default), the immediate announcement above fires with whatever
+   * placeholder `nextRowMemberName()` produced, and there is no later window
+   * to catch a rename - the row-member inline generate button only becomes
+   * reachable once this member already exists in an expanded row panel,
+   * strictly after this announcement has already fired. A later press of
+   * that button (`generateRowMemberName()`) changes the roster's name but
+   * cannot retroactively rewrite the log line already sent. Callers who want
+   * the log and the roster to agree for a reinforcement into an
+   * already-rolled row must generate/type the final name INTO THE ADD
+   * DIALOG before pressing Confirm (exactly what `commitAddDraft()`'s
+   * `"rowMember"` case, and the brief's own NS4 scenario, already do) - see
+   * `briefs/cyberpunk-name-generator-spec.md`'s "When the name reaches the
+   * log" correction, and the "defect 5" test in
+   * `src/scenarios/cyberpunk-name-generator.spec.ts`.
    */
   addNpcToRow(row: NpcRowParticipant, name?: string, body = 3, willpower = 3): GruntMember {
     const member = new GruntMember(name ?? this.nextRowMemberName(row), body, willpower);

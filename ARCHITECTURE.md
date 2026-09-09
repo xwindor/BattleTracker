@@ -2060,6 +2060,45 @@ helpers (`extractLogEntrySummary`, `formatLogEntryReference`) and the Matrix
 "decode" animation constants. Log *text* belongs there, not in the GM
 component.
 
+### The cyberpunk name generator
+
+`src/app/shared/name-generator.ts` (added by
+`briefs/cyberpunk-name-generator-spec.md`) is pure data plus pure functions,
+no Angular imports, the same shape as `log-formatter.ts`'s `matrixChars`/
+`randomMatrixChar` above. It is not a rules module — there is no printed rule
+governing how a GM labels an NPC (`briefs/grunt-naming-and-statblocks-spec.md`,
+governing rule G14) — it only invents flavour text the GM could have typed
+themselves.
+
+`generateName({ kind, taken, random })` is the one function every call site
+routes through: a fixed word-list corpus (`WORD_LISTS`) combined by
+slot-filling templates (`NAME_PATTERNS`), picked by weight, deduplicated
+against a case-insensitive `taken` set with a numeric-suffix fallback if the
+whole corpus for that `kind` is exhausted. `random` defaults to `Math.random`
+but is injectable, the same convention as `Participant.changeDiceCount`'s
+`rollDie?` parameter (§3), so a test can seed a deterministic sequence.
+
+Four call sites, one per generate/suggest button, each supplying its own
+`taken` set and never sharing state with the others:
+`BattleTrackerComponent.generateDraftName()` (the Add dialog) and
+`generateRowMemberName()` (one expanded grunt-group NPC box) each always draw
+from the one corpus fixed for their field (`crew` for a row/merge draft,
+`handle` otherwise) — an earlier build shipped a second `legal` corpus
+reached by cycling repeated presses, plus a style caption and a one-press
+revert button for the row-member box's generate button; Xavier cut all three
+after using the feature at the table (2026-09-07), so there is no cycling, no
+caption, and no revert anywhere in this feature now. Correcting a mis-tap is
+retyping or pressing generate again, like every other name box in this app.
+`HierarchyEditorComponent.suggestHostName()` and `suggestTargetName()` (the
+Matrix host/icon forms). None of these writes a name onto a `Participant` at
+creation — only onto `pendingAddDraft.name`, a `GruntMember.name`,
+`hostForm.name` or `targetForm.name` — so `isUnusedPlaceholder()`'s
+blank-placeholder check (§8, below) cannot be tripped by a generate press.
+Nothing about a generated name crosses the wire differently from a
+typed one: it is an ordinary string, written by the same setter, reaching
+`buildSharedParticipant()`/`toRowSnapshot()`/the Matrix target broadcast
+through the same path.
+
 ## 8. Known rough edges
 
 - **Dead first sort.** In its `combatManager.started` branch (§1 — the other
@@ -2180,7 +2219,12 @@ compiled or run, confirmed by testing several explicit `--include` glob
 variants against such a location, all of which matched zero tests. Anything
 meant to run under `npm test` must live under `src/`.
 
-**21 spec files** exist in the tree, in three groups.
+**26 spec files** exist in the tree, in three groups. (Corrected, second
+`cyberpunk-name-generator-spec.md` validator round, defect 9: this list
+previously said "21 spec files" and was missing five real files — the two
+this feature added, plus three that predated it and were never added:
+`grunt-naming-and-statblocks.spec.ts`, `grunt-statblock-data-processing.spec.ts`
+and `matrix-port-rules-correctness.spec.ts`.)
 
 *Domain / engine:*
 
@@ -2197,6 +2241,10 @@ meant to run under `npm test` must live under `src/`.
 *Shared units:*
 
 - `src/app/shared/log-formatter.spec.ts`
+- `src/app/shared/name-generator.spec.ts` — the cyberpunk name generator's
+  pure-function unit tests (acceptance criteria 1-7 of
+  `briefs/cyberpunk-name-generator-spec.md`; see "The cyberpunk name
+  generator" above)
 - `src/app/shared/roll-utils.spec.ts`
 
 *Promoted brief scenarios* — `src/scenarios/` is the convention for any
@@ -2218,6 +2266,17 @@ brief reads as a standalone regression suite:
   undo/redo system")
 - `src/scenarios/grunt-heal-dv-input.spec.ts` (brief "Grunt heal uses DV
   input")
+- `src/scenarios/grunt-naming-and-statblocks.spec.ts` (pre-existing; missing
+  from this list before defect 9's correction — brief "grunt naming and
+  statblocks")
+- `src/scenarios/grunt-statblock-data-processing.spec.ts` (pre-existing;
+  missing from this list before defect 9's correction)
+- `src/scenarios/matrix-port-rules-correctness.spec.ts` (pre-existing;
+  missing from this list before defect 9's correction — Matrix module rules
+  pass)
+- `src/scenarios/cyberpunk-name-generator.spec.ts` — this feature's promoted
+  scenarios and GM-component/Matrix-wiring acceptance criteria (8-22); see
+  "The cyberpunk name generator" above
 - `src/scenarios/player-join-claim-or-create.spec.ts` (S1-S6, brief "the
   player view opens on a claim-or-create chooser")
 - `src/scenarios/player-room-box-collapse.spec.ts` (S1-S6, brief "collapse

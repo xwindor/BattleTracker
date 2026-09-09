@@ -1,7 +1,8 @@
-import { Component, ElementRef, Input, ViewChild } from "@angular/core";
+import { Component, ElementRef, Input, OnDestroy, OnInit, QueryList, ViewChild, ViewChildren } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
+import { Subscription } from "rxjs";
 import {
   MatrixParticipant,
   MatrixHost,
@@ -10,8 +11,13 @@ import {
   MatrixTargetVisibility,
   matrixConditionMonitor
 } from "Matrix";
-import { MatrixStateService } from "app/services/matrix-state.service";
-import { TargetCardComponent } from "app/matrix/target-card/target-card.component";
+import { MatrixStateService, PropagationStop } from "app/services/matrix-state.service";
+import {
+  TargetCardComponent,
+  MarkHighlightRequest,
+  PropagationHighlightState
+} from "app/matrix/target-card/target-card.component";
+import { GeneratedNameKind, generateName, normaliseNameForComparison } from "app/shared/name-generator";
 
 interface HostFormState {
   active: boolean;
@@ -88,7 +94,7 @@ function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, hostRati
   styleUrls: ["./hierarchy-editor.component.css"],
   imports: [CommonModule, FormsModule, NgbTooltipModule, TargetCardComponent]
 })
-export class HierarchyEditorComponent {
+export class HierarchyEditorComponent implements OnInit, OnDestroy {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];
 
   /**
@@ -96,6 +102,16 @@ export class HierarchyEditorComponent {
    * `autofocus` attribute, which the template a11y rules forbid.
    */
   @ViewChild("hostNameInput") hostNameInput?: ElementRef<HTMLInputElement>;
+
+  /**
+   * Every `TargetCardComponent` currently rendered anywhere in this tree
+   * (public space and every expanded host), regardless of the recursive
+   * `ngTemplateOutlet` nesting used to render public-space nodes — Angular's
+   * `@ViewChildren` walks the rendered view, not the static template.
+   * `onPickerOpened()` (Defect 4) and `recomputeHighlight()` (Defect 7) are
+   * the two, and only, readers.
+   */
+  @ViewChildren(TargetCardComponent) private targetCardsQuery!: QueryList<TargetCardComponent>;
 
   publicSpaceExpanded = true;
   expandedHosts = new Set<string>();
@@ -106,9 +122,182 @@ export class HierarchyEditorComponent {
   // Expose type enum to template
   readonly TARGET_TYPES: MatrixTargetType[] = ["device", "file", "persona", "ic"];
 
+  /**
+   * The +Mark picker currently open somewhere in this tree, or `null` when
+   * none is. Set only from `onPropagationHighlightChange()`, which
+   * `TargetCardComponent.propagationHighlightChange` drives.
+   *
+   * Open Decision 3, refined 2026-09-06 (Defect 4, extended the same day by
+   * N-1, round-7 review): "last-opened wins" still governs which chain this
+   * highlights, unchanged from the original spec — but as of this round, at
+   * most one **picker of any kind** is ever open at all
+   * (`closeAllPickersExcept()` below) — a card's own +Mark control, or the
+   * host's own +Mark control (`hostMarkState`) — so "last-opened wins" is
+   * now purely about which highlight is showing, never about a second,
+   * losing picker being left open and armed with no visible highlight.
+   * Defect 4 originally covered only card pickers; N-1 found the host
+   * control was a third picker outside that mechanism, reachable end to
+   * end (open the host's +Mark, then a card's, then cancel the card's — the
+   * host's stayed open and armed, with no highlight anywhere to warn the
+   * GM, and it survived a collapse/re-expand of the host besides). This
+   * field is still the single source of truth for the highlight; no second
+   * field tracks "which picker is open" — that is simply
+   * `markHighlight?.target.id` when non-blocked, or the id
+   * `onPickerOpened()` was last called with. The host control's own
+   * open/closed state lives in `hostMarkState`, not here — it carries no
+   * highlight of its own (a host mark is placed directly, never
+   * propagated), so there is nothing for this field to track for it beyond
+   * making sure it, too, closes.
+   */
+  markHighlight: MarkHighlightRequest | null = null;
+  /**
+   * `PropagationStop.id -> PropagationStop`, recomputed wholesale by
+   * `recomputeHighlight()` every time `markHighlight` changes or
+   * `matrixState.stateChange$` fires. `highlightStateFor()` is an O(1)
+   * `Map.get` against this so it is safe to call from the template on every
+   * node on every change-detection tick — the actual propagation walk
+   * (`previewPropagation()`) runs exactly once per state change here, never
+   * once per node (`briefs/mark-propagation-highlight-spec.md`, "Proposed
+   * approach" §2). Do not call `previewPropagation()` from
+   * `highlightStateFor()` or any other per-node accessor.
+   */
+  private highlightByNodeId = new Map<string, PropagationStop>();
+  private stateChangeSub?: Subscription;
+
   constructor(readonly matrixState: MatrixStateService) {}
 
   get state() { return this.matrixState.state; }
+
+  ngOnInit(): void {
+    // A mark placed or removed elsewhere (host mark controls, session sync,
+    // jackOut()) while a picker is open must update a still-open highlight's
+    // cap state (spec Lifecycle table, path 12/13) — not clear it.
+    this.stateChangeSub = this.matrixState.stateChange$.subscribe(() => this.recomputeHighlight());
+  }
+
+  ngOnDestroy(): void {
+    this.stateChangeSub?.unsubscribe();
+  }
+
+  /**
+   * The sole consumer of `TargetCardComponent.propagationHighlightChange`,
+   * from both tree positions (`html`). Mutates state IMMEDIATELY — safe here
+   * because every caller of that output (`openAddMark`, `onSelectedDeckerChange`,
+   * `confirmAddMark`, `cancelAddMark`) runs from a DOM event handler, before
+   * Angular's own change-detection pass begins. Contrast `onLifecycleClear()`
+   * below, whose callers cannot make that guarantee.
+   */
+  onPropagationHighlightChange(req: MarkHighlightRequest | null): void {
+    this.markHighlight = req;
+    this.recomputeHighlight();
+  }
+
+  /**
+   * The sole consumer of `TargetCardComponent.lifecycleClear`, from both tree
+   * positions (`html`) — fired only by a card's `ngOnChanges()`/`ngOnDestroy()`,
+   * which can themselves run mid-change-detection-pass (round-6 review,
+   * defects 1/2/3). Unlike `onPropagationHighlightChange()`, this defers the
+   * actual state mutation to a microtask: scheduling the callback is itself
+   * synchronous and touches no Angular-bound state, so the emit is safe to
+   * receive at any point in a change-detection pass, and the mutation that
+   * WOULD trip `NG0100 ExpressionChangedAfterItHasBeenChecked` lands only
+   * after the current pass (and its dev-mode verification pass) has fully
+   * completed. Microtasks drain before the next paint, so no user-visible
+   * frame shows a stale highlight next to an already-closed picker.
+   *
+   * Deliberately does not reference the calling card at all — by the time
+   * this runs, that card may already be destroyed and its own outputs torn
+   * down (measured: a version of this fix that instead deferred the EMIT
+   * itself, from inside the card, found the parent's subscription already
+   * gone by the time the deferred emit fired, and the highlight never
+   * cleared). This closure only touches `this` (the still-alive editor), so
+   * that failure mode cannot recur here.
+   */
+  onLifecycleClear(): void {
+    Promise.resolve().then(() => this.onPropagationHighlightChange(null));
+  }
+
+  /**
+   * Defect 4 (round-6 review): the sole consumer of
+   * `TargetCardComponent.pickerOpened`, from both tree positions (`html`).
+   * Delegates to `closeAllPickersExcept()` — the one place the
+   * one-picker-at-a-time decision is actually made, covering every card's
+   * own picker AND (N-1, round-7 review) the host's own +Mark control — so
+   * a card whose own opening turned out to be blocked (which
+   * `onPropagationHighlightChange()` alone cannot see; a blocked open still
+   * emits `null`, carrying no target identity) still closes every other
+   * picker in the tree. No card, and no host control, decides this for
+   * itself.
+   */
+  onPickerOpened(openedTargetId: string): void {
+    this.closeAllPickersExcept({ kind: "card", targetId: openedTargetId });
+  }
+
+  /**
+   * The single implementation of "one +Mark picker open at a time"
+   * (Defect 4, round-6 review; extended to the host's own control by N-1,
+   * round-7 review). `keep` identifies the picker that just opened and
+   * should stay open; every other picker in the tree — every OTHER card
+   * (`TargetCardComponent.closePickerSilently()`, no emit — see that
+   * method's doc comment for why silence is correct here) and every OTHER
+   * host's `hostMarkState` entry — closes. Picker state stays owned in
+   * exactly two places (`targetCardsQuery`'s own cards, and this
+   * component's `hostMarkState`); this method is what keeps them
+   * consistent with each other, rather than each mechanism only knowing
+   * how to close its own kind.
+   */
+  private closeAllPickersExcept(keep: { kind: "card"; targetId: string } | { kind: "host"; hostId: string }): void {
+    this.targetCardsQuery
+      .filter(card => !(keep.kind === "card" && card.target.id === keep.targetId))
+      .forEach(card => card.closePickerSilently());
+    for (const [hostId, state] of this.hostMarkState) {
+      if (!(keep.kind === "host" && hostId === keep.hostId)) {
+        state.open = false;
+      }
+    }
+  }
+
+  /**
+   * Rebuilds `highlightByNodeId` from scratch. Calls
+   * `matrixState.previewPropagation()` **exactly once** — never once per
+   * node, never once per change-detection tick.
+   */
+  private recomputeHighlight(): void {
+    this.highlightByNodeId.clear();
+    if (!this.markHighlight) return;
+    const stops = this.matrixState.previewPropagation(this.markHighlight.target, this.markHighlight.deckerId);
+    for (const stop of stops) {
+      this.highlightByNodeId.set(stop.id, stop);
+    }
+
+    // Defect 7 (round-6 review): an external write (session sync, the
+    // host's own +Mark control, jackOut()) can cap every decker on the OPEN
+    // picker's own icon without ever touching that card's `@Input`s, so
+    // `TargetCardComponent.ngOnChanges()`'s path-10 guard never fires for
+    // it — this `stateChange$`-driven recompute is the only other place
+    // that clear path can run from. Reads the still-live card's own
+    // `availableDeckers` getter directly, rather than re-deriving the same
+    // two-line decker/MARK_CAP filter here, so the two definitions of
+    // "available" can never drift apart.
+    const openCard = this.targetCardsQuery.find(card => card.target.id === this.markHighlight?.target.id);
+    if (openCard?.addMarkOpen && openCard.availableDeckers.length === 0) {
+      openCard.closePickerSilently();
+      this.markHighlight = null;
+      this.highlightByNodeId.clear();
+    }
+  }
+
+  /**
+   * `"landing"` / `"capped"` / `null` for a target or host id — an O(1) map
+   * lookup, safe to call from the template for every node on every tick. Not
+   * a source of truth on its own: it only reflects whatever
+   * `recomputeHighlight()` last computed.
+   */
+  highlightStateFor(nodeId: string): PropagationHighlightState | null {
+    const stop = this.highlightByNodeId.get(nodeId);
+    if (!stop) return null;
+    return stop.willLand ? "landing" : "capped";
+  }
 
   // ── Host form ────────────────────────────────────────────────────────────
 
@@ -143,6 +332,28 @@ export class HierarchyEditorComponent {
 
   suggestAsdf(): void {
     this.suggestAsdfForForm(this.hostForm.rating);
+  }
+
+  /**
+   * Fill the host form's Name box with a generated host name (brief
+   * "cyberpunk-name-generator-spec.md" acceptance criterion 17). Writes
+   * `hostForm.name` only - no `matrixState` call, so nothing is saved until
+   * the GM presses Save.
+   *
+   * Defect 2 (validator round): the box's *current* value is folded into
+   * `taken` before drawing - `takenMatrixNames()` only sees names already
+   * saved onto a host or target, and an in-progress form's name is neither
+   * until Save, so without this a press could redraw exactly what's already
+   * on screen (rare for `host`'s ~18,000 combinations, but the same call
+   * shape as `suggestTargetName()` below, where the small icon corpora make
+   * it far more likely).
+   */
+  suggestHostName(): void {
+    const taken = this.takenMatrixNames();
+    if (this.hostForm.name) {
+      taken.add(normaliseNameForComparison(this.hostForm.name));
+    }
+    this.hostForm.name = generateName({ kind: "host", taken });
   }
 
   private suggestAsdfForForm(rating: number): void {
@@ -232,6 +443,68 @@ export class HierarchyEditorComponent {
     this.targetForm = { ...BLANK_TARGET_FORM };
   }
 
+  /**
+   * Fill the target form's Name box with a generated icon name (brief
+   * "cyberpunk-name-generator-spec.md" acceptance criterion 18). The corpus
+   * follows `targetForm.type` - a device, a file, a persona or an IC read
+   * differently on the Matrix Perception readout, so their names come from
+   * different word lists.
+   *
+   * Defect 2 (validator round): the box's *current* value is folded into
+   * `taken` before drawing, for the same reason as `suggestHostName()` above
+   * - and worse here, since `ic` (20 options) and `persona` (30) are small
+   * enough that a redraw of the on-screen value was reachable roughly one
+   * press in 20-30 without this.
+   */
+  suggestTargetName(): void {
+    const kind = this.iconKindFor(this.targetForm.type);
+    const taken = this.takenMatrixNames();
+    if (this.targetForm.name) {
+      taken.add(normaliseNameForComparison(this.targetForm.name));
+    }
+    this.targetForm.name = generateName({ kind, taken });
+  }
+
+  /**
+   * Which corpus a target icon's generate button draws from, keyed off
+   * `MatrixTargetType`. Exhaustive `switch`, no `default` branch - the same
+   * deliberate shape as `calcMatrixHealth` above, so a future
+   * `MatrixTargetType` is a compile error here rather than a silent
+   * fallback. `"host"` is included for exhaustiveness only: `targetForm.type`
+   * is drawn from `TARGET_TYPES`, which never contains `"host"` - a host's
+   * own name comes from `suggestHostName()`, not this form.
+   */
+  private iconKindFor(type: MatrixTargetType): GeneratedNameKind {
+    switch (type) {
+      case "device": return "device";
+      case "file": return "file";
+      case "persona": return "persona";
+      case "ic": return "ic";
+      case "host": return "host";
+    }
+  }
+
+  /**
+   * Every Matrix host and target name already in use, normalised - the
+   * uniqueness scope for a generated host or target name (brief "Uniqueness
+   * scope"). A separate namespace from `takenCombatantNames()` on the GM
+   * component: a host called "Vulture" and a ganger called "Vulture" are not
+   * confusable in any log line.
+   */
+  private takenMatrixNames(): Set<string> {
+    const names = new Set<string>();
+    for (const host of this.state.hosts) {
+      names.add(normaliseNameForComparison(host.name));
+      for (const target of host.targets) {
+        names.add(normaliseNameForComparison(target.name));
+      }
+    }
+    for (const target of this.state.publicTargets) {
+      names.add(normaliseNameForComparison(target.name));
+    }
+    return names;
+  }
+
   saveTargetForm(): void {
     const f = this.targetForm;
     if (!f.name.trim()) return;
@@ -317,9 +590,52 @@ export class HierarchyEditorComponent {
     this.publicSpaceExpanded = !this.publicSpaceExpanded;
   }
 
+  /**
+   * Round-6 review, Defect 3: this used to call `onPropagationHighlightChange(null)`
+   * unconditionally on every collapse, to dodge the same NG0100 fixed
+   * properly now by `TargetCardComponent.lifecycleClear` (emitted from
+   * `ngOnDestroy()`) and this component's own `onLifecycleClear()`, which
+   * defers the actual state mutation to a microtask (see that method's doc
+   * comment). That was wrong on its own terms, not just a workaround: it wiped
+   * the highlight and left
+   * an unrelated card's picker open and armed with no visible warning the
+   * moment the GM collapsed ANY host, including one that had nothing to do
+   * with the open picker (measured: 2 rails -> 0, then a mark landed on
+   * three icons with no highlight ever shown for two of them) — a direct
+   * breach of `RULINGS.md` 2026-09-03 in an app with no undo. Collapsing a
+   * host now does exactly one thing besides toggling `expandedHosts`: it
+   * closes THIS host's own `hostMarkState` entry (see round-7 review,
+   * Defect D-3, below). If the picker that was open belongs to a card
+   * inside THIS host, collapsing destroys that card and its own
+   * `ngOnDestroy` clears the highlight, deferred safely past this
+   * change-detection pass. If the open picker belongs to a card elsewhere
+   * in the tree, nothing here touches it at all — the highlight and the
+   * picker both survive, correctly.
+   *
+   * Round-7 review, Defect D-3: unlike a card's own +Mark picker, which is
+   * destroyed along with its component when its containing branch
+   * collapses, the host's own +Mark control (`hostMarkState`) is a `Map`
+   * entry owned by THIS component — collapsing a host does not destroy it.
+   * Left unclosed, an armed host picker (decker already selected, `open:
+   * true`) survived a fold-and-reopen and re-rendered `.hier-mark-confirm`
+   * still armed, one stray tap from placing a host mark with no undo. This
+   * is the exact hazard the Defect-3 fix above (and Defect 4/N-1's
+   * `closeAllPickersExcept()`) already guards against for every OTHER
+   * picker in the tree; only this host's OWN collapse path was missing it.
+   * Deliberately local and narrow: only `hostId`'s own entry closes here.
+   * Reaching into `markHighlight` (that was Defect 3, already fixed once)
+   * or into another host's `hostMarkState` entry would reintroduce exactly
+   * the overreach this component's own regression test guards against —
+   * collapsing an unrelated host must not clear a public-tree picker's
+   * highlight, or another host's armed picker.
+   */
   toggleHost(hostId: string): void {
     if (this.expandedHosts.has(hostId)) {
       this.expandedHosts.delete(hostId);
+      const s = this.hostMarkState.get(hostId);
+      if (s) {
+        s.open = false;
+      }
     } else {
       this.expandedHosts.add(hostId);
     }
@@ -416,7 +732,25 @@ export class HierarchyEditorComponent {
     return "●".repeat(count) + "○".repeat(3 - count);
   }
 
+  /**
+   * N-1 (round-7 review, Xavier's decision, 2026-09-06): the host's own
+   * +Mark control used to be a third picker outside the one-picker-at-a-time
+   * mechanism Defect 4 built for cards — opening it never closed a card's
+   * open picker, and opening a card's picker never closed it either, so both
+   * could be open and armed at once with only one highlight visible to warn
+   * the GM about either. `closeAllPickersExcept()` now covers both kinds.
+   * A card picker carries a live highlight (`markHighlight`) that its own
+   * `closePickerSilently()` deliberately does not clear (see that method's
+   * doc comment — closing silently is correct for a losing CARD, because the
+   * highlight is about to be replaced by the picker that is opening instead);
+   * opening the host's own control replaces it with nothing, so this method
+   * clears it explicitly.
+   */
   openHostAddMark(host: MatrixHost): void {
+    this.closeAllPickersExcept({ kind: "host", hostId: host.id });
+    if (this.markHighlight) {
+      this.onPropagationHighlightChange(null);
+    }
     const s = this.getHostMarkState(host.id);
     s.open = true;
     if (!s.selectedDeckerId && this.hostAvailableDeckers(host).length > 0) {

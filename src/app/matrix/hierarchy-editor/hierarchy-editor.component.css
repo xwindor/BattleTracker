@@ -236,12 +236,53 @@
 /* ── Host nodes ──────────────────────────────────────────────────────────── */
 
 .hier-host-node {
+  /* N-10 (round-7 review): anchors the capped-rail pseudo-element below,
+     which needs `position: absolute` to cost no layout (AC-13). No rule in
+     this file previously set `position` on this element. */
+  position: relative;
   border-left: 2px solid transparent;
   margin: 0.1rem 0;
 }
 
 .hier-host-node.hier-host-active {
   border-left-color: var(--matrix-text, #00ff9f);
+}
+
+/* Round-6, mark-propagation-highlight-spec.md (2026-09-05): a host is always
+   a valid propagation destination (branch (a), MatrixStateService.
+   collectPropagationStops()) but is never itself a MatrixTarget, so it has no
+   `<app-target-card>` of its own to carry the highlight — these two rules
+   live on the editor's own elements instead. `.hier-host-active`'s border
+   already claims the border box (above), so the highlight uses only the
+   inset shadow (padding box) — both coexist without fighting over one
+   property. `box-shadow: inset` costs no layout (AC-13). */
+.hier-host-node.hier-prop-landing {
+  box-shadow: inset 3px 0 0 0 #ffb340;
+}
+
+/* N-10 (round-7 review): this used to be the same box-shadow as landing,
+   just at a lower alpha (0.45) — a same-width, same-shape, merely-dimmer
+   rail. Part 0 tells the GM to read solid-vs-dashed, not solid-vs-dimmer
+   (`briefs/mark-propagation-highlight-spec.md`, "Correction, 2026-09-06"),
+   and the device rail below already renders that distinction via its real
+   `border-left-style: dashed` (`.hier-public-node.hier-prop-capped`) — a
+   capped host showed a same-width hairline-vs-thick contrast with no dashed
+   pattern at all, inconsistent with the device cue it sits right next to in
+   the same tree. This element's own `border-left` is reserved for the
+   active-host indicator (`.hier-host-active` above) and box-shadow cannot
+   render a dashed pattern, so the dashed cue here is a separate `::before`
+   rail instead of reusing either. `position: absolute` costs no layout
+   (AC-13); `pointer-events: none` keeps it from becoming a fourth thing on
+   this row someone can mis-tap (see N-8's fix to `.hier-prop-marker` for the
+   same concern next to it). */
+.hier-host-node.hier-prop-capped::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-left: 3px dashed rgba(255, 179, 64, 0.55);
+  pointer-events: none;
 }
 
 .hier-host-header {
@@ -261,6 +302,20 @@
 
 .hier-host-active .hier-host-header {
   background: #0a1f0a;
+}
+
+/* Cue 2 of 3 (row tint) for a host destination — same colours/values as
+   `.tc-info-row.tc-prop-*` in target-card.component.css so the two card
+   shapes read as one visual language. `outline`, never `border`, so it costs
+   no layout (AC-13). */
+.hier-host-header.hier-prop-landing {
+  background: rgba(255, 179, 64, 0.14);
+}
+
+.hier-host-header.hier-prop-capped {
+  background: rgba(255, 179, 64, 0.06);
+  outline: 1px dashed rgba(255, 179, 64, 0.5);
+  outline-offset: -1px;
 }
 
 .hier-active-badge {
@@ -749,6 +804,29 @@ input[type="number"]::-webkit-inner-spin-button {
   padding-left: 0.35rem;
 }
 
+/* Round-6, mark-propagation-highlight-spec.md (2026-09-05) — cue 1 of 3 (the
+   ancestor rail). `.hier-public-node`'s `border-left` already runs the full
+   height of that node's entire subtree (an ancestor's card AND every one of
+   its descendants, including the clicked card), so turning it amber makes an
+   affected ancestor visible immediately beside the clicked icon with no
+   scrolling — this is the answer to the compounding-indent problem the
+   deleted text preview could not solve (see the spec's "Proposed approach"
+   §1). Two cues stack without changing the 1px border width so nothing
+   reflows (AC-13): `border-left-color` (kept a real border — this element
+   owns no other border-left state to conflict with) plus a thicker `inset`
+   box-shadow layered on top for contrast; `border-left-style: dashed` is the
+   non-colour distinction between "will land" and "capped" (thick+solid vs.
+   thin+dashed, AC-11). */
+.hier-public-node.hier-prop-landing {
+  border-left-color: #ffb340;
+  box-shadow: inset 2px 0 0 0 #ffb340;
+}
+
+.hier-public-node.hier-prop-capped {
+  border-left-color: rgba(255, 179, 64, 0.55);
+  border-left-style: dashed;
+}
+
 .hier-parent-row {
   display: flex;
   align-items: center;
@@ -790,4 +868,21 @@ input[type="number"]::-webkit-inner-spin-button {
   font-size: 0.65rem;
   margin-left: 0.15rem;
   cursor: help;
+}
+
+/* Round-6, mark-propagation-highlight-spec.md (2026-09-05) — cue 3 of 3 (the
+   marker glyph), for a host destination. A host has no `<app-target-card>`
+   of its own (see `.hier-host-node.hier-prop-*` above), so this mirrors
+   `.tc-prop-marker` in target-card.component.css rather than sharing it —
+   `TargetCardComponent`'s Emulated view encapsulation cannot be reached from
+   here, and vice versa. */
+.hier-prop-marker {
+  color: #ffb340;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+  cursor: help;
+}
+
+.hier-prop-marker-capped {
+  opacity: 0.65;
 }

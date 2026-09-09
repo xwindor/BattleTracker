@@ -72,6 +72,10 @@
       <label class="hier-form-label" for="hier-add-host-name">Name</label>
       <input #hostNameInput id="hier-add-host-name" type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
         placeholder="Host name" maxlength="60">
+      <button type="button" class="hier-suggest-btn" (click)="suggestHostName()"
+        ngbTooltip="Suggest a host name" placement="top" data-testid="add-host-name-generate">
+        Suggest
+      </button>
     </div>
     <div class="hier-form-row">
       <label class="hier-form-label" for="hier-add-host-rating">Rating</label>
@@ -109,14 +113,37 @@
 
   <!-- ── Host nodes ────────────────────────────────────────────────────── -->
   @for (host of state.hosts; track host.id) {
-  <div class="hier-host-node" [class.hier-host-active]="isActiveHost(host)">
+  <div class="hier-host-node" [attr.data-host-id]="host.id" [class.hier-host-active]="isActiveHost(host)"
+    [class.hier-prop-landing]="highlightStateFor(host.id) === 'landing'"
+    [class.hier-prop-capped]="highlightStateFor(host.id) === 'capped'">
 
     <!-- Host header row -->
-    <div class="hier-host-header" (click)="toggleHost(host.id)">
+    <div class="hier-host-header" (click)="toggleHost(host.id)"
+      [class.hier-prop-landing]="highlightStateFor(host.id) === 'landing'"
+      [class.hier-prop-capped]="highlightStateFor(host.id) === 'capped'">
       @if (isActiveHost(host)) {
       <span class="hier-active-badge">ACTIVE</span>
       }
       <i class="fas fa-server hier-host-icon"></i>
+      @if (highlightStateFor(host.id); as hostHighlight) {
+      <!-- N-8 (round-7 review): this is the newest, most eye-catching thing
+           on a row whose whole header carries (click)="toggleHost(host.id)"
+           above, and it carries cursor: help besides — both invite a tap
+           that would collapse the host, destroying the picker inside it and
+           clearing the highlight. `.hier-row-actions` beside it already
+           stops the click from reaching the header for exactly this reason;
+           this marker gets the same treatment rather than being made
+           inert, so its aria-label/title (a11y, Open Decision 6) still work
+           on tap/click for a touchscreen GM, not just on hover. -->
+      <span class="hier-prop-marker" role="img" (click)="$event.stopPropagation()"
+        [class.hier-prop-marker-capped]="hostHighlight === 'capped'"
+        [attr.aria-label]="hostHighlight === 'capped'
+          ? 'Already at the 3-mark cap for the selected decker — will receive nothing (p. 236)'
+          : 'Will also receive 1 mark when this +Mark is confirmed'"
+        [title]="hostHighlight === 'capped'
+          ? 'Already at the 3-mark cap for the selected decker — will receive nothing (p. 236)'
+          : 'Will also receive 1 mark when this +Mark is confirmed'">{{ hostHighlight === 'capped' ? '△' : '▲' }}</span>
+      }
       <span class="hier-host-name">{{ host.name }}</span>
       <span class="hier-host-rating">R{{ host.rating }}</span>
       <span class="hier-host-asdf">{{ host.attack }}/{{ host.sleaze }}/{{ host.dataProcessing }}/{{ host.firewall }}</span>
@@ -192,6 +219,10 @@
           <label class="hier-form-label" for="hier-edit-host-name">Name</label>
           <input id="hier-edit-host-name" type="text" class="hier-form-input" [(ngModel)]="hostForm.name"
             placeholder="Host name" maxlength="60">
+          <button type="button" class="hier-suggest-btn" (click)="suggestHostName()"
+            ngbTooltip="Suggest a host name" placement="top" data-testid="edit-host-name-generate">
+            Suggest
+          </button>
         </div>
         <div class="hier-form-row">
           <label class="hier-form-label" for="hier-edit-host-rating">Rating</label>
@@ -267,9 +298,13 @@
           [host]="host"
           [activeDeckers]="activeDeckers"
           [editing]="isEditingTarget(t)"
+          [propagationDestination]="highlightStateFor(t.id)"
           (editTarget)="openEditTarget(host, t)"
           (deleteTarget)="deleteTarget(host, t)"
-          (cycleVisibilityRequested)="cycleVisibility(host, t)">
+          (cycleVisibilityRequested)="cycleVisibility(host, t)"
+          (propagationHighlightChange)="onPropagationHighlightChange($event)"
+          (pickerOpened)="onPickerOpened($event)"
+          (lifecycleClear)="onLifecycleClear()">
         </app-target-card>
         }
 
@@ -297,6 +332,10 @@
     <label class="hier-form-label" for="hier-target-name">Name</label>
     <input id="hier-target-name" type="text" class="hier-form-input" [(ngModel)]="targetForm.name"
       placeholder="Target name" maxlength="60">
+    <button type="button" class="hier-suggest-btn" (click)="suggestTargetName()"
+      ngbTooltip="Suggest a name" placement="top" data-testid="target-name-generate">
+      Suggest
+    </button>
   </div>
 
   <div class="hier-form-row">
@@ -350,15 +389,21 @@
 
 <!-- ── Public-space target node (recursive — Decision 7b nesting) ────────── -->
 <ng-template #publicTargetNodeTpl let-t let-depth="depth">
-<div class="hier-public-node" [style.marginLeft.px]="depth * 18">
+<div class="hier-public-node" [attr.data-target-id]="t.id" [style.marginLeft.px]="depth * 18"
+  [class.hier-prop-landing]="highlightStateFor(t.id) === 'landing'"
+  [class.hier-prop-capped]="highlightStateFor(t.id) === 'capped'">
   <app-target-card
     [target]="t"
     [host]="null"
     [activeDeckers]="activeDeckers"
     [editing]="isEditingTarget(t)"
+    [propagationDestination]="highlightStateFor(t.id)"
     (editTarget)="openEditTarget(null, t)"
     (deleteTarget)="deleteTarget(null, t)"
-    (cycleVisibilityRequested)="cycleVisibility(null, t)">
+    (cycleVisibilityRequested)="cycleVisibility(null, t)"
+    (propagationHighlightChange)="onPropagationHighlightChange($event)"
+    (pickerOpened)="onPickerOpened($event)"
+    (lifecycleClear)="onLifecycleClear()">
   </app-target-card>
 
   <!-- Set/clear this target's parent — scoped to public-space targets;

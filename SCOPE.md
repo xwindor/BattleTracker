@@ -36,10 +36,29 @@ The test for any proposed behaviour:
   violation"). Scoped to devices only: only a `type: "device"` icon
   propagates a mark upward, and only a device or a host receives one — a
   file, persona, IC, or nested-host icon neither propagates nor receives
-  (Xavier's decision 8, 2026-09-03).
+  (Xavier's decision 8, 2026-09-03). The app must also say which icons a mark
+  will reach **before** the GM commits it — a mark the app writes on the GM's
+  behalf is only acceptable if the GM was told it was coming. Indicating them
+  visually satisfies this: the `+Mark` control highlights the destination
+  icons in the hierarchy tree, distinguishing one that will receive the mark
+  from one already at the 3-mark cap that will receive nothing (Xavier's
+  decision, 2026-09-06; `RULINGS.md` 2026-09-03, "Propagation is visible, not
+  reversible"). An earlier text preview was tried and removed — it could not
+  fit the panel at realistic nesting depths.
 - Making state visible at a glance, to the GM and to players in the player view.
 - Applying a change the GM tells it to apply — including rolling dice when the
   GM asks for a roll.
+- Offering a suggestion the GM can accept, reject or overwrite is in scope, so
+  long as it only ever fires on an explicit tap and stays editable afterwards.
+  This is what lets the app generate content — cyberpunk names for grunts,
+  crews, Matrix hosts and icons — without deciding anything for the GM: no
+  suggestion is ever written unprompted, and every one of them is just text in
+  a box the GM can type over (Scope Question A,
+  `briefs/cyberpunk-name-generator.md`, approved 2026-09-05). The boundary is
+  the tap: a name the GM asked for is a suggestion, a name the app fills in by
+  itself is a decision. Correcting a mis-tap means pressing again or retyping,
+  consistent with the no-undo rule below — a one-press revert affordance was
+  built and removed for exactly that reason (Xavier's decision, 2026-09-07).
 - Enforcing legality — to a degree, decided per feature rather than as a blanket
   rule. The tracker should help the GM follow the rules, but it must stay
   flexible: GMs override rules constantly, and sometimes the GM needs to do

@@ -1351,9 +1351,13 @@ What changes is **discoverability**, not the mechanic: the GM must be able to
 see that a mark on one icon also placed a mark somewhere else, before and
 after the fact.
 
-- **Before committing:** the `+Mark` control on a device states what it will
-  *also* mark — "Also marks Host: <name>" or "Also marks: <parent name>" —
-  before the GM confirms (`TargetCardComponent.propagationPreview`).
+- **Before committing:** the `+Mark` control on a device indicates what it will
+  *also* mark by highlighting those icons in the hierarchy tree — amber for an
+  icon that will receive the mark, dimmed and outlined for one already at the
+  3-mark cap that will receive nothing — before the GM confirms
+  (`HierarchyEditorComponent.highlightStateFor()`). Superseded the earlier
+  text preview on 2026-09-05: the sentence could not fit the panel at
+  realistic nesting depths.
 - **After the fact:** an icon whose current mark for a decker includes at
   least one that arrived by propagation shows a badge on that decker's mark
   row (`MatrixTarget.propagatedMarks` / `MatrixHost.propagatedMarks`),
