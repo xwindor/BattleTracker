@@ -4357,6 +4357,115 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
       expect(component.canConfirmHostAddMark(host)).toBeTrue();
     });
+
+    // ── Round-9 review: the `@Input`-driven route ────────────────────────
+    //
+    // Round-8 gave `closeExhaustedHostPickers()` exactly one caller — the
+    // `stateChange$` subscription in `ngOnInit()`. Every test above drives
+    // availability to zero through `MatrixStateService` (`addMarkToHost`),
+    // which fires `stateChange$` and was always covered. Nothing above
+    // covered the OTHER route: `enableDeck()` / `removeDeck()`
+    // (`battle-tracker.component.ts`) and `CombatManager.removeParticipant()`
+    // all change `activeDeckers` without ever touching `MatrixStateService`,
+    // so they reach this component purely as an `@Input` change. Before this
+    // round, `HierarchyEditorComponent` had no `ngOnChanges` at all, so that
+    // whole route went unreconciled — the tests below exercise it directly.
+    //
+    // Following this suite's own established convention for testing a
+    // component's `ngOnChanges()` on a bare `ComponentFixture` with no
+    // parent template binding (see 'ngOnChanges closes the picker...' on
+    // `TargetCardComponent` above, and `AccessHostPanelComponent`'s
+    // `beforeEach`, both at the top of this file): mutate the `@Input`
+    // field directly, then call `component.ngOnChanges(...)` with the same
+    // `SimpleChanges`-shaped payload Angular would produce from a real
+    // parent binding. This exercises the actual `ngOnChanges()`
+    // implementation added this round — it is not a call to
+    // `closeExhaustedHostPickers()` itself, which is exactly the kind of
+    // test that would not have caught this defect (the defect was that
+    // NOTHING called it from this route, not that the method itself was
+    // wrong).
+    it('Round-9 #1: picker open and armed, activeDeckers changes so availability hits zero -> picker closes and disarms', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+
+      // The only decker's deck is removed / the participant is deleted —
+      // exactly the shape `enableDeck()`/`removeDeck()` and
+      // `CombatManager.removeParticipant()` produce: a fresh `activeDeckers`
+      // array with no `MatrixStateService` write at all.
+      component.activeDeckers = [];
+      component.ngOnChanges({ activeDeckers: {} } as never);
+
+      const s = component.getHostMarkState(host.id);
+      expect(s.open).toBeFalse();
+      expect(s.selectedDeckerId).toBe('');
+    });
+
+    it('Round-9 #2: availability returning afterwards does not resurrect the picker armed — a fresh openHostAddMark() is required', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      component.activeDeckers = [];
+      component.ngOnChanges({ activeDeckers: {} } as never);
+      expect(component.getHostMarkState(host.id).open).toBeFalse();
+
+      // The decker becomes available again (deck re-enabled).
+      component.activeDeckers = [decker];
+      component.ngOnChanges({ activeDeckers: {} } as never);
+      fixture.detectChanges();
+
+      const s = component.getHostMarkState(host.id);
+      expect(s.open).toBeFalse();
+      expect(s.selectedDeckerId).toBe('');
+
+      // A genuine fresh tap still works normally afterwards.
+      component.openHostAddMark(host);
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+      expect(component.canConfirmHostAddMark(host)).toBeTrue();
+    });
+
+    it('Round-9 #3: a picker in a legitimate multi-decker state is NOT force-closed by the new ngOnChanges hook', () => {
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+
+      // An unrelated `activeDeckers` change that still leaves availability
+      // above zero (e.g. a third decker joining, or the array reference
+      // simply being replaced with equivalent content) must not disturb an
+      // otherwise-legitimate open picker.
+      const newman = new MatrixParticipant();
+      newman.name = 'Netcat';
+      component.activeDeckers = [decker, slamm, newman];
+      component.ngOnChanges({ activeDeckers: {} } as never);
+      fixture.detectChanges();
+
+      const s = component.getHostMarkState(host.id);
+      expect(s.open).toBeTrue();
+      expect(s.selectedDeckerId).toBe('Tesseract');
+    });
+
+    it('Round-9 #4: a deleted host\'s hostMarkState entry is dropped, not left stranded in the Map forever', () => {
+      const host2 = new MatrixHost({ id: 'h2', name: 'Renraku Arcology', rating: 6 });
+      matrixState.addHost(host2);
+      component.getHostMarkState(host2.id); // seeds a Map entry for host2, as opening its +Mark control would
+
+      expect(component.getHostMarkState(host2.id)).toBeDefined();
+
+      matrixState.removeHost(host2);
+      fixture.detectChanges();
+
+      // `getHostMarkState()` lazily recreates a missing entry, so the only
+      // way to observe the deletion is to check the Map directly rather
+      // than through that accessor.
+      const rawMap = (component as unknown as { hostMarkState: Map<string, unknown> })['hostMarkState'];
+      expect(rawMap.has(host2.id)).toBeFalse();
+    });
   });
 
   // ── Decision 7 — marks propagate up the containment hierarchy ──────────

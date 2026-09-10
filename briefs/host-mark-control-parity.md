@@ -49,8 +49,19 @@ fixed:
    becomes available. This was also the fix for a second problem the
    follow-up review caught: without it, a closed-but-still-"loaded"
    picker could silently come back armed and ready to fire after some
-   unrelated action (like removing a mark), with no fresh tap from the GM
-   — that can no longer happen.
+   unrelated action (like removing a mark), with no fresh tap from the GM.
+
+   **A second update, same day, closes the same hole for a different
+   trigger.** The fix above only covered the case where the picker got
+   stranded through a mark being placed or removed. It turned out the
+   picker could also get stranded a different way: if the GM removes a
+   decker's deck, or deletes that participant entirely, while that
+   decker's the only one selected in an open host picker, the picker used
+   to stay silently loaded the same way — and could come back armed later
+   if a decker became available again, ready to fire on the very next tap
+   with no fresh +Mark click. That route is now covered too. Between the
+   two fixes, a picker can no longer come back pre-armed no matter which
+   of these two ways its last available decker disappeared.
 
 ## Not building — and why
 

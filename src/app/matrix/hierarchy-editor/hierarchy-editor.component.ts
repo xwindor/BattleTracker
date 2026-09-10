@@ -1,4 +1,4 @@
-import { Component, ElementRef, Input, OnDestroy, OnInit, QueryList, ViewChild, ViewChildren } from "@angular/core";
+import { Component, ElementRef, Input, OnChanges, OnDestroy, OnInit, QueryList, SimpleChanges, ViewChild, ViewChildren } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
@@ -114,7 +114,7 @@ function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, hostRati
   styleUrls: ["./hierarchy-editor.component.css"],
   imports: [CommonModule, FormsModule, NgbTooltipModule, TargetCardComponent]
 })
-export class HierarchyEditorComponent implements OnInit, OnDestroy {
+export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];
 
   /**
@@ -204,6 +204,43 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
       this.recomputeHighlight();
       this.closeExhaustedHostPickers();
     });
+  }
+
+  /**
+   * Round-9 review (`host-mark-control-parity-spec.md`): the host +Mark
+   * picker can also be stranded-and-armed by a route that changes decker
+   * availability WITHOUT ever touching `MatrixStateService` — `enableDeck()`
+   * / `removeDeck()` (`battle-tracker.component.ts`) and
+   * `CombatManager.removeParticipant()` all mutate `activeDeckers` and
+   * arrive here purely as an `@Input` change, never through
+   * `matrixState.stateChange$`. Before this, `closeExhaustedHostPickers()`
+   * had exactly one caller — the `stateChange$` subscription in `ngOnInit()`
+   * — so that whole input-driven route went unreconciled: the `@if
+   * (hostAvailableDeckers(host).length > 0)` gate (`html:196`) still hid the
+   * DOM the instant availability hit zero, but `hostMarkState` itself sat
+   * untouched, `open: true` and armed, until a decker became available
+   * again — at which point the picker reappeared already armed, placeable
+   * on the very next tap with no fresh +Mark click.
+   *
+   * This mirrors `TargetCardComponent.ngOnChanges()`'s own two-route split
+   * (`target-card.component.ts:195`) — the service route and the input
+   * route both have to converge on the same cleanup. Deliberately calls
+   * ONLY `closeExhaustedHostPickers()`, never `recomputeHighlight()`:
+   * `matrixActiveDeckers` (`battle-tracker.component.ts:1249-1252`) is a
+   * getter returning a fresh `.filter()` array on every read, so its
+   * reference changes on every change-detection cycle and `ngOnChanges`
+   * fires constantly here. `closeExhaustedHostPickers()` is safe at that
+   * rate — it `continue`s immediately on any picker that is not open, so it
+   * is a no-op walk over a tiny `Map` in the common case.
+   * `recomputeHighlight()` is NOT safe at that rate: it calls
+   * `previewPropagation()` and would duplicate work
+   * `TargetCardComponent.ngOnChanges()` already does for the card-picker
+   * highlight. `recomputeHighlight()` stays reachable only from the
+   * `stateChange$` subscription above, and stays free of any `hostMarkState`
+   * reference — see that method's own doc comment.
+   */
+  ngOnChanges(_changes: SimpleChanges): void {
+    this.closeExhaustedHostPickers();
   }
 
   ngOnDestroy(): void {
@@ -886,19 +923,39 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
    * claiming the confirm button and blocked-reason element remain in the
    * DOM (merely disabled) once availability reaches zero — they do not.
    *
-   * Runs on every `stateChange$` tick (`ngOnInit`), so it also catches an
-   * external write that reaches every remaining available decker on a host
-   * whose picker is open — the host-control equivalent of
-   * `recomputeHighlight()`'s own Defect 7 guard for cards.
+   * Runs on every `stateChange$` tick (`ngOnInit`) and on every `@Input`
+   * change (`ngOnChanges`, round-9), so it also catches an external write
+   * that reaches every remaining available decker on a host whose picker is
+   * open — the host-control equivalent of `recomputeHighlight()`'s own
+   * Defect 7 guard for cards.
+   *
+   * Round-9 addendum: also drops any `hostMarkState` entry whose host no
+   * longer exists at all (deleted host). The original `if (host && ...)`
+   * guard above silently short-circuited for that case, leaving the entry
+   * in the `Map` forever — not user-visible today, since host ids are
+   * random and never reused, but it is the same stale-`hostMarkState`
+   * family as the rest of this method. Collects ids to delete first, then
+   * deletes after the loop — mutating a `Map` mid-iteration by deleting the
+   * CURRENT key is well-defined in JS, but deleting a key other than the
+   * one just visited during iteration is not something to rely on, so this
+   * stays conservative and two-pass.
    */
   private closeExhaustedHostPickers(): void {
+    const deletedHostIds: string[] = [];
     for (const [hostId, s] of this.hostMarkState) {
-      if (!s.open) continue;
       const host = this.state.hosts.find(h => h.id === hostId);
-      if (host && this.hostAvailableDeckers(host).length === 0) {
+      if (!host) {
+        deletedHostIds.push(hostId);
+        continue;
+      }
+      if (!s.open) continue;
+      if (this.hostAvailableDeckers(host).length === 0) {
         s.open = false;
         s.selectedDeckerId = "";
       }
+    }
+    for (const hostId of deletedHostIds) {
+      this.hostMarkState.delete(hostId);
     }
   }
 

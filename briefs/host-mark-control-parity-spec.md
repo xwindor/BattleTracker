@@ -468,3 +468,67 @@ the single-decker (or all-capped) case, the GM still sees the whole
 `+Mark` group vanish rather than a disabled button with an explanation —
 AC-7/AC-8 are reworded above to state that scope honestly, and
 `briefs/host-mark-control-parity.md` is updated to match.
+
+## Round-9 fix (2026-09-10) — the input-driven route
+
+Round-8's fix (`closeExhaustedHostPickers()`) had exactly one caller: the
+`matrixState.stateChange$` subscription in `ngOnInit()`. That covers every
+route that changes decker availability by writing through
+`MatrixStateService` (a mark placed/removed, a host edited or deleted). It
+does **not** cover a second, separate route: `HierarchyEditorComponent`
+takes `activeDeckers` as a plain `@Input`, and several ordinary GM actions
+change that array without ever touching `MatrixStateService` at all —
+`enableDeck()` / `removeDeck()` (`battle-tracker.component.ts`, wired to
+real participant-row buttons) and `CombatManager.removeParticipant()`. The
+component declared `implements OnInit, OnDestroy` only, with no
+`ngOnChanges` at all, so an `@Input` change from any of those routes was
+never reconciled — the picker could go stranded-and-armed exactly the way
+round-8 fixed for the `stateChange$` route, just via a different door.
+
+**Fix:** `HierarchyEditorComponent` now also `implements OnChanges`, and
+`ngOnChanges()` calls the same `closeExhaustedHostPickers()`. Every route
+that can change decker availability now terminates in that one method —
+mirroring how `TargetCardComponent` already covers both its own routes
+(`ngOnChanges()` for the input route, `recomputeHighlight()`'s Defect 7
+guard for the service route).
+
+**Deliberately not done: funnelling `recomputeHighlight()` through
+`ngOnChanges()` as well.** This was considered and rejected. `activeDeckers`
+as consumed by the GM component (`battle-tracker.component.ts`'s
+`matrixActiveDeckers` getter, `:1249-1252`) is a getter that returns a fresh
+`.filter()` array on every read — its reference changes on every
+change-detection cycle, so `ngOnChanges` fires far more often than the
+underlying data actually changes. `closeExhaustedHostPickers()` tolerates
+that rate fine: it `continue`s immediately on any picker entry that is not
+open, so in the overwhelmingly common case (no host picker open) it is a
+no-op walk over a tiny `Map`. `recomputeHighlight()` does not tolerate that
+rate: it calls `matrixState.previewPropagation()`, a real computation, and
+running it on every change-detection tick would both waste work and
+duplicate what `TargetCardComponent.ngOnChanges()` already does for the
+card-picker highlight. `recomputeHighlight()` therefore stays reachable only
+from the `stateChange$` subscription, exactly as before, and stays free of
+any `hostMarkState` reference — this separation has now been confirmed by
+two reviewers (round-8 and round-9) and must hold.
+
+**Folded into the same method, same loop:** `closeExhaustedHostPickers()`'s
+`if (host && ...)` guard silently short-circuited for a host that no longer
+exists (deleted), leaving that host's `hostMarkState` entry in the `Map`
+forever. The method now collects the ids of any entry whose host is gone
+and deletes them after the loop (not during, to keep `Map` iteration safe).
+Not user-visible — host ids are random strings and never reused, so a
+leaked entry can never be mistaken for a live host's state — but it is the
+same stale-`hostMarkState` family as the rest of this fix and cost two
+lines in the same place.
+
+**Tests.** Added to the `HierarchyEditorComponent host +Mark control parity`
+describe block in `src/scenarios/matrix-port-rules-correctness.spec.ts`,
+following this suite's own established convention for testing a bare
+`ComponentFixture`'s `ngOnChanges()` with no parent template binding
+(mutate the `@Input` field directly, then call `component.ngOnChanges({
+activeDeckers: {} } as never)` — the same pattern already used for
+`TargetCardComponent`'s and `AccessHostPanelComponent`'s own `ngOnChanges()`
+tests elsewhere in this file): picker open-and-armed closing when
+availability hits zero via an `@Input` change; availability returning
+afterward without the picker resurrecting armed; a legitimate multi-decker
+state surviving the new hook untouched; and the stale-`Map`-entry cleanup
+for a deleted host.
