@@ -587,6 +587,19 @@
   border-color: #3a7a3a;
 }
 
+/* Inline rejection message (2026-09-09: "a rejected re-parent must say so"
+   — briefs/parent-picker-into-edit-view-spec.md, revised AC-8). Matches
+   `.tc-add-mark-blocked` (target-card.component.css) — the app's existing
+   vocabulary for "here's why this control didn't do what you asked",
+   rather than inventing a new one. Red (#ff8a8a) is otherwise reserved for
+   destructive/blocked states across this app (see that class's own
+   comment) — never used for a merely-informational hint. */
+.hier-form-error {
+  color: #ff8a8a;
+  font-size: 0.7rem;
+  margin-left: 0.3rem;
+}
+
 .hier-suggest-btn {
   font-size: 0.71rem;
   font-family: inherit;
@@ -827,27 +840,23 @@ input[type="number"]::-webkit-inner-spin-button {
   border-left-style: dashed;
 }
 
+/* Defect 1 (parent-picker-into-edit-view, review round): this row used to
+   carry BOTH `.hier-form-row` (the shared form-row family) and its own
+   `.hier-parent-row` layout properties on the same element — identical
+   specificity, source order decided, and since this rule is declared AFTER
+   `.hier-form-row` (:514 above), it silently won, giving the Parent row a
+   different gap/padding than every other row in the form. The label and
+   select have been moved onto the `.hier-form-label`/`.hier-form-select`
+   family outright (no more `.hier-parent-label`/`.hier-parent-select` at
+   all — deleted rather than left as unused orphans); this rule now
+   carries only the one thing genuinely specific to this row (room for the
+   clear button and, since 2026-09-09, the inline rejection message) and no
+   longer overrides anything `.hier-form-row` already sets. Kept as a class,
+   not folded away entirely, purely as the DOM hook tests already query
+   (`.hier-parent-row` presence/absence marks whether the Parent field is on
+   screen at all). */
 .hier-parent-row {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.1rem 0.35rem 0.3rem;
-}
-
-.hier-parent-label {
-  font-size: 0.68rem;
-  min-width: auto;
-}
-
-.hier-parent-select {
-  font-size: 0.68rem;
-  font-family: inherit;
-  padding: 0.05rem 0.2rem;
-  background: #0a1a0a;
-  border: 1px solid #1a4a1a;
-  color: var(--matrix-text, #00ff9f);
-  border-radius: 2px;
-  max-width: 10rem;
+  padding-bottom: 0.05rem;
 }
 
 .hier-parent-clear-btn {

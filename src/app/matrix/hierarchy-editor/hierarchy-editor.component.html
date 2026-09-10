@@ -358,6 +358,45 @@
   </div>
   }
 
+  <!-- Parent picker, moved here from the always-visible tree row
+       (briefs/parent-picker-into-edit-view-spec.md). Save-buffered (Option
+       A): the select writes only to `targetForm.parentTargetId`; the actual
+       commit — and the self/descendant guard — happens in
+       `saveTargetForm()` via `setParent()`/`clearParent()`, not here.
+       Gated on `hostId === null` as well as `type === 'device'`: a device
+       already inside a host uses `linkedHostId` for its containment, not
+       this field (`canHaveParent()`'s `context` check). Offered in both Add
+       and Edit (Xavier, 2026-09-09) — a target being created has no
+       descendants yet, so its options come from `parentOptionsForNewTarget()`
+       rather than `parentOptionsFor()`, which needs a real target to exclude
+       self/descendants from. -->
+  @if (targetForm.type === 'device' && targetForm.hostId === null) {
+  <div class="hier-form-row hier-parent-row">
+    <label class="hier-form-label" for="hier-target-parent">Parent</label>
+    <select id="hier-target-parent" class="hier-form-select"
+      [ngModel]="targetForm.parentTargetId" (ngModelChange)="onParentSelectionChange($event)">
+      <option value="">— None (top-level) —</option>
+      @for (opt of (targetForm.isEditing && targetForm.target ? parentOptionsFor(targetForm.target) : parentOptionsForNewTarget()); track opt.id) {
+      <option [value]="opt.id">{{ opt.name }}</option>
+      }
+    </select>
+    @if (targetForm.parentTargetId) {
+    <button type="button" class="hier-parent-clear-btn" (click)="onParentSelectionChange('')" title="Clear parent">✕</button>
+    }
+    <!-- Inline rejection message (2026-09-09: "a rejected re-parent must say
+         so" — supersedes the old silent-drop). Matches the app's existing
+         inline-message vocabulary (`.tc-add-mark-blocked` in
+         target-card.component.css: red-ish text, small, next to the
+         control it explains) rather than inventing a new style. Cleared by
+         `onParentSelectionChange()` above the moment the GM picks something
+         else, and by reopening/closing the form (fresh `TargetFormState`
+         each time), so it can never linger stale. -->
+    @if (targetForm.parentError) {
+    <span class="hier-form-error">{{ targetForm.parentError }}</span>
+    }
+  </div>
+  }
+
   @if (targetForm.type === 'persona') {
   <div class="hier-form-row">
     <label class="hier-form-label" for="hier-target-decker-link">Decker Link</label>
@@ -406,27 +445,10 @@
     (lifecycleClear)="onLifecycleClear()">
   </app-target-card>
 
-  <!-- Set/clear this target's parent — scoped to public-space targets;
-       weapons/files "parented to" a device out on the open grid
-       (Xavier, 2026-09-02). Marking a child propagates a mark up to its
-       parent, and onward up the chain (MatrixStateService.addMark()).
-       Device-only, both ends (Xavier's decision 8, 2026-09-03): only a
-       device ever propagates or receives a propagated mark, so the control
-       (and the choices it offers) only appear for a device target. -->
-  @if (canHaveParent(t)) {
-  <div class="hier-parent-row small">
-    <label class="hier-parent-label text-muted" [attr.for]="'hier-parent-' + t.id">Parent</label>
-    <select [attr.id]="'hier-parent-' + t.id" class="hier-parent-select" [ngModel]="t.parentTargetId ?? ''" (ngModelChange)="setParent(t, $event)">
-      <option value="">— None (top-level) —</option>
-      @for (opt of parentOptionsFor(t); track opt.id) {
-      <option [value]="opt.id">{{ opt.name }}</option>
-      }
-    </select>
-    @if (t.parentTargetId) {
-    <button type="button" class="hier-parent-clear-btn" (click)="clearParent(t)" title="Clear parent">✕</button>
-    }
-  </div>
-  }
+  <!-- Setting/clearing this target's parent moved into the shared target
+       Edit/Add form (briefs/parent-picker-into-edit-view-spec.md) — the
+       tree no longer shows a live Parent control. The tree's own nesting
+       (childrenOf()/parentTargetId) still reflects the result. -->
 
   @for (child of childrenOf(t.id); track child.id) {
   <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: child, depth: depth + 1 }"></ng-container>

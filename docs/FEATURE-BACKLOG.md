@@ -6,6 +6,16 @@ Completed items are deleted from this file rather than kept as historical
 record — the change that shipped them is the record (`briefs/`,
 `ARCHITECTURE.md`, git history). Last swept 2026-08-23.
 
+## Silent Parent-dropdown fallback when the parent is deleted mid-edit (deferred from parent-picker-into-edit-view review round)
+
+Live-at-the-table race, cosmetic only (state ends up correct): if the GM
+deletes a target that is the current parent of some other target while that
+other target's own Edit form is sitting open, the open form's Parent dropdown
+silently falls back to "— None (top-level) —" with no explanation — the GM
+sees the field change under them with nothing telling them why. See
+`briefs/parent-picker-into-edit-view-spec.md`'s "NOT IN THIS ROUND" section
+(2026-09-09) for the trace; not fixed there, backlogged instead.
+
 ## Clear interrupts control (deferred from "Remove the undo/redo system", Open Decision 1)
 
 `Participant.resetActions()` exists and is fully implemented (clears

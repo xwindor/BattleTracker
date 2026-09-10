@@ -103,6 +103,31 @@ function textContains(fixture: ComponentFixture<unknown>, needle: string): boole
   return (fixture.nativeElement as HTMLElement).textContent?.includes(needle) ?? false;
 }
 
+/**
+ * Asserts that exactly one element matching `selector` is actually rendered
+ * in `fixture`'s DOM and that its visible text is non-empty once whitespace
+ * is trimmed. Returns that text so a caller can also check its wording.
+ *
+ * This is the "the GM can see it" half of the DOM-vs-component-field
+ * convention documented above the parent-picker describe block below — use
+ * this (or `expectAbsent`) whenever an acceptance criterion is phrased as
+ * "the GM sees X", instead of reading a component field that the template
+ * might not actually be bound to.
+ */
+function expectVisibleText(fixture: ComponentFixture<unknown>, selector: string): string {
+  const el = (fixture.nativeElement as HTMLElement).querySelector(selector);
+  expect(el).withContext(`expected an element matching "${selector}" to be rendered`).not.toBeNull();
+  const text = (el?.textContent ?? '').trim();
+  expect(text.length).withContext(`expected "${selector}" to render non-empty text`).toBeGreaterThan(0);
+  return text;
+}
+
+/** Asserts that no element matching `selector` is rendered anywhere in `fixture`. */
+function expectAbsent(fixture: ComponentFixture<unknown>, selector: string): void {
+  const el = (fixture.nativeElement as HTMLElement).querySelector(selector);
+  expect(el).withContext(`expected no element matching "${selector}" to be rendered`).toBeNull();
+}
+
 /** Whether any loaded stylesheet defines a rule whose selector contains `fragment`. */
 function cssDefinesSelector(fragment: string): boolean {
   for (const sheet of Array.from(document.styleSheets)) {
@@ -879,15 +904,41 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(component.canHaveParent(persona)).toBeFalse();
     });
 
-    it('Decision 8: the rendered public-space tree does not show a Parent control for a file', () => {
+    // parent-picker-into-edit-view-spec.md, Open Decision 3 / "Affected
+    // paths" item 4: canHaveParent() used to check only `type`, never
+    // `context`, which was harmless only because it was called exclusively
+    // from the public-space tree template. The shared target Edit/Add form
+    // is reachable for host-nested targets too, so a `context: "host"`
+    // device must be pinned down as `false` here.
+    it('canHaveParent() is false for a device whose context is "host", even though its type is "device"', () => {
+      const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host' });
+      expect(component.canHaveParent(hostDevice)).toBeFalse();
+    });
+
+    // The tree no longer renders a live Parent control at all
+    // (briefs/parent-picker-into-edit-view-spec.md) — it moved into the
+    // shared target Edit/Add form. Rewritten from the old DOM-level tree
+    // assertion (which counted `.hier-parent-row` elements directly in the
+    // tree and would now pass vacuously, finding zero regardless of type).
+    it('Decision 8 + parent-picker-into-edit-view: the rendered public-space tree shows no Parent control anywhere, and Edit shows one only for a device, not a file', () => {
       const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
       matrixState.addTarget(null, file);
       fixture.detectChanges();
 
-      const parentRows = fixture.debugElement.queryAll(By.css('.hier-parent-row'));
-      // Two devices in the fixture (device, weapon) get a Parent control; the
-      // added file does not.
-      expect(parentRows.length).toBe(2);
+      // No Parent control anywhere in the rendered tree, regardless of type.
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+
+      // Opening Edit on the file shows no Parent field.
+      component.openEditTarget(null, file);
+      fixture.detectChanges();
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+      component.closeTargetForm();
+      fixture.detectChanges();
+
+      // Opening Edit on the device shows exactly one Parent field.
+      component.openEditTarget(null, device);
+      fixture.detectChanges();
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(1);
     });
 
     // Defect 4 (round-5): deleting an open-grid parent must not orphan its
@@ -933,6 +984,518 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
 
         expect(window.confirm).not.toHaveBeenCalled();
         expect(matrixState.state.publicTargets).not.toContain(weapon);
+      });
+    });
+
+    // ── briefs/parent-picker-into-edit-view-spec.md — the Parent field, ──
+    // ── moved into the shared target Edit/Add form (Save-buffered) ──────
+    //
+    // CONVENTION (earned, not decorative — read before adding a test here or
+    // anywhere else in this file):
+    //
+    //   Any acceptance criterion phrased as "the GM sees X" must be asserted
+    //   through rendered DOM (`fixture.nativeElement`/`fixture.debugElement`
+    //   — see `expectVisibleText()`/`expectAbsent()` above, and `pickParent()`
+    //   below) — never by reading a component field. A component-field
+    //   assertion only proves the *data* is right; it says nothing about
+    //   whether the template actually renders it, and a broken `@if`/binding
+    //   can ship invisibly under field-only coverage. Component-field
+    //   assertions remain fine for *internal invariants* — e.g. "the guard
+    //   evaluates against live state, not stale options" — that have no
+    //   single on-screen representation of their own.
+    //
+    //   This is not a hypothetical risk: the identical gap has shipped
+    //   through three separate rounds of this codebase before being named
+    //   as a defect class rather than three unrelated misses:
+    //     1. The Parent dropdown itself, this brief's own first round — every
+    //        AC-2/AC-3/AC-5/AC-6/etc. test below drove `setParent()`/
+    //        `targetForm` directly until "Defect 2" (below) added the
+    //        DOM-driven describe block that actually clicks the rendered
+    //        `<select>`.
+    //     2. The very next round of this same brief — the AC-8 rejection
+    //        message added a real `.hier-form-error` binding
+    //        (`hierarchy-editor.component.html`), but every AC-8 test still
+    //        asserted `targetForm.parentError` only; nothing here ever
+    //        queried `.hier-form-error` until the tests added below.
+    //     3. Earlier Matrix work: a highlight class asserted only via a
+    //        component's own tracked state rather than the class actually
+    //        landing on an element, a blocked-reason message checked only as
+    //        `card.addMarkBlockedReason` and not on screen, and a "zero armed
+    //        pickers" assertion (round-7 review, "N-1", this file) that
+    //        originally queried only `.tc-confirm-btn` — an element its own
+    //        fixture never rendered for the host's `+Mark` control — so the
+    //        assertion passed by finding nothing, regardless of whether the
+    //        real hazard was fixed.
+    describe('Parent field moved into the target Edit/Add form (Save-buffered, Option A)', () => {
+
+      it('AC-2: opening Edit on a device shows a Parent field whose value matches the target\'s current parentTargetId', () => {
+        component.setParent(weapon, device.id);
+        component.openEditTarget(null, weapon);
+        expect(component.targetForm.parentTargetId).toBe(device.id);
+      });
+
+      it('AC-2: opening Edit on an unparented device shows the field as unset ("— None —")', () => {
+        component.openEditTarget(null, weapon);
+        expect(component.targetForm.parentTargetId).toBe('');
+      });
+
+      it('Scenario 1 (Ordinary): setting Parent on the form and clicking Save updates parentTargetId and re-nests the tree', () => {
+        component.openEditTarget(null, weapon);
+        component.targetForm.parentTargetId = device.id;
+        component.saveTargetForm();
+
+        expect(weapon.parentTargetId).toBe(device.id);
+        expect(component.childrenOf(device.id).map(t => t.id)).toEqual(['wpn1']);
+        expect(component.childrenOf(null).map(t => t.id)).toEqual(['dev1']);
+      });
+
+      it('Scenario 3 (Undo — Cancel discards the change): changing Parent then Cancel leaves parentTargetId unchanged', () => {
+        component.openEditTarget(null, weapon);
+        component.targetForm.parentTargetId = device.id;
+        component.closeTargetForm();
+
+        expect(weapon.parentTargetId).toBeUndefined();
+
+        // Reopening Edit shows "— None —" again, not the discarded value.
+        component.openEditTarget(null, weapon);
+        expect(component.targetForm.parentTargetId).toBe('');
+      });
+
+      it('AC-3: changing Parent and clicking Cancel leaves the target\'s parentTargetId unchanged even when a parent was already set', () => {
+        component.setParent(weapon, device.id);
+        const other = new MatrixTarget({ id: 'other1', name: 'Other Device', type: 'device', context: 'public' });
+        matrixState.addTarget(null, other);
+
+        component.openEditTarget(null, weapon);
+        component.targetForm.parentTargetId = other.id;
+        component.closeTargetForm();
+
+        expect(weapon.parentTargetId).toBe(device.id);
+      });
+
+      it('AC-5: opening Edit on a persona shows no Parent field (canHaveParent gate)', () => {
+        const persona = new MatrixTarget({ id: 'p1', name: 'NPC', type: 'persona', context: 'public' });
+        matrixState.addTarget(null, persona);
+        component.openEditTarget(null, persona);
+        expect(component.canHaveParent(persona)).toBeFalse();
+      });
+
+      it('AC-6: opening Edit on a device whose context is "host" shows no Parent field, even though its type is "device"', () => {
+        const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+        matrixState.addHost(host);
+        const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host', linkedHostId: host.id });
+        host.targets.push(hostDevice);
+
+        component.openEditTarget(host, hostDevice);
+        fixture.detectChanges();
+
+        expect(component.canHaveParent(hostDevice)).toBeFalse();
+        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+      });
+
+      it('Scenario 2: switching Type from device to file mid-edit clears parentTargetId on Save, rather than silently keeping it', () => {
+        component.setParent(weapon, device.id);
+        component.openEditTarget(null, weapon);
+        expect(component.targetForm.parentTargetId).toBe(device.id);
+
+        component.targetForm.type = 'file'; // Type changed in the same session
+        component.saveTargetForm();
+
+        expect(weapon.type).toBe('file');
+        expect(weapon.parentTargetId).toBeUndefined();
+      });
+
+      // Reviewer-requested coverage: Scenario 2's reverse. Changing Type
+      // INTO 'device' mid-session must make the Parent field available and
+      // let the GM actually use it in the same Save, not just handle the
+      // outgoing direction.
+      it('Scenario 2 (reverse): switching Type from file to device mid-edit reveals the Parent field and lets the GM set one in the same Save', () => {
+        const loose = new MatrixTarget({ id: 'loose1', name: 'Loose File', type: 'file', context: 'public' });
+        matrixState.addTarget(null, loose);
+
+        component.openEditTarget(null, loose);
+        fixture.detectChanges();
+        expect(component.canHaveParent(component.targetForm.target!)).toBeFalse();
+        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+
+        component.targetForm.type = 'device'; // Type changed in the same session
+        fixture.detectChanges();
+        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(1);
+
+        component.targetForm.parentTargetId = device.id;
+        component.saveTargetForm();
+
+        expect(loose.type).toBe('device');
+        expect(loose.parentTargetId).toBe(device.id);
+        expect(component.childrenOf(device.id).map(t => t.id)).toContain(loose.id);
+      });
+
+      // AC-8, revised 2026-09-09 (Xavier: "a rejected re-parent must say
+      // so"). Supersedes the old silent-drop version of this test: a cycle
+      // attempt now blocks the WHOLE save (nothing commits, not even the
+      // target's other fields) and leaves a visible message in the form,
+      // rather than silently dropping only the parent half while writing
+      // everything else.
+      it('AC-8: a Save that would create a cycle is blocked entirely, shows an inline message, and leaves the form open', () => {
+        const a = new MatrixTarget({ id: 'a1', name: 'A', type: 'device', context: 'public' });
+        const b = new MatrixTarget({ id: 'b1', name: 'B', type: 'device', context: 'public' });
+        const c = new MatrixTarget({ id: 'c1', name: 'C', type: 'device', context: 'public' });
+        matrixState.addTarget(null, a);
+        matrixState.addTarget(null, b);
+        matrixState.addTarget(null, c);
+        component.setParent(c, a.id); // C is a child of A
+
+        // Attempt: parent A under C — a cycle, since C is currently A's
+        // descendant. Also rename A in the same session, to prove the whole
+        // save is blocked, not just the parent half.
+        component.openEditTarget(null, a);
+        component.targetForm.name = 'Renamed A';
+        component.targetForm.parentTargetId = c.id;
+        component.saveTargetForm();
+
+        expect(a.parentTargetId).toBeUndefined();
+        expect(a.name).toBe('A'); // the name change did not commit either — nothing did
+        expect(component.targetForm.active).toBeTrue(); // the form stays open
+        expect(component.targetForm.isEditing).toBeTrue();
+        expect(component.targetForm.target).toBe(a);
+        expect(component.targetForm.parentError).toBe("Can't parent this under one of its own children.");
+
+        // Picking a different parent clears the stale message (the GM's
+        // "different choice" path — the ✕/select route through
+        // onParentSelectionChange(), which clears it).
+        component.onParentSelectionChange('');
+        expect(component.targetForm.parentError).toBeNull();
+
+        // Re-parent C under B instead — succeeds, C is no longer under A.
+        component.openEditTarget(null, c);
+        component.targetForm.parentTargetId = b.id;
+        component.saveTargetForm();
+        expect(c.parentTargetId).toBe(b.id);
+
+        // Now A -> C is no longer a cycle (evaluated against LIVE state at
+        // this second Save, not the option list computed when this form was
+        // first opened) — it must now succeed. Reopening the form also
+        // clears any stale message from before, on its own.
+        component.openEditTarget(null, a);
+        expect(component.targetForm.parentError).toBeNull();
+        component.targetForm.parentTargetId = c.id;
+        component.saveTargetForm();
+        expect(a.parentTargetId).toBe(c.id);
+      });
+
+      it('AC-9: creating a new device via the Add form with no Parent selected leaves parentTargetId undefined', () => {
+        component.openAddTarget(null, 'device');
+        component.targetForm.name = 'New Drone';
+        component.saveTargetForm();
+
+        const created = matrixState.state.publicTargets.find(t => t.name === 'New Drone')!;
+        expect(created.parentTargetId).toBeUndefined();
+      });
+
+      it('AC-9: creating a new device via the Add form with a Parent selected sets parentTargetId to match (Xavier, 2026-09-09: Add flow also offers Parent)', () => {
+        component.openAddTarget(null, 'device');
+        component.targetForm.name = 'New Weapon';
+        component.targetForm.parentTargetId = device.id;
+        component.saveTargetForm();
+
+        const created = matrixState.state.publicTargets.find(t => t.name === 'New Weapon')!;
+        expect(created.parentTargetId).toBe(device.id);
+        expect(component.childrenOf(device.id).map(t => t.id)).toContain(created.id);
+      });
+
+      // Reviewer-traced race, not previously tested: the GM picks a parent
+      // in the Add form, then deletes that very target from the tree before
+      // clicking Save. Xavier's judgement call (2026-09-09, "ALSO" section):
+      // a DELETED parent is treated differently from a CYCLE. A cycle is an
+      // impossible nesting the GM's own choice would create right now — that
+      // deserves the new blocking message. A deleted parent is not the GM's
+      // choice being wrong; it is a target that simply stopped existing
+      // while the form sat open, through no fault of the selection made —
+      // closer to the option list going stale than to a rejected choice. It
+      // still degrades silently to unparented, exactly as before this
+      // change, with no dangling reference and no inline message.
+      it('the deleted-parent race: a parent chosen in the Add form and then deleted before Save leaves the new target unparented, with no message and no dangling reference', () => {
+        const doomed = new MatrixTarget({ id: 'doomed1', name: 'Doomed Mount', type: 'device', context: 'public' });
+        matrixState.addTarget(null, doomed);
+
+        component.openAddTarget(null, 'device');
+        component.targetForm.name = 'New Widget';
+        component.targetForm.parentTargetId = doomed.id;
+
+        // The chosen parent vanishes before Save.
+        matrixState.removeTarget(null, doomed);
+
+        component.saveTargetForm();
+
+        const created = matrixState.state.publicTargets.find(t => t.name === 'New Widget')!;
+        expect(created).toBeTruthy();
+        expect(created.parentTargetId).toBeUndefined(); // unparented, not pointing at a ghost
+        expect(component.targetForm.parentError).toBeNull(); // no message — this is not a rejected choice
+        expect(component.targetForm.active).toBeFalse(); // the save proceeded and the form closed normally
+      });
+
+      // Gap 3 (review round, closing a defect class): the test above ("the
+      // deleted-parent race") only covers the ADD flow, where a stale
+      // reference can never dangle because a brand-new MatrixTarget starts
+      // with parentTargetId === undefined anyway — deleting the chosen
+      // parent before Save just leaves that default in place. The real case
+      // is an EXISTING target whose own Edit form sits open holding a
+      // parent id that is deleted out from under it while the form is open.
+      //
+      // This resolves correctly today, but ONLY because two separate
+      // mechanisms happen to interact: deleteTarget()
+      // (hierarchy-editor.component.ts) already re-homes a deleted parent's
+      // children to `undefined` at delete time — BEFORE this stale Save ever
+      // runs — so by the time commitParentField()/setParent() re-validates
+      // the form's buffered id against parentOptionsFor() at Save time, the
+      // target's real parentTargetId is already undefined; the guard's
+      // silent no-write (setParent() finds the stale id no longer in
+      // parentOptionsFor() and returns without writing) lands on a value
+      // that was already cleared, rather than restoring a dangling pointer
+      // to nothing. That correctness is incidental to those two mechanisms
+      // agreeing, not designed as one guarantee — if deleteTarget() ever
+      // stops re-homing children, or setParent()'s guard ever starts writing
+      // the stale id instead of no-op'ing, this test should catch it.
+      it('an existing target\'s Edit form holding a since-deleted parent id saves to unparented, not a dangling reference', () => {
+        const parent = new MatrixTarget({ id: 'p1', name: 'Parent Device', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'c1', name: 'Child Device', type: 'device', context: 'public' });
+        matrixState.addTarget(null, parent);
+        matrixState.addTarget(null, child);
+        component.setParent(child, parent.id);
+
+        component.openEditTarget(null, child); // buffers parentTargetId = parent.id
+        expect(component.targetForm.parentTargetId).toBe(parent.id);
+
+        // The parent is deleted while `child`'s Edit form sits open, holding
+        // the now-stale id. `parent` itself has `child` parented to it, so
+        // deleteTarget()'s own re-homing confirmation fires first (Defect 4,
+        // above) — confirmed, which is what re-homes `child` to top level
+        // before this test's stale Save ever runs.
+        spyOn(window, 'confirm').and.returnValue(true);
+        component.deleteTarget(null, parent);
+        expect(window.confirm).toHaveBeenCalled();
+        expect(child.parentTargetId).toBeUndefined(); // re-homed by deleteTarget() already, before Save
+
+        // The open Edit form belongs to `child`, a different target than the
+        // one just deleted — deleteTarget() only resets targetForm when the
+        // deleted target IS the form's own target, so the form stays open,
+        // still holding the stale parent.id buffered value.
+        expect(component.targetForm.active).toBeTrue();
+        expect(component.targetForm.parentTargetId).toBe(parent.id);
+
+        component.saveTargetForm();
+
+        expect(child.parentTargetId).toBeUndefined(); // unparented, not pointing at the deleted parent
+        expect(component.targetForm.parentError).toBeNull(); // a deleted parent is not a rejected choice
+      });
+
+      it('Scenario 5: re-parenting an existing device from one parent to another takes one Edit-change-Save cycle, and the tree re-nests immediately after Save', () => {
+        const mount2 = new MatrixTarget({ id: 'mount2', name: 'Spare Mount', type: 'device', context: 'public' });
+        matrixState.addTarget(null, mount2);
+        component.setParent(weapon, device.id); // weapon ("smartgun") currently under "mount" (device)
+
+        component.openEditTarget(null, weapon);
+        expect(component.targetForm.parentTargetId).toBe(device.id);
+        component.targetForm.parentTargetId = mount2.id;
+        component.saveTargetForm();
+
+        expect(weapon.parentTargetId).toBe(mount2.id);
+        expect(component.childrenOf(mount2.id).map(t => t.id)).toEqual(['wpn1']);
+        expect(component.childrenOf(device.id).map(t => t.id)).toEqual([]);
+      });
+
+      it('the Add form offers a Parent field only for a public-space device (hostId === null)', () => {
+        const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+        matrixState.addHost(host);
+        component.openAddTarget(host, 'device');
+        fixture.detectChanges();
+
+        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+      });
+
+      // Defect 2 (review round): every test above drives `targetForm`
+      // and `saveTargetForm()` directly — none of them touch the rendered
+      // `<select id="hier-target-parent">`, its `[value]="opt.id"` options,
+      // or the ✕ clear button, so a broken `[(ngModel)]`/`(ngModelChange)`
+      // binding or a broken clear handler could ship with every other test
+      // here still green. These drive the actual DOM, the way a GM's tap
+      // would.
+      describe('Parent field: DOM-driven (Defect 2 — nothing above drives the real dropdown)', () => {
+        /** The rendered Parent `<select>`, or null if the field isn't on screen. */
+        function parentSelect(): HTMLSelectElement | null {
+          return fixture.nativeElement.querySelector('#hier-target-parent');
+        }
+
+        /** The ✕ clear button beside the Parent select, or null if not rendered. */
+        function parentClearBtn(): HTMLButtonElement | null {
+          return fixture.nativeElement.querySelector('.hier-parent-clear-btn');
+        }
+
+        /** Picks an option by its value, exactly as a tap on the dropdown would. */
+        function pickParent(value: string): void {
+          const el = parentSelect()!;
+          const index = Array.from(el.options).findIndex(o => o.value === value);
+          expect(index).toBeGreaterThanOrEqual(0);
+          el.selectedIndex = index;
+          el.dispatchEvent(new Event('change'));
+          fixture.detectChanges();
+        }
+
+        it('selecting a real <option> through the rendered <select> reaches targetForm.parentTargetId', () => {
+          component.openEditTarget(null, weapon);
+          fixture.detectChanges();
+
+          pickParent(device.id);
+
+          expect(component.targetForm.parentTargetId).toBe(device.id);
+        });
+
+        it('the rendered option list\'s values and labels match parentOptionsFor()', () => {
+          component.openEditTarget(null, weapon);
+          fixture.detectChanges();
+
+          const expected = component.parentOptionsFor(weapon);
+          const renderedOptions = Array.from(parentSelect()!.options)
+            .filter(o => o.value !== ''); // drop "— None (top-level) —"
+
+          expect(renderedOptions.map(o => o.value)).toEqual(expected.map(o => o.id));
+          expect(renderedOptions.map(o => o.textContent?.trim())).toEqual(expected.map(o => o.name));
+        });
+
+        it('clicking the ✕ clear affordance empties the field', () => {
+          component.setParent(weapon, device.id);
+          component.openEditTarget(null, weapon);
+          fixture.detectChanges();
+          expect(component.targetForm.parentTargetId).toBe(device.id);
+
+          parentClearBtn()!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          fixture.detectChanges();
+
+          expect(component.targetForm.parentTargetId).toBe('');
+          // The clear button itself disappears once there is nothing to clear.
+          expect(parentClearBtn()).toBeNull();
+        });
+
+        it('picking through the real <select> and then clicking Save commits the change', () => {
+          component.openEditTarget(null, weapon);
+          fixture.detectChanges();
+
+          pickParent(device.id);
+          const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+          saveBtn.click();
+          fixture.detectChanges();
+
+          expect(weapon.parentTargetId).toBe(device.id);
+          expect(component.childrenOf(device.id).map(t => t.id)).toEqual(['wpn1']);
+        });
+
+        // Gap 1 (review round, closing a defect class — see the convention
+        // block above): AC-8's rejection message was previously asserted
+        // only via `component.targetForm.parentError`; no test here ever
+        // queried `.hier-form-error`. If the `@if (targetForm.parentError)`
+        // binding at hierarchy-editor.component.html were broken (wrong
+        // property, inverted condition), every field-only AC-8 test could
+        // stay green while the GM saw nothing on screen — exactly the
+        // silent-drop failure this whole feature exists to prevent.
+        // Note on arrangement: `parentOptionsFor(a)` excludes A's own
+        // descendants from the rendered `<select>` — so a value that is
+        // ALREADY a's descendant when the form opens (as in the
+        // component-level AC-8 test above) can never be reached by clicking
+        // through the real dropdown; the option simply never renders. The
+        // only way this guard is reachable via genuine DOM interaction is
+        // the live-state race `saveTargetForm()`'s own comment describes: the
+        // GM picks a currently-valid parent through the real `<select>`,
+        // and it becomes invalid before Save because something else changed
+        // the graph while this form stayed open (below, `component.setParent`
+        // stands in for that "something else" — this app has only one target
+        // form open at a time, so nothing in today's UI can do this to
+        // itself, but the guard exists for exactly this shape of staleness,
+        // matching Scenario 4's "evaluated against live state" reasoning).
+        function pickThenMakeItACycle(a: MatrixTarget, c: MatrixTarget): void {
+          pickParent(c.id); // valid right now — c is not yet a's descendant
+          component.setParent(c, a.id); // c becomes a's child, invalidating the pick
+        }
+
+        it('AC-8 DOM: a blocked save renders the rejection message on screen, and the real ✕ clear button removes it', () => {
+          const a = new MatrixTarget({ id: 'a1', name: 'A', type: 'device', context: 'public' });
+          const c = new MatrixTarget({ id: 'c1', name: 'C', type: 'device', context: 'public' });
+          matrixState.addTarget(null, a);
+          matrixState.addTarget(null, c);
+
+          component.openEditTarget(null, a);
+          fixture.detectChanges();
+          pickThenMakeItACycle(a, c);
+
+          const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+          saveBtn.click();
+          fixture.detectChanges();
+
+          const message = expectVisibleText(fixture, '.hier-form-error');
+          expect(message).toBe("Can't parent this under one of its own children.");
+
+          // The ✕ clear button is a real rendered control (it shows whenever
+          // `targetForm.parentTargetId` is set) — clicking it, not touching
+          // any component field, is what removes the message from screen.
+          const clearBtn = fixture.nativeElement.querySelector('.hier-parent-clear-btn') as HTMLButtonElement;
+          expect(clearBtn).withContext('the ✕ clear button should be rendered while a parent is selected').not.toBeNull();
+          clearBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          fixture.detectChanges();
+
+          expectAbsent(fixture, '.hier-form-error');
+        });
+
+        it('AC-8 DOM: the rejection message is gone from the screen after the form is closed and reopened', () => {
+          const a = new MatrixTarget({ id: 'a1', name: 'A', type: 'device', context: 'public' });
+          const c = new MatrixTarget({ id: 'c1', name: 'C', type: 'device', context: 'public' });
+          matrixState.addTarget(null, a);
+          matrixState.addTarget(null, c);
+
+          component.openEditTarget(null, a);
+          fixture.detectChanges();
+          pickThenMakeItACycle(a, c);
+          (fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement).click();
+          fixture.detectChanges();
+          expectVisibleText(fixture, '.hier-form-error'); // message is up first
+
+          (fixture.nativeElement.querySelector('.hier-btn-cancel') as HTMLButtonElement).click();
+          fixture.detectChanges();
+          component.openEditTarget(null, a); // reopen the same target's Edit form
+          fixture.detectChanges();
+
+          expectAbsent(fixture, '.hier-form-error');
+        });
+
+        // Gap 2 (review round): AC-8's existing coverage checks real state
+        // (`a.name` did not change) but never checks that the GM's
+        // in-progress typing is still sitting in the form after the blocked
+        // save — the entire reason it is acceptable to block the whole save,
+        // rather than merely dropping the parent half, is that the GM does
+        // not lose their work. Asserted through the rendered Name input, not
+        // the buffer object, per the convention above.
+        it('AC-8 DOM: the GM\'s other in-progress edit (a renamed target) survives a blocked save, visible in the rendered form', () => {
+          const a = new MatrixTarget({ id: 'a1', name: 'A', type: 'device', context: 'public' });
+          const c = new MatrixTarget({ id: 'c1', name: 'C', type: 'device', context: 'public' });
+          matrixState.addTarget(null, a);
+          matrixState.addTarget(null, c);
+
+          component.openEditTarget(null, a);
+          fixture.detectChanges();
+
+          const nameInput = fixture.nativeElement.querySelector('#hier-target-name') as HTMLInputElement;
+          nameInput.value = 'Renamed A';
+          nameInput.dispatchEvent(new Event('input'));
+          fixture.detectChanges();
+
+          pickThenMakeItACycle(a, c);
+          (fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement).click();
+          fixture.detectChanges();
+
+          // The form is still open and the Name field still shows the GM's
+          // buffered edit — nothing was cleared by the rejected save.
+          const nameAfter = fixture.nativeElement.querySelector('#hier-target-name') as HTMLInputElement;
+          expect(nameAfter.value).toBe('Renamed A');
+          expect(a.name).toBe('A'); // and it never reached real state either
+        });
       });
     });
   });

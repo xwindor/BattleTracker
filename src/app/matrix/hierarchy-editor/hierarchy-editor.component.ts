@@ -43,6 +43,25 @@ interface TargetFormState {
   visibility: MatrixTargetVisibility;
   deviceRating: number;
   linkedParticipantId: string;
+  /**
+   * Buffered "Parent" choice (`briefs/parent-picker-into-edit-view-spec.md`,
+   * Option A — Save-buffered). Empty string = no parent. Committed only by
+   * `saveTargetForm()`, via `setParent()`/`clearParent()` so the
+   * self/descendant guard stays the single choke point it already was for
+   * the old tree-row control (Open Decision 4).
+   */
+  parentTargetId: string;
+  /**
+   * Inline message shown in the form when the buffered Parent choice above
+   * was rejected at the last Save attempt (2026-09-09, Xavier: "a rejected
+   * re-parent must say so" — supersedes the old AC-8 silent-drop). `null`
+   * when there is nothing to report. Cleared whenever the GM changes the
+   * Parent selection (`onParentSelectionChange()`) or reopens/re-blanks the
+   * form (`openAddTarget()`/`openEditTarget()`/`closeTargetForm()`, all of
+   * which build a fresh `TargetFormState` rather than mutating this one), so
+   * a stale message can never linger past the condition that caused it.
+   */
+  parentError: string | null;
 }
 
 const BLANK_HOST_FORM: HostFormState = {
@@ -54,7 +73,8 @@ const BLANK_HOST_FORM: HostFormState = {
 const BLANK_TARGET_FORM: TargetFormState = {
   active: false, isEditing: false, target: null, hostId: null,
   name: "", type: "device", visibility: "hidden",
-  deviceRating: 4, linkedParticipantId: ""
+  deviceRating: 4, linkedParticipantId: "", parentTargetId: "",
+  parentError: null
 };
 
 /**
@@ -434,7 +454,9 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
       type: target.type,
       visibility: target.visibility,
       deviceRating: target.deviceRating,
-      linkedParticipantId: target.linkedParticipantId ?? ""
+      linkedParticipantId: target.linkedParticipantId ?? "",
+      parentTargetId: target.parentTargetId ?? "",
+      parentError: null
     };
     this.hostForm = { ...BLANK_HOST_FORM };
   }
@@ -509,6 +531,27 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
     const f = this.targetForm;
     if (!f.name.trim()) return;
 
+    // Validate the buffered Parent choice BEFORE committing anything else.
+    // 2026-09-09 (Xavier): "a rejected re-parent must say so" — supersedes
+    // the old AC-8 silent-drop. A self/descendant cycle now blocks the WHOLE
+    // save, with a visible message, rather than writing every other field
+    // and quietly dropping only the parent half. Only checked when the
+    // field is still meaningful for this save (an existing target, staying
+    // a public-space device) — a type change away from device (Scenario 2)
+    // still drops the buffered value silently in `commitParentField()`
+    // below, because that is not a rejected choice, just a field that no
+    // longer applies. A parent that was simply deleted from state since the
+    // form opened is a different, more benign case again (not an impossible
+    // nesting, just a stale option) — left to `setParent()`'s existing
+    // guard to drop silently once the rest of the save commits, rather than
+    // raising this message.
+    if (f.isEditing && f.target && f.parentTargetId
+        && f.type === "device" && f.hostId === null
+        && this.wouldCreateCycle(f.target, f.parentTargetId)) {
+      f.parentError = "Can't parent this under one of its own children.";
+      return; // block the whole save — commit nothing
+    }
+
     const host = f.hostId ? (this.state.hosts.find(h => h.id === f.hostId) ?? null) : null;
     const deviceRating = Math.max(1, f.deviceRating);
     // "ic" targets have no Device Rating of their own — they borrow the
@@ -527,6 +570,7 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
         linkedParticipantId: f.linkedParticipantId || undefined,
         matrixHealth: health
       });
+      this.commitParentField(f.target, f.parentTargetId);
     } else {
       const target = new MatrixTarget({
         id: this.matrixState.generateTargetId(),
@@ -540,6 +584,7 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
         matrixHealth: health
       });
       this.matrixState.addTarget(host, target);
+      this.commitParentField(target, f.parentTargetId);
     }
     this.targetForm = { ...BLANK_TARGET_FORM };
   }
@@ -818,6 +863,46 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * `target`'s own id plus every id reachable by walking down from it — the
+   * single definition of "would create a cycle if picked as target's own
+   * parent," shared by `parentOptionsFor()` (which OFFERS choices excluding
+   * this set) and `wouldCreateCycle()` below (which ASKS whether a specific
+   * already-chosen id is in it), so the self/descendant rule has exactly one
+   * place it is computed (Open Decision 4 — one choke point, not two copies).
+   */
+  private selfAndDescendantIds(targetId: string): Set<string> {
+    const result = this.descendantIds(targetId);
+    result.add(targetId);
+    return result;
+  }
+
+  /**
+   * Whether choosing `parentId` as `target`'s parent would create a cycle —
+   * the same rule `setParent()`'s guard enforces at commit time, made
+   * askable here so `saveTargetForm()` can validate BEFORE writing anything
+   * (2026-09-09: a rejected re-parent must say so, not silently drop — see
+   * `briefs/parent-picker-into-edit-view-spec.md` AC-8's revised form).
+   * Built on `selfAndDescendantIds()`, the same set `parentOptionsFor()`
+   * excludes, so this is not a second copy of the self/descendant rule.
+   *
+   * Asymmetry, noted rather than fixed (review round): unlike
+   * `parentOptionsFor()`, this does NOT also require `parentId` to resolve
+   * to a `type === "device"` target — it only mirrors the self/descendant
+   * half of that method's filtering, not the device-only half. Harmless
+   * today only because the one caller (`saveTargetForm()`) always passes a
+   * `parentTargetId` that came from this same form's `<select>`, which never
+   * offers a non-device option in the first place (`parentOptionsFor()`/
+   * `parentOptionsForNewTarget()` both filter to devices before rendering
+   * any `<option>`). If a future caller ever calls this with an
+   * out-of-band id — bypassing the dropdown — this would silently accept a
+   * non-device parent that `parentOptionsFor()` would have refused to offer.
+   * Do not assume this is a byte-identical mirror of `parentOptionsFor()`.
+   */
+  wouldCreateCycle(target: MatrixTarget, parentId: string): boolean {
+    return this.selfAndDescendantIds(target.id).has(parentId);
+  }
+
+  /**
    * Valid parent choices for `target`: every other public-space **device**,
    * excluding `target` itself and anything already beneath it — picking a
    * descendant as your own parent would create a cycle
@@ -831,11 +916,30 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
    * link `MatrixStateService.propagateMarkUp()` will never actually walk
    * through. See `MatrixTarget.parentTargetId`'s doc comment for the full
    * citation.
+   *
+   * Called both from the shared target Edit form and, indirectly via
+   * `commitParentField()`, from `saveTargetForm()` at Save time — the latter
+   * is what makes the self/descendant guard evaluate against **live**
+   * state, not whatever this list looked like when the form was opened
+   * (`briefs/parent-picker-into-edit-view-spec.md`, "Critical correctness
+   * points", scenario 4).
    */
   parentOptionsFor(target: MatrixTarget): MatrixTarget[] {
-    const excluded = this.descendantIds(target.id);
-    excluded.add(target.id);
+    const excluded = this.selfAndDescendantIds(target.id);
     return this.state.publicTargets.filter(t => !excluded.has(t.id) && t.type === "device");
+  }
+
+  /**
+   * Valid parent choices for a target being **created** (Add flow, Open
+   * Decision 2 = "yes", `briefs/parent-picker-into-edit-view-spec.md`). A
+   * target with no id yet can have no descendants, so the self/descendant
+   * exclusion `parentOptionsFor()` runs does not apply — this is a separate
+   * accessor rather than an overload so `parentOptionsFor()`'s contract
+   * (always excludes self + descendants of a real target) stays unchanged
+   * for its existing caller.
+   */
+  parentOptionsForNewTarget(): MatrixTarget[] {
+    return this.state.publicTargets.filter(t => t.type === "device");
   }
 
   /**
@@ -843,9 +947,55 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
    * (Xavier's decision 8, 2026-09-03): only a device ever propagates a mark
    * it receives, so parenting a file/persona/IC/nested-host under something
    * else would be a control that can never do anything.
+   *
+   * Also gated on `context === "public"`
+   * (`briefs/parent-picker-into-edit-view-spec.md`, Open Decision 3): a
+   * device already sitting inside a host uses `linkedHostId` for its
+   * containment, not `parentTargetId` (`MatrixTarget.parentTargetId`'s doc
+   * comment). This gate was previously enforced only by which template
+   * called it — the public-space tree never rendered a host-nested target —
+   * but the shared Edit/Add form is reachable for host-nested devices too,
+   * so the check now has to say so explicitly.
    */
   canHaveParent(target: MatrixTarget): boolean {
-    return target.type === "device";
+    return target.type === "device" && target.context === "public";
+  }
+
+  /**
+   * The Parent half of `saveTargetForm()`'s commit (Open Decision 4:
+   * delegates to `setParent()`/`clearParent()` rather than reimplementing
+   * the self/descendant guard here, so that guard has exactly one choke
+   * point). Called for both the edit and create branches, after the rest of
+   * the target's fields have already been written/constructed, so `target`
+   * reflects this Save's `type`/`context` when `canHaveParent()` is
+   * evaluated.
+   *
+   * If the type no longer supports a parent (e.g. the GM switched Type from
+   * `device` to `file` in the same form session — spec scenario 2), any
+   * buffered `parentTargetId` is dropped rather than written: the target
+   * ends the save with `parentTargetId === undefined` regardless of what was
+   * sitting in the form.
+   */
+  private commitParentField(target: MatrixTarget, bufferedParentId: string): void {
+    if (this.canHaveParent(target) && bufferedParentId) {
+      this.setParent(target, bufferedParentId);
+    } else {
+      this.clearParent(target);
+    }
+  }
+
+  /**
+   * The form's Parent `<select>` and its ✕ clear button both route through
+   * here rather than writing `targetForm.parentTargetId` directly, so that
+   * changing the selection also clears any stale `parentError` left over
+   * from a previous rejected Save (2026-09-09 decision — "so a stale error
+   * can't linger"). Reopening the form clears it too, for free, because
+   * `openAddTarget()`/`openEditTarget()`/`closeTargetForm()` all build a
+   * fresh `TargetFormState` rather than mutating this one.
+   */
+  onParentSelectionChange(parentId: string): void {
+    this.targetForm.parentTargetId = parentId;
+    this.targetForm.parentError = null;
   }
 
   setParent(target: MatrixTarget, parentId: string): void {
