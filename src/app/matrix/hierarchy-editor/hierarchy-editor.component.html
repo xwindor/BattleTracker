@@ -203,8 +203,14 @@
             <option [value]="d.name">{{ d.name }}</option>
             }
           </select>
-          <button type="button" class="hier-mark-confirm" (click)="confirmHostAddMark(host)">✓</button>
+          <button type="button" class="hier-mark-confirm"
+            (click)="confirmHostAddMark(host)"
+            [disabled]="!canConfirmHostAddMark(host)"
+            [title]="hostAddMarkBlockedReason(host) ?? 'Place 1 mark'">✓</button>
           <button type="button" class="hier-mark-cancel" (click)="getHostMarkState(host.id).open = false">✕</button>
+          @if (hostAddMarkBlockedReason(host)) {
+          <span class="hier-add-mark-blocked">{{ hostAddMarkBlockedReason(host) }}</span>
+          }
           }
         </span>
         }

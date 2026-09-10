@@ -785,6 +785,20 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .hier-mark-confirm:hover { background: #0d350d; }
 
+.hier-mark-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Why the ✓ is disabled — shown inline rather than letting the button do
+   nothing when clicked. Mirrors .tc-add-mark-blocked on the target card
+   (target-card.component.css:347). */
+.hier-add-mark-blocked {
+  color: #ff8a8a;
+  font-size: 0.7rem;
+  margin-left: 0.3rem;
+}
+
 .hier-mark-cancel {
   background: transparent;
   border: 1px solid #2a3a2a;

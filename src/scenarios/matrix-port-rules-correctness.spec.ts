@@ -62,7 +62,7 @@ import { MatrixRunPanelComponent } from 'app/matrix/matrix-run-panel/matrix-run-
 import { MatrixGraphComponent } from 'app/matrix/matrix-graph/matrix-graph.component';
 import { TargetCardComponent, MarkHighlightRequest } from 'app/matrix/target-card/target-card.component';
 
-import { MatrixStateService } from 'app/services/matrix-state.service';
+import { MatrixStateService, MARK_CAP } from 'app/services/matrix-state.service';
 import { OsTrackingService, osBandFor } from 'app/services/os-tracking.service';
 import { SharedMatrixTarget } from 'app/services/session-sync.service';
 
@@ -3258,12 +3258,36 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       component.toggleHost(host.id);
       fixture.detectChanges();
 
+      // Flake root cause (diagnosed by measuring `document.body`'s own
+      // `getBoundingClientRect()` alongside the tree's): this fixture (155px
+      // of fixed Karma/Jasmine chrome + this test's own ~390px-tall tree) is
+      // routinely taller than the headless browser's small test viewport.
+      // Karma runs the entire suite in one long-lived page, and by the time
+      // this test runs the window is frequently already scrolled to the
+      // bottom (a leftover position from whatever earlier test last grew the
+      // page, never reset — the window's scroll position is global state
+      // Angular's per-test teardown does not touch). While scrolled to the
+      // bottom, the browser clamps `scrollY` to the document's max scroll
+      // exactly, so ANY growth in page height — including this test's own,
+      // already-exempted, `gn`-row growth from opening the picker — silently
+      // increases that clamp and drags the whole viewport's visible content
+      // up by the same amount. That reads as every element's own `top`
+      // shifting, `dr` (the outermost node, with no ancestor of its own)
+      // included, even though nothing in the tree actually moved relative to
+      // its neighbours. Resetting to the top before every measurement makes
+      // the comparison deterministic and independent of whatever a
+      // predecessor test left the shared page scrolled to: Chrome's scroll
+      // anchoring explicitly does not adjust `scrollY` away from 0, so once
+      // pinned at the top this cannot recur mid-test.
+      window.scrollTo(0, 0);
+
       const nodesBefore = Array.from(
         fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
       ) as HTMLElement[];
       const rectsBefore = nodesBefore.map(el => el.getBoundingClientRect());
 
       openPickerOn('gn');
+      window.scrollTo(0, 0); // see comment above — keep the comparison pinned to the top through the mutation too
 
       const gnNode = fixture.nativeElement.querySelector("[data-target-id='gn']") as HTMLElement;
       const nodesAfter = Array.from(
@@ -3355,12 +3379,15 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       matrixState.addHost(host2);
       fixture.detectChanges();
 
+      window.scrollTo(0, 0); // see the scroll-pinning comment on the `gn` phase above — same flake, same fix, second measurement span
+
       const nodesBefore2 = Array.from(
         fixture.nativeElement.querySelectorAll('.hier-public-node, .tc-info-row, .hier-host-node, .hier-host-header')
       ) as HTMLElement[];
       const rectsBefore2 = nodesBefore2.map(el => el.getBoundingClientRect());
 
       openPickerOn('hdv');
+      window.scrollTo(0, 0);
 
       const hdvEl = nativeElFor('hdv');
       const hostNode = fixture.nativeElement.querySelector(`[data-host-id='${host.id}']`) as HTMLElement;
@@ -3923,6 +3950,414 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     }));
   });
 
+  // ── Host +Mark control parity (host-mark-control-parity-spec.md, 2026-09-10) ──
+  //
+  // Brings the host's own +Mark control's decker-filtering and
+  // disabled/blocked-reason messaging up to parity with TargetCardComponent's.
+  // Reuses the same fixture pattern as the propagation-highlight describe
+  // block above: `component.activeDeckers` assigned directly, a host added
+  // via `matrixState.addHost()`.
+  describe('HierarchyEditorComponent host +Mark control parity (host-mark-control-parity-spec.md, 2026-09-10)', () => {
+    let fixture: ComponentFixture<HierarchyEditorComponent>;
+    let component: HierarchyEditorComponent;
+    let matrixState: MatrixStateService;
+    let host: MatrixHost;
+    let decker: MatrixParticipant;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [HierarchyEditorComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(HierarchyEditorComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.activeDeckers = [decker];
+
+      host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      component.toggleHost(host.id); // expand — the +Mark button only renders inside an expanded host body
+      fixture.detectChanges();
+    });
+
+    // ── AC-1, AC-2: nameless/capped exclusion, MARK_CAP not a bare literal ──
+
+    it('AC-1: hostAvailableDeckers() excludes a decker whose name is blank or all-whitespace', () => {
+      const blank = new MatrixParticipant();
+      blank.name = '   ';
+      component.activeDeckers = [decker, blank];
+      fixture.detectChanges();
+
+      const names = component.hostAvailableDeckers(host).map(d => d.name);
+      expect(names).toEqual(['Tesseract']);
+    });
+
+    it('AC-1: hostAvailableDeckers() still excludes a decker at or over MARK_CAP', () => {
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      expect(component.hostAvailableDeckers(host)).toEqual([]);
+    });
+
+    it('AC-2: hostAvailableDeckers(), dots(), and confirmHostAddMark() all key off MARK_CAP, not a bare 3', () => {
+      // Exercised indirectly: setting the cap to a decker's mark count via
+      // the shared constant, rather than a hardcoded 3, must still block
+      // them — this would fail if any of the three read a literal that had
+      // drifted from MARK_CAP.
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+      expect(component.hostAvailableDeckers(host)).toEqual([]);
+
+      expect(component.dots(MARK_CAP)).toBe('●'.repeat(MARK_CAP) + '○'.repeat(0));
+      expect(component.dots(0)).toBe('○'.repeat(MARK_CAP));
+
+      component.openHostAddMark(host); // picker stays closed (no available deckers) but state can still be seeded directly for this check
+      component.getHostMarkState(host.id).selectedDeckerId = 'Tesseract';
+      component.confirmHostAddMark(host);
+      fixture.detectChanges();
+
+      // Blocked by the MARK_CAP-driven guard inside confirmHostAddMark(): no
+      // mark written past the cap.
+      expect(host.marks['Tesseract']).toBe(MARK_CAP);
+    });
+
+    // ── AC-3, AC-4, AC-5: hostAddMarkBlockedReason() ─────────────────────
+
+    it('AC-3: hostAddMarkBlockedReason() returns "Pick a decker first" when nothing is selected', () => {
+      component.openHostAddMark(host);
+      component.getHostMarkState(host.id).selectedDeckerId = '';
+      fixture.detectChanges();
+
+      expect(component.hostAddMarkBlockedReason(host)).toBe('Pick a decker first');
+    });
+
+    it('AC-4: hostAddMarkBlockedReason() names the decker and MARK_CAP when the selected decker is at or over cap', () => {
+      component.openHostAddMark(host);
+      component.getHostMarkState(host.id).selectedDeckerId = 'Tesseract';
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      expect(component.hostAddMarkBlockedReason(host)).toBe(
+        `Tesseract already holds the maximum ${MARK_CAP} marks on this host (p. 236)`
+      );
+    });
+
+    it('AC-5: hostAddMarkBlockedReason() returns null when a decker is selected and under cap', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+      expect(component.hostAddMarkBlockedReason(host)).toBeNull();
+    });
+
+    // ── AC-6, AC-7, AC-8: canConfirmHostAddMark(), disabled button, blocked-reason DOM element ──
+
+    it('AC-6: canConfirmHostAddMark() is true exactly when hostAddMarkBlockedReason() is null', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.hostAddMarkBlockedReason(host)).toBeNull();
+      expect(component.canConfirmHostAddMark(host)).toBeTrue();
+
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+      expect(component.hostAddMarkBlockedReason(host)).not.toBeNull();
+      expect(component.canConfirmHostAddMark(host)).toBeFalse();
+    });
+
+    it('AC-7: the confirm button is disabled in the DOM exactly when canConfirmHostAddMark() is false', () => {
+      // A second, uncapped decker must stay available, or capping the only
+      // decker collapses the outer `@if (hostAvailableDeckers(host).length >
+      // 0)` gate and takes the whole +Mark group — confirm button included —
+      // out of the DOM along with it (see Scenario 3, which is the same
+      // shape deliberately).
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      let confirmBtn = fixture.nativeElement.querySelector('.hier-mark-confirm') as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBeFalse();
+
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      confirmBtn = fixture.nativeElement.querySelector('.hier-mark-confirm') as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBeTrue();
+    });
+
+    it('AC-8: .hier-add-mark-blocked renders with the blocked-reason text exactly when it is non-null, and is absent when null', () => {
+      // Same reason as AC-7: a second, uncapped decker keeps the outer gate
+      // open once Tesseract is capped.
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).toBeNull();
+
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      const blocked = fixture.nativeElement.querySelector('.hier-add-mark-blocked') as HTMLElement;
+      expect(blocked).not.toBeNull();
+      expect(blocked.textContent?.trim()).toBe(
+        `Tesseract already holds the maximum ${MARK_CAP} marks on this host (p. 236)`
+      );
+    });
+
+    // ── AC-9: openHostAddMark() never auto-selects a blank-named or capped decker ──
+
+    it('AC-9: openHostAddMark() does not auto-select a blank-named decker even when it is first in activeDeckers', () => {
+      const blank = new MatrixParticipant();
+      blank.name = '';
+      component.activeDeckers = [blank, decker];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+    });
+
+    it('AC-9: openHostAddMark() does not auto-select an already-capped decker even when it is first in activeDeckers', () => {
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      host.marks['Slamm-0'] = MARK_CAP;
+      component.activeDeckers = [slamm, decker];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+    });
+
+    // ── Scenarios to survive ──────────────────────────────────────────────
+
+    it('Scenario 1 — ordinary case: two available deckers, one auto-selected, confirm enabled, no blocked text, confirm writes the mark and closes the picker', () => {
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      const options = fixture.nativeElement.querySelectorAll('.hier-mark-select option');
+      expect(options.length).toBe(2);
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+
+      const confirmBtn = fixture.nativeElement.querySelector('.hier-mark-confirm') as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBeFalse();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).toBeNull();
+
+      confirmBtn.click();
+      fixture.detectChanges();
+
+      expect(host.marks['Tesseract']).toBe(1);
+      expect(component.getHostMarkState(host.id).open).toBeFalse();
+    });
+
+    it('Scenario 2 — edge case, nameless decker present: the dropdown lists only the named decker, never auto-selects the blank one', () => {
+      const blank = new MatrixParticipant();
+      blank.name = '';
+      component.activeDeckers = [decker, blank];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      const options = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-mark-select option')
+      ) as HTMLOptionElement[];
+      expect(options.length).toBe(1);
+      expect(options[0].value).toBe('Tesseract');
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+    });
+
+    it('Scenario 3 — edge case, selected decker capped externally: confirm disables, blocked text appears, a second available decker stays listed', () => {
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+
+      // External write, mirroring the existing "Defect 7" pattern.
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      expect(component.hostAddMarkBlockedReason(host)).toBe(
+        `Tesseract already holds the maximum ${MARK_CAP} marks on this host (p. 236)`
+      );
+      const confirmBtn = fixture.nativeElement.querySelector('.hier-mark-confirm') as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBeTrue();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).not.toBeNull();
+
+      const options = Array.from(
+        fixture.nativeElement.querySelectorAll('.hier-mark-select option')
+      ) as HTMLOptionElement[];
+      expect(options.map(o => o.value)).toContain('Slamm-0');
+    });
+
+    it('Scenario 4 — undo-adjacent case: cancelling clears the picker with no mark written and no blocked text leaking into the next open', () => {
+      // A second, uncapped decker keeps the outer availability gate open
+      // once Tesseract is capped (same reason as AC-7/AC-8/Scenario 3), so
+      // the blocked-reason text can actually render for this assertion.
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      host.marks['Tesseract'] = MARK_CAP; // force a blocked reason to exist before cancelling
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).not.toBeNull();
+
+      component.getHostMarkState(host.id).open = false; // the existing cancel button's own handler
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).toBeNull();
+      expect(host.marks['Tesseract']).toBe(MARK_CAP); // unchanged — no mark was written
+
+      // Reopening starts clean: the still-uncapped decker auto-selects with
+      // no stale blocked reason.
+      component.getHostMarkState(host.id).selectedDeckerId = ''; // force a fresh auto-select
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Slamm-0');
+      expect(component.hostAddMarkBlockedReason(host)).toBeNull();
+    });
+
+    it('Scenario 5 — live-at-the-table case: an external cap landing while the picker is open (session-sync-style write) visibly disables confirm and shows why, instead of a silent dead tap', () => {
+      const slamm = new MatrixParticipant();
+      slamm.name = 'Slamm-0';
+      component.activeDeckers = [decker, slamm];
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.canConfirmHostAddMark(host)).toBeTrue();
+
+      // Simulates a session-sync-driven external write landing mid-picker,
+      // the same shape of write scenario 3 exercises directly.
+      host.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      const confirmBtn = fixture.nativeElement.querySelector('.hier-mark-confirm') as HTMLButtonElement;
+      expect(confirmBtn.disabled).toBeTrue();
+      const blocked = fixture.nativeElement.querySelector('.hier-add-mark-blocked') as HTMLElement;
+      expect(blocked.textContent).toContain('Tesseract');
+      expect(blocked.textContent).toContain('already holds the maximum');
+
+      // A disabled button no-ops a DOM click — confirming this is exactly
+      // the silent-dead-tap failure mode the change removes for the GM:
+      // the GM now sees why, instead of tapping a button that quietly does
+      // nothing.
+      confirmBtn.click();
+      fixture.detectChanges();
+      expect(host.marks['Tesseract']).toBe(MARK_CAP); // unchanged
+
+      // Picking the other available decker recovers cleanly.
+      component.getHostMarkState(host.id).selectedDeckerId = 'Slamm-0';
+      fixture.detectChanges();
+      expect(component.canConfirmHostAddMark(host)).toBeTrue();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).toBeNull();
+    });
+
+    // ── AC-7b / AC-8b (round-8 review): the single-decker case AC-7/AC-8
+    //    deliberately avoided. With only one decker in `activeDeckers`,
+    //    capping it drops `hostAvailableDeckers(host)` to zero, which takes
+    //    the whole `+Mark` group — confirm button and blocked-reason text
+    //    both — out of the DOM entirely, rather than leaving them present
+    //    and merely disabled. AC-7/AC-8 as originally worded ("disabled in
+    //    the DOM exactly when ...") are false in this state; these two
+    //    tests assert what actually happens here instead. ──────────────
+
+    it('AC-7b: with only one decker, capping it removes the confirm button from the DOM entirely (not merely disabled)', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).not.toBeNull();
+
+      // Real external write via the service, so `stateChange$` fires and
+      // `closeExhaustedHostPickers()` runs — mirrors production paths
+      // (session sync, another GM control), not a raw property poke.
+      matrixState.addMarkToHost(host, 'Tesseract', MARK_CAP);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-btn')).toBeNull();
+    });
+
+    it('AC-8b: with only one decker, capping it removes .hier-add-mark-blocked from the DOM entirely (not merely rendered-and-non-null)', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      matrixState.addMarkToHost(host, 'Tesseract', MARK_CAP);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-blocked')).toBeNull();
+    });
+
+    // ── Round-8 review, defect 1: ghost-reopen regression ────────────────
+
+    it('Defect 1a: capping the only decker while its picker is open closes the picker outright — nothing stays armed', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).open).toBeTrue();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+
+      matrixState.addMarkToHost(host, 'Tesseract', MARK_CAP);
+      fixture.detectChanges();
+
+      const s = component.getHostMarkState(host.id);
+      expect(s.open).toBeFalse();
+      expect(s.selectedDeckerId).toBe('');
+    });
+
+    it('Defect 1b: removing a mark afterwards via the "×" control does not silently re-arm the picker — it reopens closed, requiring a fresh +Mark tap', () => {
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      // Caps the only decker while the picker is open (Defect 1a's setup).
+      matrixState.addMarkToHost(host, 'Tesseract', MARK_CAP);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).open).toBeFalse();
+
+      // An ordinary, unrelated action: the GM removes a mark on this exact
+      // decker/host via the always-visible "×" remove control.
+      component.removeHostMark(host, 'Tesseract');
+      fixture.detectChanges();
+
+      // The +Mark group is available again (availability > 0), but must
+      // come back in its closed, "tap +Mark to reopen" state — not
+      // reappear already armed with a confirm button ready to fire.
+      const s = component.getHostMarkState(host.id);
+      expect(s.open).toBeFalse();
+      expect(s.selectedDeckerId).toBe('');
+      expect(fixture.nativeElement.querySelector('.hier-add-mark-btn')).not.toBeNull();
+      expect(fixture.nativeElement.querySelector('.hier-mark-confirm')).toBeNull();
+
+      // A genuine fresh tap still works normally afterwards.
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+      expect(component.getHostMarkState(host.id).selectedDeckerId).toBe('Tesseract');
+      expect(component.canConfirmHostAddMark(host)).toBeTrue();
+    });
+  });
 
   // ── Decision 7 — marks propagate up the containment hierarchy ──────────
 

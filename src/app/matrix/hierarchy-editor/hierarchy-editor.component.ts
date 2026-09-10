@@ -11,7 +11,7 @@ import {
   MatrixTargetVisibility,
   matrixConditionMonitor
 } from "Matrix";
-import { MatrixStateService, PropagationStop } from "app/services/matrix-state.service";
+import { MatrixStateService, PropagationStop, MARK_CAP } from "app/services/matrix-state.service";
 import {
   TargetCardComponent,
   MarkHighlightRequest,
@@ -192,7 +192,18 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
     // A mark placed or removed elsewhere (host mark controls, session sync,
     // jackOut()) while a picker is open must update a still-open highlight's
     // cap state (spec Lifecycle table, path 12/13) — not clear it.
-    this.stateChangeSub = this.matrixState.stateChange$.subscribe(() => this.recomputeHighlight());
+    //
+    // `closeExhaustedHostPickers()` is a separate call, not folded into
+    // `recomputeHighlight()` itself — round-8 review confirmed
+    // `recomputeHighlight()` has zero references to `hostMarkState` and
+    // must stay that way (it computes the tree-wide propagation highlight,
+    // a card-picker concern; the host's own +Mark control is a distinct
+    // picker with its own lifecycle, same relationship `hostMarkState` and
+    // `markHighlight` already have everywhere else in this component).
+    this.stateChangeSub = this.matrixState.stateChange$.subscribe(() => {
+      this.recomputeHighlight();
+      this.closeExhaustedHostPickers();
+    });
   }
 
   ngOnDestroy(): void {
@@ -768,13 +779,48 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
       .map(([id, count]) => ({ deckerId: id, count }));
   }
 
-  /** Deckers that can still receive another mark on this host (count < 3). */
+  /**
+   * Deckers that can still receive another mark on this host (count <
+   * MARK_CAP, p. 236).
+   *
+   * Nameless participants are excluded: `marks` is keyed by `decker.name`, so
+   * one cannot hold a mark. Mirrors `TargetCardComponent.availableDeckers`'
+   * own guard (host-mark-control-parity-spec.md) for the same reason: this
+   * component takes `activeDeckers` as an `@Input` from whoever mounts it, so
+   * the guard lives here too rather than trusting every future caller.
+   */
   hostAvailableDeckers(host: MatrixHost): MatrixParticipant[] {
-    return this.activeDeckers.filter(d => (host.marks[d.name] ?? 0) < 3);
+    return this.activeDeckers
+      .filter(d => (d.name ?? "").trim() !== "")
+      .filter(d => (host.marks[d.name] ?? 0) < MARK_CAP);
   }
 
   dots(count: number): string {
-    return "●".repeat(count) + "○".repeat(3 - count);
+    return "●".repeat(count) + "○".repeat(MARK_CAP - count);
+  }
+
+  /**
+   * Why the host confirm button is disabled, or `null` when it is usable.
+   * Mirrors `TargetCardComponent.addMarkBlockedReason` exactly, reading state
+   * out of `hostMarkState` (per-host map entry) rather than a component
+   * field (a card is one component per target; this control manages
+   * potentially many hosts from one component instance). Wording says
+   * "on this host" rather than "on this icon" — this component's own
+   * template vocabulary (`hier-host-*` vs. `hier-public-node`) already
+   * distinguishes hosts from icons (host-mark-control-parity-spec.md,
+   * Open Decision 1).
+   */
+  hostAddMarkBlockedReason(host: MatrixHost): string | null {
+    const s = this.getHostMarkState(host.id);
+    if (!s.selectedDeckerId) return "Pick a decker first";
+    if ((host.marks[s.selectedDeckerId] ?? 0) >= MARK_CAP) {
+      return `${s.selectedDeckerId} already holds the maximum ${MARK_CAP} marks on this host (p. 236)`;
+    }
+    return null;
+  }
+
+  canConfirmHostAddMark(host: MatrixHost): boolean {
+    return this.hostAddMarkBlockedReason(host) === null;
   }
 
   /**
@@ -806,9 +852,54 @@ export class HierarchyEditorComponent implements OnInit, OnDestroy {
   confirmHostAddMark(host: MatrixHost): void {
     const s = this.getHostMarkState(host.id);
     if (!s.selectedDeckerId) return;
-    if ((host.marks[s.selectedDeckerId] ?? 0) >= 3) return;
+    if ((host.marks[s.selectedDeckerId] ?? 0) >= MARK_CAP) return;
     this.matrixState.addMarkToHost(host, s.selectedDeckerId, 1);
     s.open = false;
+  }
+
+  /**
+   * Round-8 review, defect 1 (`briefs/host-mark-control-parity-spec.md`):
+   * mirrors `TargetCardComponent.ngOnChanges()`'s Path 10 guard (see that
+   * method's doc comment) for the host's own +Mark control — closing an
+   * armed picker the moment its last available decker disappears, instead
+   * of leaving `hostMarkState` stranded `open: true`.
+   *
+   * The template's outer `@if (hostAvailableDeckers(host).length > 0)`
+   * (`html:196`) already removes the whole `+Mark` group from the DOM the
+   * instant availability hits zero, but that gate alone does not clear
+   * `hostMarkState` — an unrelated later action that brings availability
+   * back above zero (e.g. removing a mark on the same decker via the
+   * always-visible "×" control) then silently re-admits the gate with the
+   * picker still `open: true` and still armed with the same
+   * `selectedDeckerId`, ready to place a mark on the very next tap with no
+   * fresh GM click on +Mark.
+   *
+   * Chosen over keeping the control visibly open with a blocked message at
+   * zero availability (Option (b) in the spec's round-8 defect list):
+   * that option cannot itself prevent the same silent rearm unless it ALSO
+   * clears `selectedDeckerId`, which collapses to this same closed-in-
+   * substance state while diverging from what `TargetCardComponent`'s own
+   * reference picker actually does in this situation (it closes; it never
+   * sits open-and-disabled with zero available deckers) — the parity this
+   * control exists to match. See that spec's defect 1/2 discussion for the
+   * full comparison; AC-7/AC-8 were reworded to describe this instead of
+   * claiming the confirm button and blocked-reason element remain in the
+   * DOM (merely disabled) once availability reaches zero — they do not.
+   *
+   * Runs on every `stateChange$` tick (`ngOnInit`), so it also catches an
+   * external write that reaches every remaining available decker on a host
+   * whose picker is open — the host-control equivalent of
+   * `recomputeHighlight()`'s own Defect 7 guard for cards.
+   */
+  private closeExhaustedHostPickers(): void {
+    for (const [hostId, s] of this.hostMarkState) {
+      if (!s.open) continue;
+      const host = this.state.hosts.find(h => h.id === hostId);
+      if (host && this.hostAvailableDeckers(host).length === 0) {
+        s.open = false;
+        s.selectedDeckerId = "";
+      }
+    }
   }
 
   removeHostMark(host: MatrixHost, deckerId: string): void {
