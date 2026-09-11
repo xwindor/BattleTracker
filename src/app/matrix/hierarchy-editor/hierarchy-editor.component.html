@@ -19,10 +19,29 @@
       <span class="hier-section-title">Public Space</span>
       <span class="hier-count">{{ state.publicTargets.length }}</span>
       <div class="hier-header-actions" (click)="$event.stopPropagation()">
+        <!-- Type-specific icons (D4, briefs/pan-membership-spec.md
+             validator round): reuse the same fa-microchip / fa-file-alt /
+             fa-user-circle icons the host Targets subsection uses below
+             (`hier-type-add-btn` buttons), rather than three identical
+             fa-plus signs that fail a glance test. -->
         <button type="button" class="hier-add-btn"
           (click)="openAddTarget(null, 'device')"
           ngbTooltip="Add loose device to public space" placement="top">
-          <i class="fas fa-plus"></i> Loose Device
+          <i class="fas fa-microchip"></i> Loose Device
+        </button>
+        <!-- File/Persona controls added alongside Loose Device
+             (briefs/pan-membership-spec.md AC-6): mirrors three of a
+             host's four target-add controls (Device, File, Persona) — no
+             IC button, since IC only ever exists inside a host (p. 235). -->
+        <button type="button" class="hier-add-btn"
+          (click)="openAddTarget(null, 'file')"
+          ngbTooltip="Add loose file to public space" placement="top">
+          <i class="fas fa-file-alt"></i> File
+        </button>
+        <button type="button" class="hier-add-btn"
+          (click)="openAddTarget(null, 'persona')"
+          ngbTooltip="Add loose persona to public space" placement="top">
+          <i class="fas fa-user-circle"></i> Persona
         </button>
       </div>
       <i class="fas ms-auto"
@@ -370,15 +389,28 @@
       }
     </select>
     <!-- Xavier, add-child-button-spec.md, "One consequence the spec does
-         not fully resolve": switching Type away from "device" silently
-         drops a buffered Parent (whether pre-filled by "+" or picked by
-         hand) at Save time, and the Parent row itself is about to
-         disappear once Type is no longer "device" — so this warns BEFORE
+         not fully resolve": switching Type away from a parentable type
+         silently drops a buffered Parent (whether pre-filled by "+" or
+         picked by hand) at Save time, and the Parent row itself is about to
+         disappear once Type is no longer parentable — so this warns BEFORE
          that row is gone, using the same inline-message vocabulary as the
          AC-8 rejection message (`.hier-form-error`) rather than a silent
-         drop. Does not block Save; canHaveParent() stays device-only. -->
-    @if (parentDropWarning()) {
-    <span class="hier-form-error">{{ parentDropWarning() }}</span>
+         drop. Does not block Save. Since `briefs/pan-membership-spec.md`
+         widened `canHaveParent()` to device/file/persona, this is currently
+         unreachable through this `<select>` — see `parentDropWarning()`'s
+         own doc comment for why it is kept anyway.
+
+         Shares this slot with `childRehomeWarning()` (Xavier's 2026-09-11
+         "N1" decision, `briefs/pan-membership-spec.md`): the currently-live
+         sibling case, where retyping a device with children to File/Persona
+         re-homes those children to top level on Save with no notice today.
+         Both are non-blocking, pre-Save, present-tense heads-ups rendered
+         in the same `.hier-form-error` vocabulary; at most one is ever
+         non-null for a given form state (see `childRehomeWarning()`'s own
+         doc comment), so `childRehomeWarning()` is checked first without
+         needing to pick between them. -->
+    @if (childRehomeWarning() ?? parentDropWarning(); as saveWarning) {
+    <span class="hier-form-error">{{ saveWarning }}</span>
     }
   </div>
 
@@ -395,16 +427,21 @@
        A): the select writes only to `targetForm.parentTargetId`; the actual
        commit — and the self/descendant guard — happens in
        `saveTargetForm()` via `setParent()`/`clearParent()`, not here.
-       Gated on `hostId === null` as well as `type === 'device'`: a device
+       Gated on `targetFormShowsParentField` — a component getter built on
+       the same `PARENTABLE_TYPES` constant `canHaveParent()` reads
+       (`briefs/pan-membership-spec.md`), so this row is no longer a third,
+       independent copy of "which types can have a parent." A device
        already inside a host uses `linkedHostId` for its containment, not
-       this field (`canHaveParent()`'s `context` check). Offered in both Add
-       and Edit (Xavier, 2026-09-09) — a target being created has no
+       this field (the getter's own `hostId === null` half). Offered in both
+       Add and Edit (Xavier, 2026-09-09) — a target being created has no
        descendants yet, so its options come from `parentOptionsForNewTarget()`
        rather than `parentOptionsFor()`, which needs a real target to exclude
-       self/descendants from. -->
-  @if (targetForm.type === 'device' && targetForm.hostId === null) {
+       self/descendants from. Candidate options are device-only regardless
+       of `targetForm.type` — only a device can ever BE a parent
+       (`canBeParent()`). -->
+  @if (targetFormShowsParentField) {
   <div class="hier-form-row hier-parent-row">
-    <label class="hier-form-label" for="hier-target-parent">Parent</label>
+    <label class="hier-form-label" for="hier-target-parent">{{ parentFieldLabel }}</label>
     <select id="hier-target-parent" class="hier-form-select"
       [ngModel]="targetForm.parentTargetId" (ngModelChange)="onParentSelectionChange($event)">
       <option value="">— None (top-level) —</option>
@@ -470,7 +507,9 @@
     [editing]="isEditingTarget(t)"
     [propagationDestination]="highlightStateFor(t.id)"
     [dotAddBlocked]="anyOtherPickerOpen(t.id)"
-    [canAddChild]="canHaveParent(t)"
+    [canAddChild]="canBeParent(t)"
+    [slaveCapBadge]="slaveCapBadgeText(t)"
+    [slaveCapTooltip]="slaveCapWarning(t)"
     (editTarget)="openEditTarget(null, t)"
     (deleteTarget)="deleteTarget(null, t)"
     (cycleVisibilityRequested)="cycleVisibility(null, t)"
@@ -479,14 +518,34 @@
     (lifecycleClear)="onLifecycleClear()"
     (addChild)="openAddChildTarget(t)">
   </app-target-card>
-  <!-- `[canAddChild]="canHaveParent(t)"` (briefs/add-child-button-spec.md,
+  <!-- `[canAddChild]="canBeParent(t)"` (briefs/add-child-button-spec.md,
        Xavier's decision 2026-09-10, after reviewing the measured cost
-       below): reuses the same device/public-space gate the Parent field
-       already uses, so a host-nested device (never reaching this template —
-       see the host-subsection card instantiation, which deliberately does
-       NOT bind `canAddChild`) structurally cannot show the control, with no
-       second copy of that condition. See `target-card.component.html`'s
-       `.tc-actions` comment for the accepted width-cost figures. -->
+       below; re-pointed from `canHaveParent(t)` to `canBeParent(t)` by
+       `briefs/pan-membership-spec.md` once `canHaveParent()` widened to
+       also admit files and personas — "can this target have a parent" and
+       "can this target BE a parent" stopped sharing an answer, and this
+       button answers the second question, not the first). Reuses the same
+       device/public-space gate the Parent field's candidate list already
+       uses, so a host-nested device (never reaching this template — see
+       the host-subsection card instantiation, which deliberately does NOT
+       bind `canAddChild`) structurally cannot show the control, with no
+       second copy of that condition — and neither can a file or persona
+       card, which can never BE a parent even though it can now HAVE one.
+       See `target-card.component.html`'s `.tc-actions` comment for the
+       accepted width-cost figures. -->
+
+  <!-- Slave-cap warning (briefs/pan-membership-spec.md AC-18, Xavier's
+       2026-09-11 decision: warn, never block) now renders as a short badge
+       INSIDE `TargetCardComponent`'s `.tc-info-row` — `[slaveCapBadge]`/
+       `[slaveCapTooltip]` above — rather than as a `<span>` here below the
+       card. Round-2 fix ("N2"): the full ~120-character sentence, printed
+       as its own line in this narrow tree, wrapped at realistic nesting
+       depths and pushed the master's whole subtree down — the same
+       failure mode the text-preview version of the mark-propagation
+       highlight was removed for (`SCOPE.md`). See
+       `HierarchyEditorComponent.slaveCapBadgeText()`'s own doc comment for
+       the full reasoning; the full sentence (citation included) is not
+       lost, it is the badge's on-hover tooltip. -->
 
   <!-- Setting/clearing this target's parent moved into the shared target
        Edit/Add form (briefs/parent-picker-into-edit-view-spec.md) — the

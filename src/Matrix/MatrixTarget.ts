@@ -39,9 +39,6 @@ export class MatrixTarget {
   dataProcessing: number;
   firewall: number;
 
-  /** General rating (used for CM calc on non-device targets). */
-  rating: number;
-
   /** Device Rating (device type only, 1–12). Used for CM and direct-connection tests. */
   deviceRating: number;
 
@@ -113,6 +110,17 @@ export class MatrixTarget {
    * enforces the destination half by excluding non-device targets from the
    * parent picker; `MatrixStateService.propagateMarkUp()` enforces both
    * halves at write time regardless of what the UI allowed in).
+   *
+   * **Widened to file/persona as a location fact, not PAN slaving
+   * (`briefs/pan-membership-spec.md`).** A `file` or `persona` target with
+   * `context === "public"` may now also hold a `parentTargetId` (device
+   * only, same `canBeParent()` gate as above) — but this only ever records
+   * where that icon *lives* or *runs*, never a real slaving relationship: a
+   * file or persona was never eligible to be a PAN slave in the first place
+   * (p. 233, "Only devices can be slaves, masters, or part of a PAN").
+   * Nothing about the device-only propagation rule above changes: `addMark()`
+   * still refuses to enter `propagateMarkUp()` for a file or persona, and the
+   * walk still never lands on one, in either direction.
    */
   parentTargetId?: string;
 
@@ -126,7 +134,6 @@ export class MatrixTarget {
     this.sleaze = init?.sleaze ?? 0;
     this.dataProcessing = init?.dataProcessing ?? 0;
     this.firewall = init?.firewall ?? 0;
-    this.rating = init?.rating ?? 1;
     this.deviceRating = init?.deviceRating ?? 4;
     this.matrixDamage = init?.matrixDamage ?? 0;
     // No guessed default: a device/persona/IC monitor is

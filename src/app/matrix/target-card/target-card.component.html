@@ -16,6 +16,24 @@
     @if (target.type === 'device') {
     <span class="tc-dr">DR{{ target.deviceRating }}</span>
     }
+    <!-- Slave-cap badge (briefs/pan-membership-spec.md, Xavier's
+         2026-09-11 decision "N2": short badge, full sentence on hover).
+         `[slaveCapBadge]` is null for every card except a public-space
+         device over its Device Rating x3 slave cap (HierarchyEditorComponent
+         .slaveCapBadgeText()) — `white-space: nowrap` on `.tc-slave-cap-badge`
+         (target-card.component.css) keeps it to exactly this line, so it
+         never adds a wrapped second line under the row the way the old
+         full-sentence `<span>` did. Full sentence, citation included, is
+         the `ngbTooltip`; matches the ▲/△ propagation marker's own
+         role="img" + tooltip pattern above. Leading "⚠" glyph (N3): a
+         non-colour cue distinguishing this amber "attention" vocabulary
+         from the red `.hier-form-error` rejection vocabulary for a
+         colour-blind GM. -->
+    @if (slaveCapBadge) {
+    <span class="tc-slave-cap-badge" role="img"
+      [attr.aria-label]="slaveCapTooltip"
+      [ngbTooltip]="slaveCapTooltip" placement="top">{{ slaveCapBadge }}</span>
+    }
     @if (target.visibility === 'running-silent') {
     <i class="fas fa-low-vision tc-icon-sm"
       ngbTooltip="Running Silent — Matrix Perception required" placement="top"></i>
@@ -54,7 +72,7 @@
          correctness.spec.ts, which locks this figure in). -->
     <div class="tc-actions">
       @if (canAddChild) {
-      <button type="button" class="tc-icon-btn" (click)="addChild.emit()" title="Add child device">
+      <button type="button" class="tc-icon-btn" (click)="addChild.emit()" title="Add nested device, file, or persona">
         <i class="fas fa-plus"></i>
       </button>
       }

@@ -65,6 +65,12 @@ The test for any proposed behaviour:
   something the rules wouldn't strictly allow. Where a feature enforces a limit,
   say so and get the call made explicitly; the default is to warn rather than
   refuse.
+  - **Limits currently watched, with the call on record:**
+    - The PAN slave cap — a device holding more than (Device Rating × 3)
+      slaved devices is flagged, never blocked (Xavier, 2026-09-11; p. 233;
+      `RULINGS.md` same date). Files and personas nested under the same device
+      do not count toward it. The boundary did not move: this is the stated
+      default above, applied explicitly rather than a new kind of enforcement.
 
 ## Out of scope
 

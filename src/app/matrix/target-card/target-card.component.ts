@@ -70,13 +70,38 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * (`briefs/add-child-button-spec.md`, Open Decision 1 = Option A).
    * Parent-computed: this card does not know or care WHY it can add a
    * child, only whether to show the control — `HierarchyEditorComponent`
-   * owns `canHaveParent()` and the actual routing. Defaults to `false`,
+   * owns `canBeParent()` (`briefs/pan-membership-spec.md`) and the actual
+   * routing. Defaults to `false`,
    * safely, for the host-subsection call site (`hierarchy-editor.component
    * .html`, host-nested target instantiation), which never sets it — a
    * host-nested device never renders this control (Determination 3,
    * structural rather than a second explicit check).
    */
   @Input() canAddChild = false;
+  /**
+   * Short over-slave-cap badge text (e.g. `"⚠ 13/12 slaves"`), or `null`
+   * when this device is not over its cap — `HierarchyEditorComponent
+   * .slaveCapBadgeText()` (`briefs/pan-membership-spec.md`, Xavier's
+   * 2026-09-11 decision "N2": "short badge, detail on hover"). Rendered
+   * inline in `.tc-info-row`, the same row the "+" add-child button and the
+   * ▲/△ propagation marker occupy, so it is measured against the same
+   * accepted-cost harness (`N-9`/`N-ADD-CHILD`) rather than reflow the tree
+   * as a separate line — see `.tc-slave-cap-badge` (target-card.component
+   * .css) for why `white-space: nowrap` matters here. `null`, never an
+   * empty string, when there is nothing to show — matches every other
+   * "show a small marker or don't" input on this card
+   * (`propagationDestination`).
+   */
+  @Input() slaveCapBadge: string | null = null;
+  /**
+   * The full over-cap sentence (citation included) — shown only as this
+   * badge's `ngbTooltip`, never printed into the tree itself. Kept as a
+   * separate input from `slaveCapBadge` rather than reconstructed here so
+   * `HierarchyEditorComponent.slaveCapWarning()` (the single definition of
+   * that sentence, also read by existing tests) stays the one source of the
+   * wording.
+   */
+  @Input() slaveCapTooltip: string | null = null;
 
   @Output() readonly editTarget = new EventEmitter<void>();
   @Output() readonly deleteTarget = new EventEmitter<void>();

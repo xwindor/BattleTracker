@@ -375,6 +375,30 @@
   opacity: 0.65;
 }
 
+/* Slave-cap badge (briefs/pan-membership-spec.md, Xavier's 2026-09-11
+   decision "N2": short badge, full sentence on hover). Same amber
+   (`#ffb340`) as `.tc-prop-marker` above — this app's existing "attention,
+   not failure" colour — deliberately not the `.tc-add-mark-blocked`/
+   `.hier-form-error` red reserved for a rejected/blocked action; this
+   badge never blocks anything. `white-space: nowrap` plus `flex-shrink: 0`
+   is the load-bearing part: this element sits in the same `.tc-info-row`
+   flex row as `.tc-name`, `.tc-dr` and `.tc-actions`, so it can shrink
+   `.tc-name`'s available width (measured and accepted, same band as the
+   "+" add-child button and this marker — `N-SLAVE-CAP-BADGE`,
+   matrix-port-rules-correctness.spec.ts) but can never itself wrap onto a
+   second line or grow the row's own height — unlike the old
+   `.hier-slave-cap-warning` `<span>` it replaces, which rendered below the
+   card as its own line and reflowed the whole subtree under it. `cursor:
+   help` matches `.tc-prop-marker`, signalling the `ngbTooltip` carries
+   more detail. */
+.tc-slave-cap-badge {
+  color: #ffb340;
+  font-size: 0.7rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: help;
+}
+
 /* Why the ✓ is disabled — shown inline rather than letting the button do
    nothing when clicked. A nameless participant used to reach the picker as a
    blank option, and confirming silently bailed on the falsy id. */

@@ -1392,3 +1392,72 @@ only ever touch the record they're called on; `propagatedMarks[deckerId]`
 clears only when that same record's count for that decker reaches 0. Do not
 add a "remove upstream too" option without a new ruling here — this entry
 settles that question as asked and answered.
+
+## 2026-09-11 — Files and personas in the tree: location, not PAN membership
+
+Raised while widening the hierarchy tree so a file or an agent's persona can
+be nested under a device on the open grid
+(`briefs/pan-membership.md`, `-spec.md`). Two rules passes and two independent
+validations sit behind these; every page below was re-derived twice and
+recorded in `docs/rules-notes/matrix.md` as `validator-confirmed`.
+
+**The framing that prompted it was half right.** A PAN's master is always a
+device, and only devices propagate marks — both correct. But p. 233 states
+flatly that only devices can be slaves, masters, or part of a PAN. A file or a
+persona therefore cannot be *slaved* to anything. What they have with a device
+is a location fact: a file lives on it, an agent's persona runs on it.
+
+**Ruling 1 — nesting a file or persona under a device is location, not PAN
+membership.** The tree may show it; the app must not call it slaving. The
+Parent field reads **"Lives on"** for a file, **"Runs on"** for a persona, and
+**"Parent"** for a device. A device under a device remains real PAN slaving.
+*Why:* p. 233 forbids the membership claim, and the tracker should not quietly
+teach a rule the book does not contain.
+
+**Ruling 2 — a file may be parented to any device, not only a commlink.**
+*Why:* the one printed rule that cares where a file is — Edit File, p. 239 —
+asks only whether the file is in a host; the defender is the host, or the
+file's owner if not. Which device a file sits on is never tested. Every
+printed example happens to be a commlink or a host (p. 224), but no rule
+forbids anything else, and files can legitimately sit loose in public space
+with no parent at all. Restricting further would have required the tracker to
+model device sub-types it does not track, to enforce a convention rather than
+a rule.
+
+**Ruling 3 — IC cannot exist outside a host.** Public Space offers Device,
+File and Persona add controls — three of a host's four, never IC — and no UI
+path sets a public-space icon's type to IC. *Why:* p. 235, "IC programs are
+not connected to devices because they're only found in hosts."
+
+**Ruling 4 — the Device Rating × 3 slave cap warns, it never blocks.** A
+device whose count of **slaved devices** exceeds its Device Rating × 3 shows a
+badge; the GM can still record the over-cap state. Files and personas nested
+under the same device do not count toward it — they were never eligible to be
+slaves. *Why:* the cap is printed (p. 233), but `SCOPE.md`'s standing position
+is that the tracker helps the GM follow the rules and must stay flexible,
+because GMs override rules constantly. The app does not model commlink-versus-
+drone, so the warning applies to any device holding slaves; warning on a
+relationship the GM did not mean as a PAN is safer than staying silent on one
+they did.
+
+**Ruling 5 — re-homing children is announced before it happens.** Changing an
+icon's type so it can no longer hold children moves those children to top
+level. The form says so *before* Save — naming the count — rather than doing
+it silently or interrupting with a dialog.
+
+*Why, and it is the same reason three times now:* this was the third instance
+in this module of the app changing the GM's data without saying so, after the
+propagation preview that dropped a mark silently and the cycle rejection that
+closed the form as if it had worked. `SCOPE.md` already holds the principle —
+a write the app makes on the GM's behalf is only acceptable if the GM was told
+it was coming — and this app has no undo, so an unnoticed re-home costs a
+dozen taps to rebuild from memory. Deletion already confirms for the identical
+outcome, and it confirms not because something is deleted but **because
+children move**.
+
+**How to apply:** `canHaveParent()` governs what may *have* a parent (device,
+file, persona, all public-space); `canBeParent()` governs what may *be* one
+(public-space device only). They were one predicate until this change and must
+stay two — merging them puts an add-child control on files and personas, which
+would let a GM build a device nested inside a file. Mark propagation is gated
+separately again, on the icon being a device, and is unaffected by either.

@@ -600,6 +600,17 @@
   margin-left: 0.3rem;
 }
 
+/* `.hier-slave-cap-warning` used to be styled here (briefs/pan-membership-
+   spec.md AC-18/D3): a `<span>` rendered below the target card in the tree,
+   carrying the full over-cap sentence. Round-2 fix ("N2") moved that
+   rendering into `TargetCardComponent`'s `.tc-info-row` as a short badge
+   (`.tc-slave-cap-badge`, target-card.component.css) so it sits inline
+   with the row instead of wrapping onto new lines beneath it — see that
+   class's own comment for why, and `HierarchyEditorComponent
+   .slaveCapBadgeText()` for the accessor. No rule left to declare here;
+   deleted rather than left as dead CSS for a class this template no longer
+   renders. */
+
 .hier-suggest-btn {
   font-size: 0.71rem;
   font-family: inherit;

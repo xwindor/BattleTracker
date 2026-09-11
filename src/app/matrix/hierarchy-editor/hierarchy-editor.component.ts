@@ -119,6 +119,15 @@ function calcMatrixHealth(type: MatrixTargetType, deviceRating: number, hostRati
   }
 }
 
+/**
+ * A PAN master device's slaved-device cap: Device Rating × 3
+ * (`briefs/pan-membership-spec.md`, "Governing rules" — "A PAN is a master
+ * device (commlink/deck) plus devices slaved to it, capped at (Device
+ * Rating × 3) slaves," p. 233). Counts devices only — see
+ * `HierarchyEditorComponent.slaveCapWarning()`.
+ */
+const DEVICE_SLAVE_CAP_MULTIPLIER = 3; // p. 233
+
 @Component({
   standalone: true,
   selector: "app-hierarchy-editor",
@@ -153,6 +162,21 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
 
   // Expose type enum to template
   readonly TARGET_TYPES: MatrixTargetType[] = ["device", "file", "persona", "ic"];
+
+  /**
+   * Types that can HAVE a parent (`canHaveParent()`) — widened by
+   * `briefs/pan-membership-spec.md` from device-only to device/file/persona.
+   * A file or persona's parent is a location fact ("lives on" / "runs on"
+   * the device), never real PAN slaving — only a device is ever a PAN
+   * slave, master, or member (p. 233). `"ic"` and `"host"` are deliberately
+   * excluded: IC only ever exists inside a host (p. 235), and a nested host
+   * is not modelled here at all. The single definition of "can have a
+   * parent" — read by `canHaveParent()`, the template's Parent-field getter,
+   * `saveTargetForm()`'s cycle-check gate, and `parentDropWarning()` — so no
+   * second copy of this type list exists anywhere, including the template.
+   * Matches the `private static`, `TARGET_TYPES`-style pattern above.
+   */
+  private static readonly PARENTABLE_TYPES: readonly MatrixTargetType[] = ["device", "file", "persona"];
 
   /**
    * The +Mark picker currently open somewhere in this tree, or `null` when
@@ -532,8 +556,11 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    * own card. Reuses `BLANK_TARGET_FORM` rather than duplicating
    * `openAddTarget()`'s body, so both share one source of truth for what a
    * fresh Add session defaults to. Always public space (`hostId: null`,
-   * `type: "device"`) — `canHaveParent()` only ever gates a public-space
-   * device, so a caller-supplied `parentTarget` is always one.
+   * `type: "device"`) — the "+" control that calls this is gated by
+   * `canBeParent()`, not `canHaveParent()` (`briefs/pan-membership-spec.md`:
+   * `canHaveParent()` now also admits public-space files and personas, but
+   * only a device can ever BE a parent), so a caller-supplied `parentTarget`
+   * is always a public-space device.
    *
    * Seeds two fields, deliberately different in nature: `parentTargetId` is
    * the ordinary buffered Parent-dropdown value (editable, matches Save's
@@ -626,16 +653,22 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
     // save, with a visible message, rather than writing every other field
     // and quietly dropping only the parent half. Only checked when the
     // field is still meaningful for this save (an existing target, staying
-    // a public-space device) — a type change away from device (Scenario 2)
-    // still drops the buffered value silently in `commitParentField()`
-    // below, because that is not a rejected choice, just a field that no
-    // longer applies. A parent that was simply deleted from state since the
-    // form opened is a different, more benign case again (not an impossible
-    // nesting, just a stale option) — left to `setParent()`'s existing
-    // guard to drop silently once the rest of the save commits, rather than
-    // raising this message.
+    // a public-space device/file/persona — PARENTABLE_TYPES,
+    // `briefs/pan-membership-spec.md`) — a type change away from a
+    // parentable type (Scenario 2) still drops the buffered value silently
+    // in `commitParentField()` below, because that is not a rejected
+    // choice, just a field that no longer applies. A parent that was simply
+    // deleted from state since the form opened is a different, more benign
+    // case again (not an impossible nesting, just a stale option) — left to
+    // `setParent()`'s existing guard to drop silently once the rest of the
+    // save commits, rather than raising this message.
+    //
+    // Widening this gate to PARENTABLE_TYPES matters: without it, a file
+    // being re-parented onto one of its own descendants would skip the
+    // cycle guard entirely and corrupt the tree (`briefs
+    // /pan-membership-spec.md`, "saveTargetForm()'s cycle-check gate").
     if (f.isEditing && f.target && f.parentTargetId
-        && f.type === "device" && f.hostId === null
+        && HierarchyEditorComponent.PARENTABLE_TYPES.includes(f.type) && f.hostId === null
         && this.wouldCreateCycle(f.target, f.parentTargetId)) {
       f.parentError = "Can't parent this under one of its own children.";
       return; // block the whole save — commit nothing
@@ -651,6 +684,16 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
     const health = calcMatrixHealth(f.type, deviceRating, host?.rating ?? deviceRating) ?? 0;
 
     if (f.isEditing && f.target) {
+      // Captured BEFORE the type change commits: whether this target could
+      // be chosen as a parent under its OLD type/context
+      // (`briefs/pan-membership-spec.md` D1). If a Save flips that from
+      // true to false — the only live case today is device → file/persona,
+      // since `canBeParent()` is device-only — any children still pointing
+      // at this target's id via `parentTargetId` would otherwise go on
+      // rendering nested under what the tree now shows as a non-device,
+      // which p. 233 forbids. Re-home them through the same path
+      // `deleteTarget()` uses, rather than duplicating that logic here.
+      const couldBeParentBefore = this.canBeParent(f.target);
       this.matrixState.updateTarget(f.target, {
         name: f.name.trim(),
         type: f.type,
@@ -659,6 +702,9 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
         linkedParticipantId: f.linkedParticipantId || undefined,
         matrixHealth: health
       });
+      if (couldBeParentBefore && !this.canBeParent(f.target)) {
+        this.rehomeChildrenOf(f.target);
+      }
       this.commitParentField(f.target, f.parentTargetId);
     } else {
       const target = new MatrixTarget({
@@ -701,13 +747,31 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
           `Deleting it will move them to top level, not delete them. Continue?`
         );
         if (!ok) return;
-        for (const child of children) {
-          this.matrixState.updateTarget(child, { parentTargetId: undefined });
-        }
+        this.rehomeChildrenOf(target);
       }
     }
     this.matrixState.removeTarget(host, target);
     if (this.targetForm.target === target) this.targetForm = { ...BLANK_TARGET_FORM };
+  }
+
+  /**
+   * Clears `parentTargetId` on every direct child of `target` (top-level
+   * re-homing, not deletion) — the shared path behind two callers that both
+   * need to un-nest a target's children rather than orphan them on a stale
+   * id: `deleteTarget()` above (Round-5 defect D-4) and `saveTargetForm()`
+   * below (`briefs/pan-membership-spec.md` D1 — a Save that changes a
+   * target's type so it can no longer be a parent, e.g. device → file, must
+   * not leave children rendering nested under what the tree now shows as a
+   * non-device, which p. 233 forbids). Writes go through `clearParent()`,
+   * so `setParent()`/`clearParent()` stay the only writers of
+   * `parentTargetId`.
+   */
+  private rehomeChildrenOf(target: MatrixTarget): MatrixTarget[] {
+    const children = this.childrenOf(target.id);
+    for (const child of children) {
+      this.clearParent(child);
+    }
+    return children;
   }
 
   // ── Visibility cycling ──────────────────────────────────────────────────
@@ -1105,6 +1169,90 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
     return this.state.publicTargets.filter(t => (t.parentTargetId ?? null) === parentId);
   }
 
+  /**
+   * Warn — never block (Xavier's decision, 2026-09-11, `SCOPE.md`: the
+   * tracker helps the GM follow the rules but must stay flexible) — when a
+   * public-space device's slaved **device** count exceeds its Device
+   * Rating × `DEVICE_SLAVE_CAP_MULTIPLIER` (p. 233). Counts only
+   * `type === "device"` children: a file or persona nested under the same
+   * master is a location fact, not a PAN slave, and was never eligible to
+   * count toward this total in the first place (p. 233, "Only devices can
+   * be slaves, masters, or part of a PAN"; `briefs/pan-membership-spec.md`,
+   * Xavier's 2026-09-11 answer). `null` when `target` is not a public-space
+   * device at all, or is within cap — most devices, most of the time.
+   *
+   * Host-nested devices are out of scope here: a WAN master (a host) has no
+   * printed cap ("practically unlimited," p. 233) and uses `linkedHostId`
+   * for its containment, not `parentTargetId` — this only ever evaluates
+   * the open-grid PAN-master case.
+   *
+   * Deliberately does not block anything the GM does — there is no gate
+   * here to bypass, only a readout. Rendered with `.hier-slave-cap-warning`
+   * (amber), not `.hier-form-error` (red) — this is a warning, never a
+   * rejection (Xavier, 2026-09-11).
+   */
+  slaveCapWarning(target: MatrixTarget): string | null {
+    const over = this.overSlaveCap(target);
+    if (!over) return null;
+    const { slaveCount, cap, deviceRating } = over;
+    // Wording (D6, validator round): p. 233 states the × 3 cap for "your
+    // commlink (or deck)" specifically, and this app deliberately does not
+    // model device sub-types (see the pan-membership-spec.md "commlinks are
+    // not mechanically special" discussion) — so the message must cite the
+    // general rule the app actually enforces, not imply p. 233 names this
+    // exact device. The warning still applies to every device (that follows
+    // from not modelling sub-types; warning is safer than silence), only
+    // the citation is narrower now.
+    return `${slaveCount} slaved devices exceeds the ${cap}-slave cap — PAN masters are capped at Device Rating × 3 (Device Rating ${deviceRating} × 3, p. 233).`;
+  }
+
+  /**
+   * Short-badge counterpart to `slaveCapWarning()` above
+   * (`briefs/pan-membership-spec.md`, Xavier's 2026-09-11 decision "N2":
+   * "short badge, detail on hover"). The full sentence `slaveCapWarning()`
+   * builds is ~120 characters — printed straight into the tree, it wraps at
+   * realistic nesting depths (the tree indents `depth * 18` px and caps
+   * names at 120px) and pushes the master's entire subtree down, the same
+   * failure mode that got the text-preview version of the mark-propagation
+   * highlight removed (`SCOPE.md`). This renders inside `TargetCardComponent`'s
+   * `.tc-info-row` instead — the same flex row the "+" add-child button and
+   * the ▲/△ propagation marker already occupy — specifically so it is
+   * measured against the SAME accepted-cost harness as those two
+   * (`N-9`/`N-ADD-CHILD`, `matrix-port-rules-correctness.spec.ts`) rather
+   * than exist as an unmeasured new element outside that row. Short and
+   * `white-space: nowrap` (`.tc-slave-cap-badge`) so it can never wrap and
+   * never adds a line — the row's height is unchanged whether or not this
+   * renders (see the `N-SLAVE-CAP-BADGE` regression test). The full
+   * sentence, citation included, is not lost — it is the badge's
+   * `ngbTooltip`, the same on-hover vocabulary this component already uses
+   * elsewhere (e.g. the type icon's tooltip).
+   */
+  slaveCapBadgeText(target: MatrixTarget): string | null {
+    const over = this.overSlaveCap(target);
+    if (!over) return null;
+    // Leading glyph (Xavier's 2026-09-11 decision "N3"): amber
+    // (`.hier-slave-cap-warning`/`.tc-slave-cap-badge`, #ffb340) and red
+    // (`.hier-form-error`, #ff8a8a) were a hue-only distinction everywhere
+    // else this component pairs "attention" with a second, non-colour cue
+    // (a dashed outline, or the ▲/△ marker glyph) — this badge gets one too,
+    // so the distinction survives for a colour-blind GM.
+    return `⚠ ${over.slaveCount}/${over.cap} slaves`;
+  }
+
+  /**
+   * Shared over-cap computation behind `slaveCapWarning()` (full sentence,
+   * tooltip content) and `slaveCapBadgeText()` (short badge) — one
+   * definition of "is this device over its slave cap," so the two render
+   * paths can never disagree about when to show something.
+   */
+  private overSlaveCap(target: MatrixTarget): { slaveCount: number; cap: number; deviceRating: number } | null {
+    if (target.type !== "device" || target.context !== "public") return null;
+    const slaveCount = this.childrenOf(target.id).filter(c => c.type === "device").length;
+    const cap = target.deviceRating * DEVICE_SLAVE_CAP_MULTIPLIER;
+    if (slaveCount <= cap) return null;
+    return { slaveCount, cap, deviceRating: target.deviceRating };
+  }
+
   /** All ids reachable by walking down from `id` (used to keep the parent picker acyclic). */
   private descendantIds(id: string): Set<string> {
     const result = new Set<string>();
@@ -1169,10 +1317,12 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    * runtime, but there is no reason to let the GM create one from this form
    * in the first place.
    *
-   * Device-only (Xavier's decision 8, 2026-09-03): a mark only ever
-   * propagates onto a device or a host — never a file, persona, IC, or
-   * nested host — so offering one of those as a parent choice would build a
-   * link `MatrixStateService.propagateMarkUp()` will never actually walk
+   * Candidates are filtered through `canBeParent()` (device-only, Xavier's
+   * decision 8, 2026-09-03, unchanged by the `pan-membership` widening of
+   * `canHaveParent()`): a mark only ever propagates onto a device or a
+   * host — never a file, persona, IC, or nested host — so offering one of
+   * those as a parent choice would build a link
+   * `MatrixStateService.propagateMarkUp()` will never actually walk
    * through. See `MatrixTarget.parentTargetId`'s doc comment for the full
    * citation.
    *
@@ -1185,7 +1335,7 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    */
   parentOptionsFor(target: MatrixTarget): MatrixTarget[] {
     const excluded = this.selfAndDescendantIds(target.id);
-    return this.state.publicTargets.filter(t => !excluded.has(t.id) && t.type === "device");
+    return this.state.publicTargets.filter(t => !excluded.has(t.id) && this.canBeParent(t));
   }
 
   /**
@@ -1198,26 +1348,93 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    * for its existing caller.
    */
   parentOptionsForNewTarget(): MatrixTarget[] {
-    return this.state.publicTargets.filter(t => t.type === "device");
+    return this.state.publicTargets.filter(t => this.canBeParent(t));
   }
 
   /**
-   * Whether `target` should offer a "Parent" control at all — device-only
-   * (Xavier's decision 8, 2026-09-03): only a device ever propagates a mark
-   * it receives, so parenting a file/persona/IC/nested-host under something
-   * else would be a control that can never do anything.
+   * Whether `target` should offer a "Parent" control at all —
+   * widened by `briefs/pan-membership-spec.md` from device-only to
+   * `PARENTABLE_TYPES` (device/file/persona): a file or persona can now
+   * record which device it lives on / runs on, even though (see
+   * `canBeParent()` below) it can never itself BE a parent, and never
+   * propagates a mark it receives (p. 233 — see `MatrixTarget
+   * .parentTargetId`'s doc comment).
    *
    * Also gated on `context === "public"`
    * (`briefs/parent-picker-into-edit-view-spec.md`, Open Decision 3): a
-   * device already sitting inside a host uses `linkedHostId` for its
+   * target already sitting inside a host uses `linkedHostId` for its
    * containment, not `parentTargetId` (`MatrixTarget.parentTargetId`'s doc
    * comment). This gate was previously enforced only by which template
    * called it — the public-space tree never rendered a host-nested target —
    * but the shared Edit/Add form is reachable for host-nested devices too,
    * so the check now has to say so explicitly.
+   *
+   * This answers "can THIS target have a parent" — a different question
+   * from "can this target BE a parent," which `canBeParent()` answers on
+   * its own, narrower terms. Do not widen this method's body without also
+   * checking every caller expects the widened set (`briefs
+   * /pan-membership-spec.md`, "The load-bearing finding").
    */
   canHaveParent(target: MatrixTarget): boolean {
+    return HierarchyEditorComponent.PARENTABLE_TYPES.includes(target.type) && target.context === "public";
+  }
+
+  /**
+   * Whether `target` can be CHOSEN as another target's parent — device-only
+   * (Xavier's decision 8, 2026-09-03), unchanged by the `pan-membership`
+   * widening above: only a device ever propagates a mark it receives, so
+   * offering a file/persona/IC/nested-host as a parent choice would build a
+   * link `MatrixStateService.propagateMarkUp()` will never actually walk
+   * through (p. 233 — only a device is ever a PAN master).
+   *
+   * This is `canHaveParent()`'s OLD body, split out under its own name
+   * (`briefs/pan-membership-spec.md`, "The load-bearing finding") once
+   * `canHaveParent()` widened to cover files and personas too — those two
+   * questions ("can this target have a parent" vs. "can this target BE a
+   * parent") happened to share one answer before this feature, and no
+   * longer do. Every parent-candidate filter (`parentOptionsFor()`,
+   * `parentOptionsForNewTarget()`) and the tree's add-child "+" control
+   * (`[canAddChild]`, `hierarchy-editor.component.html`) route through this
+   * method, not `canHaveParent()` — binding the "+" to the widened method
+   * by mistake would put a working add-child button on every file and
+   * persona card, letting a GM nest a device under a file.
+   */
+  canBeParent(target: MatrixTarget): boolean {
     return target.type === "device" && target.context === "public";
+  }
+
+  /**
+   * The target Edit/Add form's Parent-row template gate
+   * (`hierarchy-editor.component.html`) — built on the same
+   * `PARENTABLE_TYPES` constant `canHaveParent()` reads, so the template
+   * never carries a third, independent copy of "which types can have a
+   * parent" (`briefs/pan-membership-spec.md`: "one constant... one method
+   * ... do not leave a third inline copy of either type list anywhere,
+   * including in the template"). Also requires `hostId === null`, matching
+   * `canHaveParent()`'s own `context === "public"` half — a host-nested
+   * target uses `linkedHostId`, not this field.
+   */
+  get targetFormShowsParentField(): boolean {
+    return HierarchyEditorComponent.PARENTABLE_TYPES.includes(this.targetForm.type) && this.targetForm.hostId === null;
+  }
+
+  /**
+   * The Parent field's label, per-type (D5, `briefs/pan-membership-spec.md`
+   * validator round, Xavier's decision). Same control, same options, same
+   * `setParent()`/`clearParent()` commit path — label only. A file nested
+   * under a device would otherwise look pixel-identical to a slaved device,
+   * and Xavier does not want the app implying a file is in a PAN: only a
+   * device is ever a PAN slave, master, or member (p. 233). "Lives on" for
+   * a file (location fact, p. 219/p. 233), "Runs on" for a persona (the
+   * device it runs on, p. 235), "Parent" for a device (the one case that is
+   * a real PAN slaving relationship).
+   */
+  get parentFieldLabel(): string {
+    switch (this.targetForm.type) {
+      case "file": return "Lives on";
+      case "persona": return "Runs on";
+      default: return "Parent";
+    }
   }
 
   /**
@@ -1229,11 +1446,15 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    * reflects this Save's `type`/`context` when `canHaveParent()` is
    * evaluated.
    *
-   * If the type no longer supports a parent (e.g. the GM switched Type from
-   * `device` to `file` in the same form session — spec scenario 2), any
-   * buffered `parentTargetId` is dropped rather than written: the target
-   * ends the save with `parentTargetId === undefined` regardless of what was
-   * sitting in the form.
+   * If the type no longer supports a parent at all (e.g. the GM switched
+   * Type from `device` to `ic` in the same form session), any buffered
+   * `parentTargetId` is dropped rather than written: the target ends the
+   * save with `parentTargetId === undefined` regardless of what was sitting
+   * in the form. Since `briefs/pan-membership-spec.md` widened
+   * `canHaveParent()` to `PARENTABLE_TYPES`, switching between `device`,
+   * `file` and `persona` no longer triggers this drop — only switching to
+   * `ic` (host-only, unreachable in public space anyway) or moving into a
+   * host (`hostId !== null`) does.
    */
   private commitParentField(target: MatrixTarget, bufferedParentId: string): void {
     if (this.canHaveParent(target) && bufferedParentId) {
@@ -1259,31 +1480,100 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
 
   /**
    * Inline warning for a silent consequence the "+" child-add entry point
-   * makes newly reachable (`briefs/add-child-button-spec.md`, "One
+   * made newly reachable (`briefs/add-child-button-spec.md`, "One
    * consequence the spec does not fully resolve"): the Type dropdown stays
    * editable even after a form is seeded with a buffered `parentTargetId`
    * (whether from a device's own Edit session or from `openAddChildTarget()`),
-   * but `commitParentField()` drops the buffered parent silently at Save
-   * time the moment `type !== "device"` — `canHaveParent()` is device-only.
-   * Once the GM switches Type away from "device", the Parent row itself
-   * stops rendering (`type === 'device'` gate on that row), so the GM has no
-   * other way to see that the parent they picked (or that was pre-filled
-   * by "+") is about to be thrown away. Returns `null` when there is nothing
-   * to warn about — most sessions.
+   * and `commitParentField()` drops the buffered parent silently at Save
+   * time the moment `canHaveParent(target)` goes false.
+   *
+   * **Currently unreachable through any real UI path
+   * (`briefs/pan-membership-spec.md`).** `canHaveParent()` widened from
+   * device-only to `PARENTABLE_TYPES` (device/file/persona), so switching
+   * Type between those three no longer drops the buffered parent at all —
+   * the only type left that fails `PARENTABLE_TYPES` is `"ic"`, and the Type
+   * `<select>` never offers `"ic"` while `hostId === null`
+   * (`hierarchy-editor.component.html`'s Type field already hides that
+   * `<option>` outside a host). So for every session this method can
+   * actually observe in the running app, either the buffered parent is kept
+   * (device/file/persona) or the Parent row was never showing to begin with
+   * (`hostId !== null`). Kept anyway, narrowed to the same
+   * `PARENTABLE_TYPES` constant, as cheap defense-in-depth against a future
+   * caller that sets `targetForm.type = 'ic'` directly, bypassing the
+   * `<select>` — see the regression test that does exactly that.
    *
    * Deliberately not folded into `parentError`: that field reports a
    * REJECTED Save attempt (a cycle) and blocks the whole save until fixed;
    * this is a heads-up about an accepted save's actual outcome, shown before
-   * Save is even clicked, and never blocks anything — Xavier's decision was
-   * to surface it, not to force the type back to `device`
-   * (`canHaveParent()` stays device-only, unwidened).
+   * Save is even clicked, and never blocks anything.
    */
   parentDropWarning(): string | null {
     const f = this.targetForm;
-    if (f.type === "device" || f.hostId !== null || !f.parentTargetId) return null;
+    if (HierarchyEditorComponent.PARENTABLE_TYPES.includes(f.type) || f.hostId !== null || !f.parentTargetId) return null;
     const parent = this.state.publicTargets.find(t => t.id === f.parentTargetId);
     const parentName = parent?.name ?? "the selected parent";
-    return `Saving as ${this.typeLabel(f.type)} will NOT nest this under ${parentName} — only a device can have a parent. It will appear at the top level.`;
+    return `Saving as ${this.typeLabel(f.type)} will NOT nest this under ${parentName} — only a device, file, or persona can have a parent. It will appear at the top level.`;
+  }
+
+  /**
+   * Inline pre-Save warning for the OTHER silent consequence of this same
+   * widening: retyping a public-space `device` (that currently has
+   * children) to `file` or `persona` makes it fail `canBeParent()` — a
+   * device is the only thing that can BE a parent (`canBeParent()`'s own
+   * doc comment) — so `saveTargetForm()` re-homes every direct child to top
+   * level on that Save (see the `couldBeParentBefore && !this.canBeParent(...)`
+   * branch there, which calls `rehomeChildrenOf()`). Before this warning
+   * existed, that happened with no on-screen notice: the children stayed
+   * visible, just un-indented, easy to miss in a deep tree, and switching
+   * the Type back does NOT restore them — `rehomeChildrenOf()` clears
+   * `parentTargetId` outright rather than remembering the old value, so
+   * "switch back and re-save" (the first recovery anyone would try) does
+   * not work (`briefs/pan-membership-spec.md`, Xavier's 2026-09-11 decision,
+   * "N1").
+   *
+   * `deleteTarget()` already confirms this identical outcome — moving a
+   * target's children to top level — with a named `window.confirm()`
+   * before doing it. That confirm exists because children move, not
+   * because something is deleted; Save was producing the same outcome
+   * silently. Xavier chose an inline pre-Save message over a second
+   * `confirm()` dialog: present tense, names the count and the
+   * destination, appears the moment the Type switch makes it true (while
+   * Save has not been clicked and the GM can still change their mind), and
+   * clears the moment it stops being true (e.g. switching Type back to
+   * Device, or to a target with no children) — this is a plain method
+   * call read fresh on every change-detection pass, exactly like
+   * `parentDropWarning()` above, so no separate "dirty" tracking is needed.
+   *
+   * Deliberately a SIBLING to `parentDropWarning()`, not a merge into it:
+   * that method answers "will THIS target's own parent link survive the
+   * Save" (a fact about `target`'s relationship to ITS parent); this method
+   * answers "will THIS target's CHILDREN survive the Save nested where they
+   * are" (a fact about `target`'s relationship to ITS children). They are
+   * gated on different predicates (`canHaveParent()` vs `canBeParent()`)
+   * and are true in disjoint form states today (`parentDropWarning()` only
+   * reaches its unreachable defense-in-depth case on `type === "ic"`; this
+   * only fires on `type === "file" | "persona"` with existing children) —
+   * folding them into one method would blur two distinct rules-facts under
+   * one name for no shortening in caller code. They share the same
+   * template slot (`hierarchy-editor.component.html`, the same
+   * `.hier-form-error` `<span>` `parentDropWarning()` already used) because
+   * only one can ever be non-null in a given form state, and both are the
+   * same kind of thing: a non-blocking heads-up about what THIS Save will
+   * silently do.
+   *
+   * Counts only DIRECT children (`childrenOf()`), matching exactly what
+   * `rehomeChildrenOf()` actually re-homes — a child's own descendants stay
+   * nested under it; only the direct link to `target` breaks.
+   */
+  childRehomeWarning(): string | null {
+    const f = this.targetForm;
+    if (!f.isEditing || !f.target) return null;
+    if (!this.canBeParent(f.target)) return null; // wasn't parent-capable before this edit; nothing to lose
+    const willStillBeParent = f.type === "device" && f.hostId === null;
+    if (willStillBeParent) return null;
+    const childCount = this.childrenOf(f.target.id).length;
+    if (childCount === 0) return null;
+    return `Saving as ${this.typeLabel(f.type)} will move its ${childCount} slaved item(s) to top level.`;
   }
 
   setParent(target: MatrixTarget, parentId: string): void {

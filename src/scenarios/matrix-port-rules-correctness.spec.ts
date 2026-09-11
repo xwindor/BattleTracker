@@ -896,13 +896,29 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(options).not.toContain(file.id); // a file is not
     });
 
-    it('Decision 8: canHaveParent() is true only for a device target', () => {
+    // Widened by briefs/pan-membership-spec.md: canHaveParent() now also
+    // admits public-space files and personas (a location fact — "lives on"
+    // / "runs on" a device — never real PAN slaving, since only a device is
+    // ever a PAN slave, master, or member, p. 233). canBeParent(), below,
+    // carries the OLD device-only body under its own name.
+    it('pan-membership: canHaveParent() is true for a public device, file, or persona', () => {
       const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
       const persona = new MatrixTarget({ id: 'p1', name: 'NPC', type: 'persona', context: 'public' });
 
       expect(component.canHaveParent(device)).toBeTrue();
-      expect(component.canHaveParent(file)).toBeFalse();
-      expect(component.canHaveParent(persona)).toBeFalse();
+      expect(component.canHaveParent(file)).toBeTrue();
+      expect(component.canHaveParent(persona)).toBeTrue();
+    });
+
+    it('pan-membership (AC-10): canBeParent() returns true only for a public device — matching canHaveParent()\'s pre-feature behaviour exactly', () => {
+      const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
+      const persona = new MatrixTarget({ id: 'p1', name: 'NPC', type: 'persona', context: 'public' });
+      const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host' });
+
+      expect(component.canBeParent(device)).toBeTrue();
+      expect(component.canBeParent(file)).toBeFalse();
+      expect(component.canBeParent(persona)).toBeFalse();
+      expect(component.canBeParent(hostDevice)).toBeFalse();
     });
 
     // parent-picker-into-edit-view-spec.md, Open Decision 3 / "Affected
@@ -921,7 +937,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     // shared target Edit/Add form. Rewritten from the old DOM-level tree
     // assertion (which counted `.hier-parent-row` elements directly in the
     // tree and would now pass vacuously, finding zero regardless of type).
-    it('Decision 8 + parent-picker-into-edit-view: the rendered public-space tree shows no Parent control anywhere, and Edit shows one only for a device, not a file', () => {
+    it('pan-membership: the rendered public-space tree shows no Parent control anywhere, and Edit shows one for a device AND for a file (AC-1, AC-11)', () => {
       const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
       matrixState.addTarget(null, file);
       fixture.detectChanges();
@@ -929,10 +945,11 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       // No Parent control anywhere in the rendered tree, regardless of type.
       expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
 
-      // Opening Edit on the file shows no Parent field.
+      // Opening Edit on the file shows exactly one Parent field, now that
+      // canHaveParent() admits files (briefs/pan-membership-spec.md).
       component.openEditTarget(null, file);
       fixture.detectChanges();
-      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(1);
       component.closeTargetForm();
       fixture.detectChanges();
 
@@ -1074,11 +1091,11 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         expect(weapon.parentTargetId).toBe(device.id);
       });
 
-      it('AC-5: opening Edit on a persona shows no Parent field (canHaveParent gate)', () => {
+      it('pan-membership (AC-2): opening Edit on a persona shows a Parent field (canHaveParent gate widened)', () => {
         const persona = new MatrixTarget({ id: 'p1', name: 'NPC', type: 'persona', context: 'public' });
         matrixState.addTarget(null, persona);
         component.openEditTarget(null, persona);
-        expect(component.canHaveParent(persona)).toBeFalse();
+        expect(component.canHaveParent(persona)).toBeTrue();
       });
 
       it('AC-6: opening Edit on a device whose context is "host" shows no Parent field, even though its type is "device"', () => {
@@ -1094,7 +1111,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
       });
 
-      it('Scenario 2: switching Type from device to file mid-edit clears parentTargetId on Save, rather than silently keeping it', () => {
+      it('pan-membership (AC-15): switching Type from device to file mid-edit KEEPS parentTargetId on Save, since file is now a parentable type', () => {
         component.setParent(weapon, device.id);
         component.openEditTarget(null, weapon);
         expect(component.targetForm.parentTargetId).toBe(device.id);
@@ -1103,21 +1120,23 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         component.saveTargetForm();
 
         expect(weapon.type).toBe('file');
-        expect(weapon.parentTargetId).toBeUndefined();
+        expect(weapon.parentTargetId).toBe(device.id); // reversed from the pre-feature "clears" behaviour
       });
 
       // Reviewer-requested coverage: Scenario 2's reverse. Changing Type
-      // INTO 'device' mid-session must make the Parent field available and
+      // INTO 'device' mid-session must keep the Parent field available and
       // let the GM actually use it in the same Save, not just handle the
       // outgoing direction.
-      it('Scenario 2 (reverse): switching Type from file to device mid-edit reveals the Parent field and lets the GM set one in the same Save', () => {
+      it('Scenario 2 (reverse): switching Type from file to device mid-edit keeps the Parent field visible and lets the GM set one in the same Save', () => {
         const loose = new MatrixTarget({ id: 'loose1', name: 'Loose File', type: 'file', context: 'public' });
         matrixState.addTarget(null, loose);
 
         component.openEditTarget(null, loose);
         fixture.detectChanges();
-        expect(component.canHaveParent(component.targetForm.target!)).toBeFalse();
-        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+        // Widened by briefs/pan-membership-spec.md: a file can already have
+        // a Parent field of its own before any Type switch.
+        expect(component.canHaveParent(component.targetForm.target!)).toBeTrue();
+        expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(1);
 
         component.targetForm.type = 'device'; // Type changed in the same session
         fixture.detectChanges();
@@ -1129,6 +1148,85 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         expect(loose.type).toBe('device');
         expect(loose.parentTargetId).toBe(device.id);
         expect(component.childrenOf(device.id).map(t => t.id)).toContain(loose.id);
+      });
+
+      // D1 (validator round, briefs/pan-membership-spec.md): a Save that
+      // changes a device's Type such that it can no longer BE a parent
+      // (`canBeParent()` true → false) must re-home its children to top
+      // level — exactly what `deleteTarget()` already does — rather than
+      // leaving them pointing at a stale `parentTargetId` and rendering
+      // nested under what the tree now shows as a non-device, which p. 233
+      // forbids. Driven entirely through the rendered form, per this
+      // describe block's own convention.
+      describe('D1: re-homing a target\'s children when Save changes its type away from a parentable-as-parent type', () => {
+
+        function typeSelect(): HTMLSelectElement {
+          return fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+        }
+
+        function setTypeThroughForm(value: string): void {
+          const el = typeSelect();
+          el.value = value;
+          el.dispatchEvent(new Event('change'));
+          fixture.detectChanges();
+        }
+
+        it('device-with-child → File: the child is re-homed to top level', () => {
+          const child = new MatrixTarget({ id: 'child1', name: 'Sensor', type: 'device', context: 'public', parentTargetId: device.id });
+          matrixState.addTarget(null, child);
+
+          component.openEditTarget(null, device);
+          fixture.detectChanges();
+          setTypeThroughForm('file');
+
+          const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+          saveBtn.click();
+          fixture.detectChanges();
+
+          expect(device.type).toBe('file');
+          expect(child.parentTargetId).toBeUndefined();
+          expect(component.childrenOf(null).map(t => t.id)).toContain(child.id);
+          expect(component.childrenOf(device.id).length).toBe(0);
+        });
+
+        it('device-with-child → Persona: the child is re-homed to top level', () => {
+          const child = new MatrixTarget({ id: 'child2', name: 'Sensor', type: 'device', context: 'public', parentTargetId: device.id });
+          matrixState.addTarget(null, child);
+
+          component.openEditTarget(null, device);
+          fixture.detectChanges();
+          setTypeThroughForm('persona');
+
+          const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+          saveBtn.click();
+          fixture.detectChanges();
+
+          expect(device.type).toBe('persona');
+          expect(child.parentTargetId).toBeUndefined();
+          expect(component.childrenOf(null).map(t => t.id)).toContain(child.id);
+          expect(component.childrenOf(device.id).length).toBe(0);
+        });
+
+        it('device-with-child → device (Type unchanged): the child stays nested', () => {
+          const child = new MatrixTarget({ id: 'child3', name: 'Sensor', type: 'device', context: 'public', parentTargetId: device.id });
+          matrixState.addTarget(null, child);
+
+          component.openEditTarget(null, device);
+          fixture.detectChanges();
+          // Rename only — Type stays 'device' through the rendered form.
+          const nameInput = fixture.nativeElement.querySelector('#hier-target-name') as HTMLInputElement;
+          nameInput.value = 'Rigger Drone Mk2';
+          nameInput.dispatchEvent(new Event('input'));
+          fixture.detectChanges();
+
+          const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+          saveBtn.click();
+          fixture.detectChanges();
+
+          expect(device.type).toBe('device');
+          expect(child.parentTargetId).toBe(device.id);
+          expect(component.childrenOf(device.id).map(t => t.id)).toContain(child.id);
+        });
       });
 
       // AC-8, revised 2026-09-09 (Xavier: "a rejected re-parent must say
@@ -3435,7 +3533,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     //
     //    Round-9 update (add-child-button-spec.md): the depth-3 ancestor's
     //    own card now ALSO carries the permanent add-child "+" control
-    //    (`.tc-actions`, `canAddChild="canHaveParent(t)"`, true for every
+    //    (`.tc-actions`, `canAddChild="canBeParent(t)"`, true for every
     //    public device) — a second, always-on cost on the same row this test
     //    measures, wired on after Xavier reviewed and accepted its measured
     //    figure (target-card.component.html's `.tc-actions` comment). That
@@ -5701,13 +5799,13 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       // querySelector" as the alternative for exactly this case. Presence in
       // the real rendered DOM, not a component field, is still what is
       // asserted.
-      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]');
+      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]');
       expect(btn).withContext('expected the add-child control to be rendered').not.toBeNull();
     });
 
     it('canAddChild=false (the default) renders no add-child control — this is HierarchyEditorComponent\'s current, deliberate state', () => {
       mount(false);
-      expectAbsent(fixture, '.tc-actions .tc-icon-btn[title="Add child device"]');
+      expectAbsent(fixture, '.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]');
       expect(component.canAddChild).toBeFalse(); // default, matching the @Input's declared default
     });
 
@@ -5716,7 +5814,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       const spy = jasmine.createSpy('addChild');
       component.addChild.subscribe(spy);
 
-      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]') as HTMLButtonElement;
       btn.click();
 
       expect(spy).toHaveBeenCalledTimes(1);
@@ -5756,13 +5854,13 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       // Icon-only button (no text node) — direct querySelector, exactly as
       // the brief's own AC-1 wording offers as the alternative to
       // `expectVisibleText()` for this case.
-      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]');
+      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]');
       expect(btn).withContext('expected the add-child control to be rendered on a public-space device').not.toBeNull();
     });
 
     it('AC-1 end-to-end: clicking the "+" opens the Add form inline under the clicked device', () => {
       const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
-      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]') as HTMLButtonElement;
       btn.click();
       fixture.detectChanges();
 
@@ -5781,8 +5879,8 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
 
       const fileNode = fixture.nativeElement.querySelector("[data-target-id='file1']") as HTMLElement;
       const personaNode = fixture.nativeElement.querySelector("[data-target-id='persona1']") as HTMLElement;
-      expect(fileNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
-      expect(personaNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+      expect(fileNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]')).toBeNull();
+      expect(personaNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]')).toBeNull();
 
       // "ic" targets only ever exist inside a host (never public space —
       // TARGET_TYPES/the form's own Type dropdown only offers "ic" once a
@@ -5812,8 +5910,8 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
 
       const hostDeviceEl = cardEl('hd1');
       const icEl = cardEl('ic1');
-      expect(hostDeviceEl.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
-      expect(icEl.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+      expect(hostDeviceEl.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]')).toBeNull();
+      expect(icEl.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]')).toBeNull();
     });
 
     // Regression lock for the ACCEPTED width cost (Xavier's decision,
@@ -5826,7 +5924,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     // widening of `.tc-actions` (this control or a new one) fails this
     // suite rather than silently regressing further, in the same style as
     // N-9. `canAddChild` is asserted at its real, template-driven default
-    // (`[canAddChild]="canHaveParent(t)"`, now wired on) for the "with
+    // (`[canAddChild]="canBeParent(t)"`, now wired on) for the "with
     // button" measurement, and forced to `false` only to reproduce the
     // "before this feature existed" baseline for comparison — not because
     // that is reachable through today's UI for a public-space device.
@@ -5865,7 +5963,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       }
 
       // The button alone (no marker): the real, wired-on default
-      // (`canHaveParent(t)`, true for every public device) squeezes
+      // (`canBeParent(t)`, true for every public device) squeezes
       // available width from 67px (forced off, reproducing the pre-feature
       // baseline) to 53px — and on its own newly truncates a 7-character
       // name, matching the same band already accepted for the marker.
@@ -5879,7 +5977,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(nameBefore.clientWidth).toBe(67);
       expect(nameBefore.scrollWidth).toBeLessThanOrEqual(nameBefore.clientWidth); // fit before the button existed
 
-      ancestorCard(tagAlone).canAddChild = true; // real default, per canHaveParent(t)
+      ancestorCard(tagAlone).canAddChild = true; // real default, per canBeParent(t)
       fixture.detectChanges();
       const nameAfter = ancestorNodeAlone.querySelector('.tc-name') as HTMLElement;
       expect(nameAfter.clientWidth).toBe(53);
@@ -5895,7 +5993,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       // not flagged as a defect.
       const tagCompound = 'nac-compound-6';
       buildChain(tagCompound, 6);
-      // canAddChild is already true by default here (canHaveParent(t)); no
+      // canAddChild is already true by default here (canBeParent(t)); no
       // override needed — this IS what a GM sees today.
 
       const clickedCard = fixture.debugElement
@@ -6041,7 +6139,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       fixture.detectChanges();
 
       const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
-      const addBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      const addBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]') as HTMLButtonElement;
       addBtn.click();
       fixture.detectChanges();
       component.targetForm.name = 'Half-typed';
@@ -6131,7 +6229,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       const scrollTopBefore = editorEl.scrollTop;
 
       const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
-      const plusBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      const plusBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add nested device, file, or persona"]') as HTMLButtonElement;
       plusBtn.click();
       fixture.detectChanges();
 
@@ -6159,30 +6257,39 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(editorEl.scrollTop).toBe(scrollTopBefore); // still no scroll, end to end
     });
 
-    // ── The silent-type-switch consequence (task's "one consequence the
-    // spec does not fully resolve") ──
-    describe('parentDropWarning() — the Type-switch-drops-parent consequence', () => {
+    // ── pan-membership-spec.md AC-16: parentDropWarning() is now
+    // unreachable through any real UI path, since PARENTABLE_TYPES admits
+    // every type the Type <select> can produce while hostId === null
+    // (device/file/persona; "ic" is hidden by that same <select> outside a
+    // host). Rewritten from "warns once the GM switches Type away from
+    // device" to prove the warning is null in every state reachable through
+    // the rendered form, plus one direct-field-write defense-in-depth case
+    // for the one type ("ic") that would still trip it if ever reached. ──
+    describe('parentDropWarning() — unreachable via real UI after pan-membership widened canHaveParent() (AC-16)', () => {
       it('is null for an ordinary device Add/Edit session with no buffered parent', () => {
         component.openAddTarget(null, 'device');
         expect(component.parentDropWarning()).toBeNull();
       });
 
-      it('is null while the form still shows type "device", even with a buffered parent (the ordinary, unaffected case)', () => {
+      it('is null while the form still shows type "device", with a buffered parent', () => {
         component.openAddChildTarget(drone);
         expect(component.targetForm.type).toBe('device');
         expect(component.parentDropWarning()).toBeNull();
       });
 
-      it('warns once the GM switches Type away from "device" while a parent (from + or from the dropdown) is still buffered', () => {
+      it('AC-16: stays null when the GM switches Type to "file" while a parent (from + or from the dropdown) is still buffered — file is now parentable', () => {
         component.openAddChildTarget(drone);
         component.targetForm.type = 'file';
-
-        const warning = component.parentDropWarning();
-        expect(warning).not.toBeNull();
-        expect(warning).toContain(drone.name);
+        expect(component.parentDropWarning()).toBeNull();
       });
 
-      it('DOM: the warning renders visibly next to the Type field, using the app\'s existing inline-message vocabulary (.hier-form-error)', () => {
+      it('AC-16: stays null when the GM switches Type to "persona" while a parent is still buffered — persona is now parentable', () => {
+        component.openAddChildTarget(drone);
+        component.targetForm.type = 'persona';
+        expect(component.parentDropWarning()).toBeNull();
+      });
+
+      it('DOM: switching the rendered Type field to "file" renders no warning message at all — the parent is kept, not dropped', () => {
         component.openAddChildTarget(drone);
         fixture.detectChanges();
 
@@ -6191,20 +6298,10 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         typeSelect.dispatchEvent(new Event('change'));
         fixture.detectChanges();
 
-        const message = expectVisibleText(fixture, '.hier-form-error');
-        expect(message).toContain(drone.name);
+        expectAbsent(fixture, '.hier-form-error');
       });
 
-      it('is null again once Type is switched back to "device"', () => {
-        component.openAddChildTarget(drone);
-        component.targetForm.type = 'file';
-        expect(component.parentDropWarning()).not.toBeNull();
-
-        component.targetForm.type = 'device';
-        expect(component.parentDropWarning()).toBeNull();
-      });
-
-      it('does not block Save — the device is created (as a file, unparented), matching the documented, now-visible consequence rather than a forced type', () => {
+      it('does not drop the buffered parent on Save — the device is created as a file, still parented to the drone (reversed by pan-membership-spec.md)', () => {
         component.openAddChildTarget(drone);
         component.targetForm.name = 'Loose File';
         component.targetForm.type = 'file';
@@ -6213,7 +6310,7 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         const created = matrixState.state.publicTargets.find(t => t.name === 'Loose File');
         expect(created).toBeDefined();
         expect(created?.type).toBe('file');
-        expect(created?.parentTargetId).toBeUndefined();
+        expect(created?.parentTargetId).toBe(drone.id);
       });
 
       it('is null for a host-nested target session (Parent field never applies there), even with a stray buffered parentTargetId', () => {
@@ -6224,6 +6321,656 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         component.targetForm.type = 'file';
         expect(component.parentDropWarning()).toBeNull();
       });
+
+      // Defense-in-depth (AC-16's own instruction): the Type <select> never
+      // offers "ic" while hostId === null, so this can only be reached by
+      // writing targetForm.type directly, bypassing the dropdown entirely —
+      // exactly the scenario parentDropWarning()'s doc comment says it is
+      // kept to guard against.
+      it('warns for a direct (non-UI-reachable) write of targetForm.type = "ic" while hostId === null and a parent is buffered', () => {
+        component.openAddChildTarget(drone);
+        component.targetForm.type = 'ic';
+
+        const warning = component.parentDropWarning();
+        expect(warning).not.toBeNull();
+        expect(warning).toContain(drone.name);
+      });
+    });
+  });
+
+  // ── briefs/pan-membership-spec.md ────────────────────────────────────────
+  //
+  // Widens `canHaveParent()` (device-only -> device/file/persona), splits
+  // `canBeParent()` out with the OLD device-only body, widens Public Space's
+  // add controls (Device/File/Persona, no IC), and adds a warn-never-block
+  // slave-cap readout. Tests here cover the analyst's AC-1 through AC-8, the
+  // scoper's AC-9 through AC-16, and the second pass's AC-17/AC-18, plus the
+  // gameplay scenarios listed in the spec. Tests that assert behaviour
+  // already covered elsewhere in this file (AC-3/AC-4 propagation — see
+  // `MatrixStateService.addMark() propagation`, above; AC-12 — see
+  // `HierarchyEditorComponent add-child render anchor and form`, AC-2 test,
+  // above) are not duplicated here.
+  describe('pan-membership: widen parent/child to files and personas (briefs/pan-membership-spec.md)', () => {
+    let fixture: ComponentFixture<HierarchyEditorComponent>;
+    let component: HierarchyEditorComponent;
+    let matrixState: MatrixStateService;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [HierarchyEditorComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(HierarchyEditorComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      component.activeDeckers = [];
+      fixture.detectChanges();
+    });
+
+    // ── AC-1/AC-2/AC-5: parentOptionsFor() for a file/persona target ──────
+
+    it('AC-1: a file target can be assigned a device parent via parentOptionsFor(), restricted to public-space devices', () => {
+      const commlink = new MatrixTarget({ id: 'commlink1', name: "Fixer's Commlink", type: 'device', context: 'public' });
+      const otherFile = new MatrixTarget({ id: 'file2', name: 'Other File', type: 'file', context: 'public' });
+      const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
+      matrixState.addTarget(null, commlink);
+      matrixState.addTarget(null, otherFile);
+      matrixState.addTarget(null, file);
+
+      const options = component.parentOptionsFor(file).map(t => t.id);
+      expect(options).toEqual([commlink.id]); // device-only — otherFile (a file) is excluded
+    });
+
+    it('AC-2: a persona target can likewise be assigned a device parent through parentOptionsFor()', () => {
+      const commlink = new MatrixTarget({ id: 'commlink1', name: "Fixer's Commlink", type: 'device', context: 'public' });
+      const persona = new MatrixTarget({ id: 'persona1', name: "Fixer's Agent", type: 'persona', context: 'public' });
+      matrixState.addTarget(null, commlink);
+      matrixState.addTarget(null, persona);
+
+      const options = component.parentOptionsFor(persona).map(t => t.id);
+      expect(options).toEqual([commlink.id]);
+    });
+
+    it('AC-5: parentOptionsFor() for a file or persona returns the identical shape (device-only) as for a device — filtered to devices, unaffected by the asking target\'s own type', () => {
+      const deviceA = new MatrixTarget({ id: 'da', name: 'Device A', type: 'device', context: 'public' });
+      const deviceB = new MatrixTarget({ id: 'db', name: 'Device B', type: 'device', context: 'public' });
+      const file = new MatrixTarget({ id: 'file1', name: 'A File', type: 'file', context: 'public' });
+      const persona = new MatrixTarget({ id: 'persona1', name: 'A Persona', type: 'persona', context: 'public' });
+      [deviceA, deviceB, file, persona].forEach(t => matrixState.addTarget(null, t));
+
+      // deviceA excludes only itself (self/descendant guard) — its own
+      // options are every OTHER device, i.e. just deviceB.
+      const forDeviceA = component.parentOptionsFor(deviceA).map(t => t.id).sort();
+      expect(forDeviceA).toEqual(['db']);
+
+      // A file/persona has no descendants of its own to exclude (nothing
+      // can be parented to a file or persona — canBeParent() is
+      // device-only), so both device candidates are offered in full.
+      const forFile = component.parentOptionsFor(file).map(t => t.id).sort();
+      const forPersona = component.parentOptionsFor(persona).map(t => t.id).sort();
+      expect(forFile).toEqual(['da', 'db']);
+      expect(forPersona).toEqual(['da', 'db']);
+      expect(forFile).toEqual(forPersona); // identical shape between the two newly-parentable types
+      // Neither ever contains the file or persona itself — canBeParent()
+      // excludes non-device types regardless of self/descendant status.
+      expect(forFile).not.toContain(file.id);
+      expect(forPersona).not.toContain(persona.id);
+    });
+
+    // N1 (validator round, Xavier's 2026-09-11 decision): an inline,
+    // pre-Save warning for the sibling silent consequence to
+    // `parentDropWarning()` — retyping a device that currently has
+    // children to File or Persona re-homes every direct child to top level
+    // on Save (`saveTargetForm()`'s `couldBeParentBefore && !canBeParent(...)`
+    // branch), and before this warning existed nothing on screen said so.
+    describe('childRehomeWarning() — N1, Xavier\'s 2026-09-11 decision ("an inline warning before Save")', () => {
+      it('is null when adding a brand-new target (nothing to re-home yet)', () => {
+        component.openAddTarget(null, 'device');
+        expect(component.childRehomeWarning()).toBeNull();
+      });
+
+      it('is null editing a device with no children, regardless of the Type switched to', () => {
+        const lone = new MatrixTarget({ id: 'lone1', name: 'Lone Drone', type: 'device', context: 'public' });
+        matrixState.addTarget(null, lone);
+        component.openEditTarget(null, lone);
+        component.targetForm.type = 'file';
+        expect(component.childRehomeWarning()).toBeNull();
+      });
+
+      it('is null editing a device with children while Type stays "device" — nothing is being re-homed', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'child1', name: 'Child', type: 'device', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, child);
+        component.openEditTarget(null, master);
+        expect(component.targetForm.type).toBe('device');
+        expect(component.childRehomeWarning()).toBeNull();
+      });
+
+      it('names the count and destination the moment Type is switched to "file" on a device with children — before Save is clicked', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const childA = new MatrixTarget({ id: 'childA', name: 'Child A', type: 'device', context: 'public', parentTargetId: master.id });
+        const childB = new MatrixTarget({ id: 'childB', name: 'Child B', type: 'file', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, childA);
+        matrixState.addTarget(null, childB);
+        component.openEditTarget(null, master);
+
+        component.targetForm.type = 'file';
+        const warning = component.childRehomeWarning();
+        expect(warning).not.toBeNull();
+        expect(warning).toContain('File'); // names what Save will produce
+        expect(warning).toContain('2'); // names the count (2 direct children)
+        expect(warning).toContain('top level'); // names the destination
+        // Nothing has actually moved yet — this is pre-Save, present tense.
+        expect(matrixState.state.publicTargets.find(t => t.id === 'childA')!.parentTargetId).toBe(master.id);
+        expect(matrixState.state.publicTargets.find(t => t.id === 'childB')!.parentTargetId).toBe(master.id);
+      });
+
+      it('also fires switching Type to "persona" on a device with children', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'child1', name: 'Child', type: 'device', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, child);
+        component.openEditTarget(null, master);
+
+        component.targetForm.type = 'persona';
+        const warning = component.childRehomeWarning();
+        expect(warning).not.toBeNull();
+        expect(warning).toContain('Persona');
+        expect(warning).toContain('1');
+      });
+
+      it('clears the moment Type is switched back to "device" — the first recovery a GM would try, correctly reflected before Save', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'child1', name: 'Child', type: 'device', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, child);
+        component.openEditTarget(null, master);
+
+        component.targetForm.type = 'file';
+        expect(component.childRehomeWarning()).not.toBeNull();
+
+        component.targetForm.type = 'device';
+        expect(component.childRehomeWarning()).toBeNull();
+      });
+
+      it('counts only DIRECT children — a grandchild nested under the re-homed child is unaffected and not counted', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'child1', name: 'Child', type: 'device', context: 'public', parentTargetId: master.id });
+        const grandchild = new MatrixTarget({ id: 'gc1', name: 'Grandchild', type: 'device', context: 'public', parentTargetId: child.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, child);
+        matrixState.addTarget(null, grandchild);
+        component.openEditTarget(null, master);
+
+        component.targetForm.type = 'file';
+        const warning = component.childRehomeWarning();
+        expect(warning).toContain('1'); // only the direct child, not the grandchild
+      });
+
+      it('is null editing a file or persona (never parent-capable, so it never had children to lose)', () => {
+        const file = new MatrixTarget({ id: 'file1', name: 'A File', type: 'file', context: 'public' });
+        matrixState.addTarget(null, file);
+        component.openEditTarget(null, file);
+        component.targetForm.type = 'persona';
+        expect(component.childRehomeWarning()).toBeNull();
+      });
+
+      it('DOM: renders in the same slot parentDropWarning() uses (.hier-form-error), the moment the Type <select> is switched', () => {
+        const master = new MatrixTarget({ id: 'master1', name: 'Master', type: 'device', context: 'public' });
+        const child = new MatrixTarget({ id: 'child1', name: 'Child', type: 'device', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, master);
+        matrixState.addTarget(null, child);
+        component.openEditTarget(null, master);
+        fixture.detectChanges();
+
+        expectAbsent(fixture, '.hier-form-error');
+
+        const typeSelect = fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+        typeSelect.value = 'file';
+        typeSelect.dispatchEvent(new Event('change'));
+        fixture.detectChanges();
+
+        const text = expectVisibleText(fixture, '.hier-form-error');
+        expect(text).toContain('1 slaved item(s) to top level');
+      });
+    });
+
+    // D5 (validator round, Xavier's decision): the Parent field's label
+    // reads "Lives on" for a file, "Runs on" for a persona, and "Parent"
+    // for a device — same control, same options, same commit path, label
+    // only. Without this, a file nested under a device looked
+    // pixel-identical to a slaved device, implying a PAN membership the
+    // rules do not support for files (p. 233).
+    describe('D5: the Parent field label is type-specific', () => {
+      it('reads "Parent" for a device', () => {
+        const master = new MatrixTarget({ id: 'md1', name: 'Master', type: 'device', context: 'public' });
+        matrixState.addTarget(null, master);
+        component.openEditTarget(null, master);
+        fixture.detectChanges();
+        const label = fixture.nativeElement.querySelector("label[for='hier-target-parent']") as HTMLElement;
+        expect(label.textContent?.trim()).toBe('Parent');
+      });
+
+      it('reads "Lives on" for a file', () => {
+        const f = new MatrixTarget({ id: 'mf1', name: 'File', type: 'file', context: 'public' });
+        matrixState.addTarget(null, f);
+        component.openEditTarget(null, f);
+        fixture.detectChanges();
+        const label = fixture.nativeElement.querySelector("label[for='hier-target-parent']") as HTMLElement;
+        expect(label.textContent?.trim()).toBe('Lives on');
+      });
+
+      it('reads "Runs on" for a persona', () => {
+        const p = new MatrixTarget({ id: 'mp1', name: 'Persona', type: 'persona', context: 'public' });
+        matrixState.addTarget(null, p);
+        component.openEditTarget(null, p);
+        fixture.detectChanges();
+        const label = fixture.nativeElement.querySelector("label[for='hier-target-parent']") as HTMLElement;
+        expect(label.textContent?.trim()).toBe('Runs on');
+      });
+
+      it('switches live if the GM changes Type mid-edit through the rendered Type select, without touching options or the commit path', () => {
+        const master = new MatrixTarget({ id: 'md2', name: 'Master', type: 'device', context: 'public' });
+        matrixState.addTarget(null, master);
+        component.openEditTarget(null, master);
+        fixture.detectChanges();
+
+        const typeSelect = fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+        typeSelect.value = 'file';
+        typeSelect.dispatchEvent(new Event('change'));
+        fixture.detectChanges();
+
+        const label = fixture.nativeElement.querySelector("label[for='hier-target-parent']") as HTMLElement;
+        expect(label.textContent?.trim()).toBe('Lives on');
+      });
+    });
+
+    // ── AC-6: Public Space header controls ─────────────────────────────────
+
+    it('AC-6/AC-13: Public Space header renders Device, File, and Persona add buttons, and never an IC button', () => {
+      const header = fixture.nativeElement.querySelector('.hier-tree-section .hier-header-actions') as HTMLElement;
+      const labels = Array.from(header.querySelectorAll('.hier-add-btn')).map(b => (b.textContent ?? '').trim());
+      expect(labels.some(l => l.includes('Loose Device'))).toBeTrue();
+      expect(labels.some(l => l.includes('File'))).toBeTrue();
+      expect(labels.some(l => l.includes('Persona'))).toBeTrue();
+      expect(labels.some(l => l.includes('IC'))).toBeFalse();
+    });
+
+    // D4 (validator round): Loose Device / File / Persona used to share an
+    // identical fa-plus icon — three plus signs in a row fail a glance
+    // test. They now reuse the same type-specific icons the host Targets
+    // subsection already uses (fa-microchip / fa-file-alt / fa-user-circle),
+    // asserted on the rendered DOM, not by reading button text alone.
+    it('D4: the Loose Device, File and Persona header buttons render distinct, type-specific icons (matching the host subsection)', () => {
+      const header = fixture.nativeElement.querySelector('.hier-tree-section .hier-header-actions') as HTMLElement;
+      const buttons = Array.from(header.querySelectorAll('.hier-add-btn')) as HTMLElement[];
+
+      const deviceBtn = buttons.find(b => (b.textContent ?? '').trim() === 'Loose Device')!;
+      const fileBtn = buttons.find(b => (b.textContent ?? '').trim() === 'File')!;
+      const personaBtn = buttons.find(b => (b.textContent ?? '').trim() === 'Persona')!;
+
+      expect(deviceBtn.querySelector('i.fa-microchip')).withContext('Loose Device should use the microchip icon').not.toBeNull();
+      expect(fileBtn.querySelector('i.fa-file-alt')).withContext('File should use the file icon').not.toBeNull();
+      expect(personaBtn.querySelector('i.fa-user-circle')).withContext('Persona should use the user-circle icon').not.toBeNull();
+
+      // No two of the three share an icon class.
+      expect(deviceBtn.querySelector('i.fa-plus')).toBeNull();
+      expect(fileBtn.querySelector('i.fa-plus')).toBeNull();
+      expect(personaBtn.querySelector('i.fa-plus')).toBeNull();
+    });
+
+    it('AC-6: clicking the header "File" button opens an Add form defaulted to type "file" in public space', () => {
+      const header = fixture.nativeElement.querySelector('.hier-tree-section .hier-header-actions') as HTMLElement;
+      const btn = Array.from(header.querySelectorAll('.hier-add-btn'))
+        .find(b => (b.textContent ?? '').trim() === 'File') as HTMLButtonElement;
+      btn.click();
+      expect(component.targetForm.type).toBe('file');
+      expect(component.targetForm.hostId).toBeNull();
+    });
+
+    it('AC-6: clicking the header "Persona" button opens an Add form defaulted to type "persona" in public space', () => {
+      const header = fixture.nativeElement.querySelector('.hier-tree-section .hier-header-actions') as HTMLElement;
+      const btn = Array.from(header.querySelectorAll('.hier-add-btn'))
+        .find(b => (b.textContent ?? '').trim() === 'Persona') as HTMLButtonElement;
+      btn.click();
+      expect(component.targetForm.type).toBe('persona');
+      expect(component.targetForm.hostId).toBeNull();
+    });
+
+    // ── AC-7/AC-14: no UI path to type "ic" in public space ────────────────
+
+    it('AC-7/AC-14: the rendered Type <select> never offers an "ic" option while hostId === null', () => {
+      component.openAddTarget(null, 'device');
+      fixture.detectChanges();
+      const typeSelect = fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+      const values = Array.from(typeSelect.options).map(o => o.value);
+      expect(values).not.toContain('ic');
+    });
+
+    // ── AC-8: host containment untouched ────────────────────────────────────
+
+    it('AC-8: a device AND a file inside a host still never get a Parent field', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host', linkedHostId: host.id });
+      const hostFile = new MatrixTarget({ id: 'hf1', name: 'Archive', type: 'file', context: 'host', linkedHostId: host.id });
+      host.targets.push(hostDevice, hostFile);
+
+      component.openEditTarget(host, hostDevice);
+      fixture.detectChanges();
+      expect(component.canHaveParent(hostDevice)).toBeFalse();
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+      component.closeTargetForm();
+
+      component.openEditTarget(host, hostFile);
+      fixture.detectChanges();
+      expect(component.canHaveParent(hostFile)).toBeFalse();
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(0);
+    });
+
+    // ── AC-11 ────────────────────────────────────────────────────────────
+
+    it('AC-11: opening Edit on a public file renders exactly one .hier-parent-row, offering the same options parentOptionsFor() returns', () => {
+      const commlink = new MatrixTarget({ id: 'commlink1', name: "Fixer's Commlink", type: 'device', context: 'public' });
+      const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
+      matrixState.addTarget(null, commlink);
+      matrixState.addTarget(null, file);
+
+      component.openEditTarget(null, file);
+      fixture.detectChanges();
+
+      const rows = fixture.debugElement.queryAll(By.css('.hier-parent-row'));
+      expect(rows.length).toBe(1);
+      const select = fixture.nativeElement.querySelector('#hier-target-parent') as HTMLSelectElement;
+      const renderedIds = Array.from(select.options).map(o => o.value).filter(v => v !== '');
+      expect(renderedIds).toEqual(component.parentOptionsFor(file).map(t => t.id));
+    });
+
+    it('AC-11: opening Edit on a public persona renders exactly one .hier-parent-row', () => {
+      const commlink = new MatrixTarget({ id: 'commlink1', name: "Fixer's Commlink", type: 'device', context: 'public' });
+      const persona = new MatrixTarget({ id: 'persona1', name: "Fixer's Agent", type: 'persona', context: 'public' });
+      matrixState.addTarget(null, commlink);
+      matrixState.addTarget(null, persona);
+
+      component.openEditTarget(null, persona);
+      fixture.detectChanges();
+
+      expect(fixture.debugElement.queryAll(By.css('.hier-parent-row')).length).toBe(1);
+    });
+
+    // ── AC-17: file Condition Monitor stays absent regardless of any
+    // stored rating ──
+
+    it('AC-17: saving a new file with a Device Rating entered still results in no Matrix Condition Monitor (matrixHealth 0)', () => {
+      component.openAddTarget(null, 'file');
+      component.targetForm.name = 'Stolen Manifest';
+      component.targetForm.deviceRating = 12; // deliberately set, even though a file has no printed rating
+      component.saveTargetForm();
+
+      const created = matrixState.state.publicTargets.find(t => t.name === 'Stolen Manifest')!;
+      expect(created.type).toBe('file');
+      expect(created.matrixHealth).toBe(0); // calcMatrixHealth('file', ...) is undefined ?? 0, unconditionally
+    });
+
+    // ── AC-18 / Scenario 7: slave-cap warning (warn, never block) ─────────
+
+    it('AC-18: slaveCapWarning() is null for a device within its Device Rating x 3 slave cap', () => {
+      const master = new MatrixTarget({ id: 'm1', name: 'Master', type: 'device', context: 'public', deviceRating: 4 });
+      matrixState.addTarget(null, master);
+      for (let i = 0; i < 12; i++) { // 4 * 3 = 12, exactly at cap
+        const slave = new MatrixTarget({ id: `s${i}`, name: `Slave ${i}`, type: 'device', context: 'public', parentTargetId: master.id });
+        matrixState.addTarget(null, slave);
+      }
+      expect(component.slaveCapWarning(master)).toBeNull();
+    });
+
+    it('Scenario 7: a device with Device Rating 4 (cap 12) holding 12 slaved devices and 3 files shows no warning — files do not count', () => {
+      const master = new MatrixTarget({ id: 'm1', name: 'Master', type: 'device', context: 'public', deviceRating: 4 });
+      matrixState.addTarget(null, master);
+      for (let i = 0; i < 12; i++) {
+        matrixState.addTarget(null, new MatrixTarget({ id: `s${i}`, name: `Slave ${i}`, type: 'device', context: 'public', parentTargetId: master.id }));
+      }
+      for (let i = 0; i < 3; i++) {
+        matrixState.addTarget(null, new MatrixTarget({ id: `f${i}`, name: `File ${i}`, type: 'file', context: 'public', parentTargetId: master.id }));
+      }
+      expect(component.slaveCapWarning(master)).toBeNull();
+
+      // Adding a 13th DEVICE raises the warning.
+      matrixState.addTarget(null, new MatrixTarget({ id: 's12', name: 'Slave 12', type: 'device', context: 'public', parentTargetId: master.id }));
+      const warning = component.slaveCapWarning(master);
+      expect(warning).not.toBeNull();
+      expect(warning).toContain('13');
+    });
+
+    // D6 (validator round): p. 233 states the x3 cap for "your commlink (or
+    // deck)" specifically, and this app deliberately does not model device
+    // sub-types — so the message must not claim p. 233 names THIS device;
+    // it should cite the general PAN-master rule the app actually enforces.
+    it('D6: the warning cites the general PAN-master rule (Device Rating x 3), not a claim that p. 233 names this specific device', () => {
+      const master = new MatrixTarget({ id: 'm1', name: 'Master', type: 'device', context: 'public', deviceRating: 1 });
+      matrixState.addTarget(null, master);
+      for (let i = 0; i < 4; i++) {
+        matrixState.addTarget(null, new MatrixTarget({ id: `s${i}`, name: `Slave ${i}`, type: 'device', context: 'public', parentTargetId: master.id }));
+      }
+      const warning = component.slaveCapWarning(master);
+      expect(warning).toContain('PAN masters are capped at Device Rating × 3');
+      expect(warning).toContain('p. 233');
+      // Decorative negative assertion removed (validator, this round): it
+      // checked for a substring of the OLD message ("this device's"), so
+      // any rewording — including an unrelated regression — would satisfy
+      // it. The two positive `toContain()` checks above carry the actual
+      // weight of this test; a negative assertion pinned to today's exact
+      // wording would be equally decorative, just against a different
+      // string, so it is not replaced with one.
+    });
+
+    it('D3/N2: the over-cap warning renders visibly on the device row as a short badge, in its own amber warning vocabulary — never the red .hier-form-error rejection colour — carries the full sentence as its tooltip, and the GM can still record the over-cap state (no block anywhere)', () => {
+      const master = new MatrixTarget({ id: 'm1', name: 'Master', type: 'device', context: 'public', deviceRating: 1 });
+      matrixState.addTarget(null, master);
+      for (let i = 0; i < 4; i++) { // 1 * 3 = 3 cap; 4th device is over
+        matrixState.addTarget(null, new MatrixTarget({ id: `s${i}`, name: `Slave ${i}`, type: 'device', context: 'public', parentTargetId: master.id }));
+      }
+      fixture.detectChanges();
+
+      const node = fixture.nativeElement.querySelector("[data-target-id='m1']") as HTMLElement;
+      const warningEl = node.querySelector('.tc-slave-cap-badge') as HTMLElement;
+      expect(warningEl).withContext('expected an over-cap badge to render on the master device row').not.toBeNull();
+      // N2: short badge text, not the full sentence — naming the count and
+      // the cap, with a leading "⚠" glyph (N3: a non-colour cue
+      // distinguishing this amber vocabulary from red rejections).
+      expect(warningEl.textContent!.trim()).toBe('⚠ 4/3 slaves');
+      // The full sentence, citation included, survives — bound as the
+      // badge's `ngbTooltip`, not printed into the tree. Read off the
+      // component instance rather than the DOM: ng-bootstrap does not
+      // reflect `ngbTooltip` as a plain attribute.
+      const cardComponent = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === 'm1')!;
+      expect(cardComponent.slaveCapTooltip).toBe(component.slaveCapWarning(master));
+      expect(cardComponent.slaveCapTooltip).toContain('p. 233');
+      // Xavier's decision is "warn, never block" — the warning must not be
+      // styled in this app's rejected-save red (.hier-form-error,
+      // #ff8a8a = rgb(255, 138, 138)), or it reads as a refusal at a glance.
+      expect(warningEl.classList.contains('hier-form-error')).toBeFalse();
+      expect(getComputedStyle(warningEl).color).not.toBe('rgb(255, 138, 138)');
+      // It renders in this app's amber "attention, not failure" colour
+      // instead (#ffb340 = rgb(255, 179, 64), same colour as the
+      // propagation highlight).
+      expect(getComputedStyle(warningEl).color).toBe('rgb(255, 179, 64)');
+
+      // Nothing about this is blocked: the 4th slave still exists in state,
+      // still renders nested under the master, and the GM can add a 5th.
+      expect(matrixState.state.publicTargets.filter(t => t.parentTargetId === master.id).length).toBe(4);
+      const fifthAllowed = component.parentOptionsForNewTarget().some(t => t.id === master.id);
+      expect(fifthAllowed).toBeTrue(); // still offered as a parent choice — never refused
+    });
+
+    // N-SLAVE-CAP-BADGE (validator round, N2): "measure it, the same way
+    // the + button and the amber marker were measured... and add a
+    // regression test asserting the row height is unchanged when the badge
+    // appears." Unlike N-9/N-ADD-CHILD, which measure `.tc-name`'s
+    // available WIDTH shrinking, this measures the master device's own row
+    // HEIGHT — the actual defect this badge fixes: the old
+    // `.hier-slave-cap-warning` `<span>` rendered below the card as its own
+    // line, growing the row's height and pushing its whole subtree down
+    // the moment it appeared. Same master device, measured before and
+    // after crossing the cap, so this is a direct before/after comparison
+    // rather than two different rows.
+    it('N-SLAVE-CAP-BADGE: measured — the master device\'s own card row height is unchanged the moment the slave-cap badge appears', () => {
+      // `.hier-public-node` nests a target's children INSIDE its own DOM
+      // subtree (`publicTargetNodeTpl`'s trailing `@for (child of
+      // childrenOf(t.id)...)`), so measuring that whole node's height
+      // before/after adding a slave would also pick up the new slave's OWN
+      // rendered row — not what this test is checking. Measure the
+      // master's own `app-target-card` host element instead (found by
+      // component instance, same technique the N-ADD-CHILD/host-nested
+      // tests above already use), which contains only this row's content.
+      function masterCardHost(): HTMLElement {
+        return fixture.debugElement
+          .queryAll(By.directive(TargetCardComponent))
+          .find(de => (de.componentInstance as TargetCardComponent).target.id === 'm1')!
+          .nativeElement as HTMLElement;
+      }
+
+      const master = new MatrixTarget({ id: 'm1', name: 'Master', type: 'device', context: 'public', deviceRating: 1 });
+      matrixState.addTarget(null, master);
+      for (let i = 0; i < 3; i++) { // 1 * 3 = 3 cap; exactly at cap, no badge yet
+        matrixState.addTarget(null, new MatrixTarget({ id: `s${i}`, name: `Slave ${i}`, type: 'device', context: 'public', parentTargetId: master.id }));
+      }
+      fixture.detectChanges();
+
+      let hostEl = masterCardHost();
+      expect(hostEl.querySelector('.tc-slave-cap-badge')).withContext('no badge yet — within cap').toBeNull();
+      const heightBefore = hostEl.getBoundingClientRect().height;
+
+      matrixState.addTarget(null, new MatrixTarget({ id: 's3', name: 'Slave 3', type: 'device', context: 'public', parentTargetId: master.id })); // 4th slave, now over cap
+      fixture.detectChanges();
+
+      hostEl = masterCardHost(); // re-query: the child count change reruns the @for, may re-create the card
+      expect(hostEl.querySelector('.tc-slave-cap-badge')).withContext('badge now showing — over cap').not.toBeNull();
+      const heightAfter = hostEl.getBoundingClientRect().height;
+      expect(heightAfter).toBe(heightBefore); // the row itself did not grow — the badge cost width, not height
+    });
+
+    // ── Gameplay scenario 1: agent on the open grid ────────────────────────
+
+    it('Scenario 1: a persona parented to a commlink renders nested beneath it, and marking either does not affect the other\'s count', () => {
+      const commlink = new MatrixTarget({ id: 'commlink1', name: "Fixer's Commlink", type: 'device', context: 'public' });
+      const persona = new MatrixTarget({ id: 'persona1', name: "Fixer's Agent", type: 'persona', context: 'public', parentTargetId: commlink.id });
+      matrixState.addTarget(null, commlink);
+      matrixState.addTarget(null, persona);
+      fixture.detectChanges();
+
+      const commlinkNode = fixture.nativeElement.querySelector("[data-target-id='commlink1']") as HTMLElement;
+      const personaNode = fixture.nativeElement.querySelector("[data-target-id='persona1']") as HTMLElement;
+      expect(commlinkNode.contains(personaNode)).toBeTrue(); // rendered nested
+
+      matrixState.addMark(persona, 'Tesseract');
+      matrixState.addMark(persona, 'Tesseract');
+      matrixState.addMark(persona, 'Tesseract');
+      expect(persona.marks['Tesseract']).toBe(3);
+      expect(commlink.marks['Tesseract']).toBeUndefined();
+
+      matrixState.addMark(commlink, 'Tesseract');
+      expect(commlink.marks['Tesseract']).toBe(1);
+      expect(persona.marks['Tesseract']).toBe(3); // unaffected by the commlink's own mark
+    });
+
+    // ── Gameplay scenario 2: file nested under a device ────────────────────
+
+    it('Scenario 2: a file nested under a device — marking either leaves the other\'s count untouched, and the mark-preview highlight never lights up the drone for a file mark', () => {
+      const drone = new MatrixTarget({ id: 'drone1', name: 'Courier Drone', type: 'device', context: 'public' });
+      const file = new MatrixTarget({ id: 'file1', name: 'Stolen Manifest', type: 'file', context: 'public', parentTargetId: drone.id });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, file);
+
+      matrixState.addMark(drone, 'Tesseract');
+      expect(drone.marks['Tesseract']).toBe(1);
+      expect(file.marks['Tesseract']).toBeUndefined();
+
+      matrixState.addMark(file, 'Tesseract');
+      expect(drone.marks['Tesseract']).toBe(1); // unchanged
+      expect(file.marks['Tesseract']).toBe(1);
+
+      // The mark-preview highlight (previewPropagation) never reaches the
+      // drone when previewing a mark ON THE FILE — a file is not a
+      // propagation source (addMark()'s type === "device" gate).
+      const stops = matrixState.previewPropagation(file, 'Tesseract');
+      expect(stops.map(s => s.id)).not.toContain(drone.id);
+    });
+
+    // ── Gameplay scenario 3: device chain still propagates; a file at the
+    // end of it does not ──
+
+    it('Scenario 3: marking Device A propagates up to Device B; marking a file parented to Device B does not propagate anywhere', () => {
+      const deviceB = new MatrixTarget({ id: 'devB', name: 'Rigged Vehicle', type: 'device', context: 'public' });
+      const deviceA = new MatrixTarget({ id: 'devA', name: 'Loose Sensor', type: 'device', context: 'public', parentTargetId: deviceB.id });
+      const sensorLog = new MatrixTarget({ id: 'log1', name: 'Sensor Log', type: 'file', context: 'public', parentTargetId: deviceB.id });
+      matrixState.addTarget(null, deviceB);
+      matrixState.addTarget(null, deviceA);
+      matrixState.addTarget(null, sensorLog);
+
+      matrixState.addMark(deviceA, 'Tesseract');
+      expect(deviceA.marks['Tesseract']).toBe(1);
+      expect(deviceB.marks['Tesseract']).toBe(1); // existing open-grid chain, unaffected by this feature
+
+      matrixState.addMark(sensorLog, 'Tesseract');
+      expect(sensorLog.marks['Tesseract']).toBe(1);
+      expect(deviceB.marks['Tesseract']).toBe(1); // still 1 — the file's mark did not propagate to its own device parent
+    });
+
+    // ── Gameplay scenario 4: attempted IC outside a host ───────────────────
+
+    it('Scenario 4: no add control in Public Space creates an IC target, and no type control lets an existing public target become "ic"', () => {
+      const header = fixture.nativeElement.querySelector('.hier-tree-section .hier-header-actions') as HTMLElement;
+      const labels = Array.from(header.querySelectorAll('.hier-add-btn')).map(b => (b.textContent ?? '').trim());
+      // Word-boundary check, not a bare substring match — "Loose Device" and
+      // "Persona" both legitimately contain the letters "ic" (dev-IC-e,
+      // don't-apply-here), which a naive substring check would misreport.
+      expect(labels.some(l => /\bic\b/i.test(l))).toBeFalse();
+
+      const device = new MatrixTarget({ id: 'd1', name: 'Loose Device', type: 'device', context: 'public' });
+      matrixState.addTarget(null, device);
+      component.openEditTarget(null, device);
+      fixture.detectChanges();
+      const typeSelect = fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+      expect(Array.from(typeSelect.options).map(o => o.value)).not.toContain('ic');
+    });
+
+    // ── Gameplay scenario 5: mark cap independence at a device/file
+    // boundary ──
+
+    it('Scenario 5: a device already at the 3-mark cap for a decker does not block that same decker from marking a file parented to it', () => {
+      const drone = new MatrixTarget({ id: 'drone1', name: 'Courier Drone', type: 'device', context: 'public' });
+      const file = new MatrixTarget({ id: 'file1', name: 'Stolen Manifest', type: 'file', context: 'public', parentTargetId: drone.id });
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, file);
+
+      matrixState.addMark(drone, 'Tesseract');
+      matrixState.addMark(drone, 'Tesseract');
+      matrixState.addMark(drone, 'Tesseract');
+      expect(drone.marks['Tesseract']).toBe(MARK_CAP);
+
+      matrixState.addMark(file, 'Tesseract'); // same decker, different icon — its own independent cap
+      expect(file.marks['Tesseract']).toBe(1);
+      expect(drone.marks['Tesseract']).toBe(MARK_CAP); // unaffected by the file's mark
+    });
+
+    // ── Gameplay scenario 6: host-boundary regression check ────────────────
+
+    it('Scenario 6: a device already inside a host still shows no parent picker, and neither does a file inside that same host', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host', linkedHostId: host.id });
+      const hostFile = new MatrixTarget({ id: 'hf1', name: 'Archive', type: 'file', context: 'host', linkedHostId: host.id });
+      host.targets.push(hostDevice, hostFile);
+
+      expect(component.canHaveParent(hostDevice)).toBeFalse();
+      expect(component.canHaveParent(hostFile)).toBeFalse();
     });
   });
 });

@@ -6,6 +6,19 @@ Completed items are deleted from this file rather than kept as historical
 record — the change that shipped them is the record (`briefs/`,
 `ARCHITECTURE.md`, git history). Last swept 2026-08-23.
 
+## Retyping a damaged device to File leaves stale `matrixDamage` (found during pan-membership defect-fix round)
+
+Files cannot take Matrix damage (p. 227/228) and `calcMatrixHealth('file',
+...)` already correctly returns no Condition Monitor for one — but
+retyping an existing, damaged public-space device to `file` via the Edit
+form does not clear its `matrixDamage` field; only `matrixHealth` gets
+recomputed (to 0) on that Save. The target ends up with `matrixHealth: 0`
+and a leftover nonzero `matrixDamage`, an inconsistent pair no current
+render path surfaces (no UI reads a file's `matrixDamage`), so nothing
+visibly breaks today. Worth tidying — clear `matrixDamage` in the same
+`saveTargetForm()` branch that recomputes `matrixHealth` — before anything
+starts reading `matrixDamage` off a `file` target.
+
 ## Silent Parent-dropdown fallback when the parent is deleted mid-edit (deferred from parent-picker-into-edit-view review round)
 
 Live-at-the-table race, cosmetic only (state ends up correct): if the GM
