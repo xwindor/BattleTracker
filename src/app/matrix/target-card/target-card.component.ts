@@ -55,10 +55,39 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * itself — see `MatrixStateService.previewPropagation()`'s visited-set).
    */
   @Input() propagationDestination: PropagationHighlightState | null = null;
+  /**
+   * True when a `+Mark` picker (card or host) is open and unconfirmed
+   * somewhere else in the tree — `HierarchyEditorComponent.anyOtherPickerOpen()`
+   * (`briefs/mark-counter-control-spec.md`, Open Decision 2, Option B).
+   * While true, the dot-row controls on this card refuse to arm/commit an
+   * add (right-click/remove is never blocked by this — only adding is).
+   * Distinct from `blockedReasonFor()`, which blocks per-decker on the
+   * 3-mark cap regardless of what else is open.
+   */
+  @Input() dotAddBlocked = false;
+  /**
+   * Whether to render the "+" add-child control in `.tc-actions`
+   * (`briefs/add-child-button-spec.md`, Open Decision 1 = Option A).
+   * Parent-computed: this card does not know or care WHY it can add a
+   * child, only whether to show the control — `HierarchyEditorComponent`
+   * owns `canHaveParent()` and the actual routing. Defaults to `false`,
+   * safely, for the host-subsection call site (`hierarchy-editor.component
+   * .html`, host-nested target instantiation), which never sets it — a
+   * host-nested device never renders this control (Determination 3,
+   * structural rather than a second explicit check).
+   */
+  @Input() canAddChild = false;
 
   @Output() readonly editTarget = new EventEmitter<void>();
   @Output() readonly deleteTarget = new EventEmitter<void>();
   @Output() readonly cycleVisibilityRequested = new EventEmitter<void>();
+  /**
+   * Fired when the GM clicks the "+" add-child control
+   * (`briefs/add-child-button-spec.md`). The parent
+   * (`HierarchyEditorComponent`) is what actually opens the Add form via
+   * `openAddChildTarget(target)` — this card only reports the click.
+   */
+  @Output() readonly addChild = new EventEmitter<void>();
   /**
    * Fired only from DOM event handlers (`openAddMark()`,
    * `onSelectedDeckerChange()`, `confirmAddMark()`, `cancelAddMark()`), never
@@ -110,6 +139,15 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
 
   addMarkOpen = false;
   selectedDeckerId = "";
+  /**
+   * Which decker's dot row (`.tc-dots-btn`, `markEntries`) currently owns the
+   * transient hover/focus-driven propagation highlight, or `null`. Distinct
+   * from `addMarkOpen`, which tracks the separate `+Mark` picker's own open
+   * state — the two controls are mutually exclusive armed states, never
+   * simultaneously the source of `HierarchyEditorComponent.markHighlight`
+   * (`briefs/mark-counter-control-spec.md`).
+   */
+  armedDotDeckerId: string | null = null;
 
   constructor(readonly matrixState: MatrixStateService) {}
 
@@ -193,13 +231,30 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * gets deferred).
    */
   ngOnChanges(changes: SimpleChanges): void {
+    let shouldClear = false;
     if (this.addMarkOpen && this.availableDeckers.length === 0) {
       this.addMarkOpen = false;
-      this.lifecycleClear.emit();
-      return;
+      shouldClear = true;
     }
     if (changes["target"] && this.addMarkOpen) {
       this.addMarkOpen = false;
+      shouldClear = true;
+    }
+    // Dot-row equivalent of the two guards above (`briefs/mark-counter-control-spec.md`
+    // affected-paths table A): the armed decker's own dot control is
+    // stranded, with no click ever available to clear it, either when the
+    // whole `target` @Input is swapped out from under it (same hazard as
+    // path 11 for `addMarkOpen`) or when the armed decker specifically no
+    // longer has room on this icon (the dot-row analogue of path 10's
+    // "last available decker disappeared" — the dot row has no
+    // `availableDeckers` list to empty, so the per-decker cap check stands
+    // in for it).
+    if (this.armedDotDeckerId !== null
+        && (changes["target"] || this.blockedReasonFor(this.armedDotDeckerId) !== null)) {
+      this.armedDotDeckerId = null;
+      shouldClear = true;
+    }
+    if (shouldClear) {
       this.lifecycleClear.emit();
     }
   }
@@ -216,7 +271,7 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * that has nothing to do with it.
    */
   ngOnDestroy(): void {
-    if (this.addMarkOpen) {
+    if (this.addMarkOpen || this.armedDotDeckerId !== null) {
       this.lifecycleClear.emit();
     }
   }
@@ -236,9 +291,28 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    *    decker on THIS card's own icon while its picker was open; the editor
    *    has already cleared `markHighlight` itself (it owns that state), so
    *    this card only needs to close its own picker UI, not emit again.
+   *
+   * Round-10 review, Defect 1: also silently disarms `armedDotDeckerId`.
+   * `closeAllPickersExcept()` (`HierarchyEditorComponent`) calls this on
+   * every card OTHER than the one whose picker just opened — including a
+   * card that is not the new highlight owner because its own +Mark picker
+   * was open, but because the GM's pointer is still resting on one of its
+   * dot controls from an earlier hover (`onDotRowEnter()`), unrelated to the
+   * picker that is opening elsewhere. `HierarchyEditorComponent` already
+   * treats "another picker opened" as taking sole ownership of the shared
+   * highlight away from this card; leaving `armedDotDeckerId` set here left
+   * a stale local arm that a later, ordinary `mouseleave`
+   * (`onDotRowLeave()`) could not tell apart from still owning the
+   * highlight — its `armedDotDeckerId === deckerId` guard only checks
+   * whether THIS card thinks it is still armed, not whether the shared
+   * highlight is still this card's to clear, and a card cannot see
+   * `markHighlight` to make that check itself. Disarming here, in the one
+   * place ownership handoff is already decided, closes that gap without
+   * plumbing the shared highlight down to every card.
    */
   closePickerSilently(): void {
     this.addMarkOpen = false;
+    this.armedDotDeckerId = null;
   }
 
   /**
@@ -293,9 +367,20 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * a blank picker produced.
    */
   get addMarkBlockedReason(): string | null {
-    if (!this.selectedDeckerId) return "Pick a decker first";
-    if ((this.target.marks[this.selectedDeckerId] ?? 0) >= MARK_CAP) {
-      return `${this.selectedDeckerId} already holds the maximum ${MARK_CAP} marks on this icon (p. 236)`;
+    return this.blockedReasonFor(this.selectedDeckerId);
+  }
+
+  /**
+   * Same logic as `addMarkBlockedReason`, parameterized — a dot row's decker
+   * is fixed by `markEntries` and is not necessarily `this.selectedDeckerId`
+   * (the `+Mark` picker's own selection). `addMarkBlockedReason` delegates
+   * here so the two definitions cannot drift
+   * (`briefs/mark-counter-control-spec.md`, affected-paths table A).
+   */
+  blockedReasonFor(deckerId: string): string | null {
+    if (!deckerId) return "Pick a decker first";
+    if ((this.target.marks[deckerId] ?? 0) >= MARK_CAP) {
+      return `${deckerId} already holds the maximum ${MARK_CAP} marks on this icon (p. 236)`;
     }
     return null;
   }
@@ -349,6 +434,98 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
 
   removeMark(deckerId: string): void {
     this.matrixState.removeMark(this.target, deckerId);
+  }
+
+  /**
+   * Arms the dot control for `deckerId` — mouse (`mouseenter`) and keyboard
+   * (`onDotRowFocus`, same body) both pass through here first, since a
+   * pointer cannot click something without entering it and a keyboard
+   * cannot activate something without first tabbing onto it
+   * (`briefs/mark-counter-control-spec.md`, "Proposed approach" §2). Shows
+   * the same propagation-highlight disclosure `openAddMark()` gives the
+   * `+Mark` picker — unless this decker is already capped on this icon, in
+   * which case nothing is emitted at all: there is nothing to preview
+   * (no highlight for a capped decker — nothing will land).
+   *
+   * No-op entirely while `dotAddBlocked` (Open Decision 2, Option B): the
+   * `[disabled]` attribute on `.tc-dots-btn` refuses `click`, but a browser
+   * still delivers `mouseenter`/`focus` to a disabled `<button>` (unlike
+   * `click`, `disabled` does not suppress hover/focus events) — without this
+   * guard, hovering a *blocked* dot control would still arm it and steal
+   * `HierarchyEditorComponent.markHighlight` away from whatever other
+   * picker Option B exists to protect, defeating the whole point of
+   * `dotAddBlocked` (`briefs/mark-counter-control-spec.md`'s S4 exists
+   * exactly to catch this).
+   */
+  onDotRowEnter(deckerId: string): void {
+    if (this.dotAddBlocked) return;
+    this.armedDotDeckerId = deckerId;
+    if (this.blockedReasonFor(deckerId) === null) {
+      this.propagationHighlightChange.emit({ target: this.target, deckerId });
+    }
+  }
+
+  /** Keyboard equivalent of `onDotRowEnter` — see that method's doc comment. */
+  onDotRowFocus(deckerId: string): void {
+    this.onDotRowEnter(deckerId);
+  }
+
+  /**
+   * Disarms the dot control for `deckerId` — mouse (`mouseleave`) and
+   * keyboard (`onDotRowBlur`, same body). Only clears if this decker is the
+   * one currently armed, so a stray leave event for a row that never armed
+   * anything (e.g. this decker was capped, so `onDotRowEnter` emitted
+   * nothing) cannot clear an unrelated highlight.
+   */
+  onDotRowLeave(deckerId: string): void {
+    if (this.armedDotDeckerId === deckerId) {
+      this.armedDotDeckerId = null;
+      this.propagationHighlightChange.emit(null);
+    }
+  }
+
+  /** Keyboard equivalent of `onDotRowLeave` — see that method's doc comment. */
+  onDotRowBlur(deckerId: string): void {
+    this.onDotRowLeave(deckerId);
+  }
+
+  /**
+   * Commits: adds exactly one mark to `deckerId` on this icon, regardless of
+   * which dot the pointer/focus happens to be over (Open Decision 1,
+   * click-adds-one, always — not click-sets-count-to-N). No-op while
+   * `dotAddBlocked` (another picker is open and unconfirmed elsewhere in the
+   * tree, Open Decision 2 Option B) or while this decker is already capped.
+   * Ordering matches `confirmAddMark()`: `addMark()` fires `stateChange$`
+   * first, and the clearing emit goes after.
+   */
+  onDotClick(deckerId: string): void {
+    if (this.dotAddBlocked || this.blockedReasonFor(deckerId) !== null) return;
+    this.matrixState.addMark(this.target, deckerId);
+    this.armedDotDeckerId = null;
+    this.propagationHighlightChange.emit(null);
+  }
+
+  /**
+   * Right-click-to-remove — suppresses the native browser context menu on
+   * this control only, then delegates to the existing, unchanged
+   * `removeMark()`. Never blocked by the 3-mark cap or by `dotAddBlocked` —
+   * capped/blocked only ever refuses an *add*.
+   *
+   * Round-10 review, Defect 2: if this decker's dot row is the one currently
+   * armed (`onDotRowEnter()`, showing "this will also mark…"), a right-click
+   * here is the GM choosing to *remove* instead of confirming that add — the
+   * armed add-highlight is stale the instant this fires, since removing a
+   * mark cannot be what it was warning about. Disarms and clears it the same
+   * way `onDotClick()`/`onDotRowLeave()` do, rather than leaving it to show
+   * until the pointer eventually leaves.
+   */
+  onDotRightClick(event: MouseEvent, deckerId: string): void {
+    event.preventDefault();
+    this.removeMark(deckerId);
+    if (this.armedDotDeckerId === deckerId) {
+      this.armedDotDeckerId = null;
+      this.propagationHighlightChange.emit(null);
+    }
   }
 
   typeIcon(type: MatrixTargetType): string {

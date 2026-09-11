@@ -47,6 +47,7 @@
 // longer cites p. 247 for the wrong direction of mark sharing (D-8).
 
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { SimpleChange } from '@angular/core';
 import { By } from '@angular/platform-browser';
 import { NgbActiveModal, NgbModal } from '@ng-bootstrap/ng-bootstrap';
 import { appConfig } from 'app/app.config';
@@ -3425,36 +3426,35 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(!!(hdvEl.compareDocumentPosition(host2Node) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTrue();
     });
 
-    // ── N-9 (round-7 review): does the marker glyph truncate a highlighted
-    //    destination's OWN name at the worst-case narrow pane width? Measured
-    //    in real ChromeHeadless layout, not assumed. Result, at
-    //    EFFECTIVE_NARROW_WIDTH_PX (354px) with the destination at depth 3 of
-    //    a 4-deep chain (the same worst case AC-12 uses): a 6-character name
-    //    ("NNNNNN") is unaffected (67px available both before and after the
-    //    marker inserts) because it was ALREADY being clipped to that width
-    //    or fits within the reduced one either way; names of exactly 7-8
-    //    characters are the narrow band where the row had just enough room
-    //    (67px) before the marker but not after (55px) — the marker's own
-    //    insertion is what tips them into ellipsis. By 9+ characters the name
-    //    was already truncated at 67px before the marker ever existed, so the
-    //    marker only shortens an already-truncated name further, which is the
-    //    accepted, pre-existing cost this cue's insertion always carried
-    //    (AC-13's "Round-6 review, Defect 5" correction).
+    // ── N-9 (round-7 review; renumbered figures round-9,
+    //    briefs/add-child-button-spec.md, 2026-09-10): does the marker glyph
+    //    truncate a highlighted destination's OWN name at the worst-case
+    //    narrow pane width? Measured in real ChromeHeadless layout, not
+    //    assumed, at EFFECTIVE_NARROW_WIDTH_PX (354px) with the destination
+    //    at depth 3 of a 4-deep chain (the same worst case AC-12 uses).
     //
-    //    Judgement call (round-7 review, evidence-based): the newly-truncated
-    //    band is real but narrow (a two-character window, only at the single
-    //    deepest/narrowest combination already tested elsewhere in this
-    //    suite) and every fix attempted for it (moving the marker out of flex
-    //    flow onto the icon) introduced its own layout regression elsewhere
-    //    (broke AC-13 by turning the icon's fixed-width wrapper into a
-    //    shrinkable flex item) — a worse, harder-to-spot failure than the one
-    //    being fixed. Recorded and left alone rather than carrying a change
-    //    that trades a narrow, cosmetic truncation for a structural layout
-    //    risk. This test locks in the CURRENT, measured behaviour so a future
-    //    change to this row's flex composition cannot silently make it worse
-    //    (e.g. widen the newly-truncated band, or start truncating names that
-    //    fit today) without failing here first.
-    it('N-9: measured — a highlighted destination\'s own name in the 7-8 character range newly truncates when the picker opens, at the worst-case narrow pane width; shorter and much longer names are unaffected', () => {
+    //    Round-9 update (add-child-button-spec.md): the depth-3 ancestor's
+    //    own card now ALSO carries the permanent add-child "+" control
+    //    (`.tc-actions`, `canAddChild="canHaveParent(t)"`, true for every
+    //    public device) — a second, always-on cost on the same row this test
+    //    measures, wired on after Xavier reviewed and accepted its measured
+    //    figure (target-card.component.html's `.tc-actions` comment). That
+    //    permanent cost is now baked into what "before the marker opens"
+    //    means here, so the boundary this test locks in shifted down by one
+    //    character from the round-7 measurement: available width is 53px
+    //    before any marker (was 67px pre-"+"-button), and 40px once the
+    //    marker also opens (was 55px). Names of 4-5 characters fit either
+    //    way; a 6-character name is the new single-character band where the
+    //    marker's own insertion is what tips it into ellipsis (53px fits,
+    //    40px doesn't); by 7+ characters the name is ALREADY truncated by
+    //    the permanent "+" button alone, before any marker ever opens, so
+    //    opening the marker changes nothing further for those lengths. This
+    //    is the accepted combined ceiling recorded in `N-ADD-CHILD`
+    //    (matrix-port-rules-correctness.spec.ts) and the `.tc-actions`
+    //    comment; this test locks in the CURRENT, measured behaviour so a
+    //    future change to this row's flex composition cannot silently make
+    //    it worse without failing here first.
+    it('N-9: measured — with the add-child button now permanent on this row, a highlighted destination\'s own name at exactly 6 characters newly truncates when the picker opens; shorter names are unaffected and 7+ character names are already truncated by the button alone', () => {
       const NARROW_LEFT_PANE_WIDTH_PX = 426; // matrix-run-panel.component.css .matrix-left-pane
       const HIER_TREE_INDENT_PER_LEVEL_PX = 18; // hierarchy-editor.component.html, marginLeft.px="depth * 18"
       const CHAIN_DEPTH_FOR_LAYOUT_TEST = 4; // same depth AC-12 uses
@@ -3493,28 +3493,43 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
         return { before, after };
       }
 
-      const short = measureNearestAncestorName(6);
-      expect(short.before.scroll).toBeLessThanOrEqual(short.before.client); // not truncated before
-      expect(short.after.scroll).toBeLessThanOrEqual(short.after.client); // unaffected — was already at the row's floor
+      // 4-5 characters: unaffected either way — available width (53px
+      // before the marker, 40px after) is still enough for these lengths.
+      const tiny = measureNearestAncestorName(4);
+      expect(tiny.before.scroll).toBeLessThanOrEqual(tiny.before.client);
+      expect(tiny.after.scroll).toBeLessThanOrEqual(tiny.after.client);
 
-      const boundary = measureNearestAncestorName(7);
+      const veryShort = measureNearestAncestorName(5);
+      expect(veryShort.before.scroll).toBeLessThanOrEqual(veryShort.before.client);
+      expect(veryShort.after.scroll).toBeLessThanOrEqual(veryShort.after.client);
+
+      // 6 characters: the new single-character boundary (was 7-8 before the
+      // add-child button existed on this row) — fits in the 53px available
+      // before any marker, but not in the 40px available once the marker
+      // also opens.
+      const boundary = measureNearestAncestorName(6);
       expect(boundary.before.scroll).toBeLessThanOrEqual(boundary.before.client); // fits before the picker opens
       expect(boundary.after.scroll).toBeGreaterThan(boundary.after.client); // measured: the marker's own insertion newly truncates it
 
-      // Round-8 review, Defect D-7: the title and the CSS comment both
-      // claimed the "7-8 character range" / "by 9+ characters" boundary
-      // without measuring 8 or 9 — only 6, 7 and 10 were ever run. Measured
-      // now so the claim matches what is actually asserted.
-      const boundary8 = measureNearestAncestorName(8);
-      expect(boundary8.before.scroll).toBeLessThanOrEqual(boundary8.before.client); // fits before the picker opens
-      expect(boundary8.after.scroll).toBeGreaterThan(boundary8.after.client); // newly truncated, same as 7
+      // 7+ characters: already truncated by the permanent add-child button
+      // alone, before any marker ever opens — opening the marker changes
+      // nothing further for these lengths (matches the pre-existing,
+      // accepted shape of this cue: it only ever shortens an
+      // already-truncated name further once truncation has already begun).
+      const seven = measureNearestAncestorName(7);
+      expect(seven.before.scroll).toBeGreaterThan(seven.before.client); // already truncated before the marker exists — by the button alone
+      expect(seven.after.scroll).toBeGreaterThan(seven.after.client);
+
+      const eight = measureNearestAncestorName(8);
+      expect(eight.before.scroll).toBeGreaterThan(eight.before.client);
+      expect(eight.after.scroll).toBeGreaterThan(eight.after.client);
 
       const nine = measureNearestAncestorName(9);
-      expect(nine.before.scroll).toBeGreaterThan(nine.before.client); // already truncated before the marker exists
+      expect(nine.before.scroll).toBeGreaterThan(nine.before.client);
 
       const long = measureNearestAncestorName(10);
-      expect(long.before.scroll).toBeGreaterThan(long.before.client); // already truncated before the marker exists
-      expect(long.after.scroll).toBeGreaterThan(long.after.client); // still truncated — the marker did not create this case
+      expect(long.before.scroll).toBeGreaterThan(long.before.client);
+      expect(long.after.scroll).toBeGreaterThan(long.after.client);
     });
 
     // ── S3 — the destination's own row is scrolled out of view ──
@@ -5137,6 +5152,1078 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
 
       expect(component.selectedDeckerId).toBe('Tesseract');
       expect(component.canConfirmAddMark).toBeTrue();
+    });
+  });
+
+  // ── mark-counter-control-spec.md (2026-09-10): dot control click-to-add / right-click-to-remove ──
+
+  describe('TargetCardComponent mark-dots control (mark-counter-control-spec.md, 2026-09-10)', () => {
+    let fixture: ComponentFixture<TargetCardComponent>;
+    let component: TargetCardComponent;
+    let matrixState: MatrixStateService;
+    let device: MatrixTarget;
+    let decker: MatrixParticipant;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [TargetCardComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(TargetCardComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      device = new MatrixTarget({ id: 'd1', name: 'Maglock', type: 'device', context: 'public' });
+      decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      device.marks['Tesseract'] = 2;
+      component.target = device;
+      component.host = null;
+      component.activeDeckers = [decker];
+      fixture.detectChanges();
+    });
+
+    function dotsBtn(): HTMLButtonElement {
+      return fixture.nativeElement.querySelector('.tc-dots-btn') as HTMLButtonElement;
+    }
+
+    // AC-1
+    it('AC-1: renders a focusable button showing ●●○, and clicking it adds one mark', () => {
+      const btn = dotsBtn();
+      expect(btn).toBeTruthy();
+      expect(btn.tagName).toBe('BUTTON');
+      expect(btn.querySelector('.tc-dots')?.textContent).toBe('●●○');
+      expect(btn.tabIndex).not.toBeLessThan(0);
+
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(device.marks['Tesseract']).toBe(3);
+    });
+
+    // AC-2
+    it('AC-2: right-clicking the dot control removes one mark and suppresses the native context menu', () => {
+      const btn = dotsBtn();
+      const evt = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      btn.dispatchEvent(evt);
+      fixture.detectChanges();
+
+      expect(device.marks['Tesseract']).toBe(1);
+      expect(evt.defaultPrevented).toBeTrue();
+    });
+
+    // AC-6
+    it('AC-6: a capped decker\'s dot control is disabled for add, carries a cap tooltip, and right-click still works', () => {
+      device.marks['Tesseract'] = MARK_CAP;
+      fixture.detectChanges();
+
+      const btn = dotsBtn();
+      expect(btn.disabled).toBeFalse(); // disabled tracks dotAddBlocked, not the per-decker cap
+      expect(btn.classList).toContain('tc-dots-capped');
+      expect(btn.title).toContain('maximum');
+
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(MARK_CAP); // add refused
+
+      btn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(MARK_CAP - 1); // remove unaffected by cap
+    });
+
+    // AC-7
+    it('AC-7: a decker with zero marks on this icon renders no dot control at all', () => {
+      device.marks['Tesseract'] = 0;
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('.tc-dots-btn')).toBeNull();
+    });
+
+    // Round-10 review, Defect 2
+    it('Defect 2: right-clicking an armed dot to remove a mark disarms it and clears the stale add-highlight', () => {
+      const highlights: (MarkHighlightRequest | null)[] = [];
+      component.propagationHighlightChange.subscribe(req => highlights.push(req));
+
+      const btn = dotsBtn();
+      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+      expect(component.armedDotDeckerId).toBe('Tesseract');
+      expect(highlights[highlights.length - 1]).not.toBeNull();
+
+      const evt = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      btn.dispatchEvent(evt);
+      fixture.detectChanges();
+
+      expect(device.marks['Tesseract']).toBe(1); // the remove itself still happened
+      expect(component.armedDotDeckerId).toBeNull();
+      expect(highlights[highlights.length - 1]).toBeNull();
+    });
+
+    // AC-12 (accessor purity, card-level half)
+    it('AC-12: reading blockedReasonFor()/armedDotDeckerId mutates no marks and emits nothing on stateChange$', () => {
+      const spy = jasmine.createSpy('stateChange');
+      const sub = matrixState.stateChange$.subscribe(spy);
+
+      void component.blockedReasonFor('Tesseract');
+      void component.armedDotDeckerId;
+
+      expect(device.marks['Tesseract']).toBe(2);
+      expect(spy).not.toHaveBeenCalled();
+      sub.unsubscribe();
+    });
+
+    // S3
+    it('S3: click then immediate right-click nets zero change', () => {
+      device.marks['Tesseract'] = 1;
+      fixture.detectChanges();
+
+      const btn = dotsBtn();
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(2);
+
+      btn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(1);
+    });
+
+    // S1
+    it('S1: two clicks increment to the cap, a third is a no-op and renders capped', () => {
+      device.marks['Tesseract'] = 1;
+      fixture.detectChanges();
+
+      dotsBtn().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(2);
+
+      dotsBtn().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(3);
+
+      dotsBtn().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(device.marks['Tesseract']).toBe(3);
+      expect(dotsBtn().classList).toContain('tc-dots-capped');
+    });
+
+    // Lifecycle: ngOnChanges clears a stranded armedDotDeckerId when the armed decker caps out
+    it('lifecycle: ngOnChanges disarms and emits lifecycleClear when the armed decker no longer has room', () => {
+      const clearSpy = jasmine.createSpy('lifecycleClear');
+      component.lifecycleClear.subscribe(clearSpy);
+
+      component.onDotRowEnter('Tesseract');
+      expect(component.armedDotDeckerId).toBe('Tesseract');
+
+      device.marks['Tesseract'] = MARK_CAP; // external write, then a benign @Input change to trigger ngOnChanges
+      component.ngOnChanges({});
+      fixture.detectChanges();
+
+      expect(component.armedDotDeckerId).toBeNull();
+      expect(clearSpy).toHaveBeenCalled();
+    });
+
+    // Lifecycle: ngOnChanges clears a stranded armedDotDeckerId on a target swap
+    it('lifecycle: ngOnChanges disarms and emits lifecycleClear when the target @Input is swapped', () => {
+      const clearSpy = jasmine.createSpy('lifecycleClear');
+      component.lifecycleClear.subscribe(clearSpy);
+
+      component.onDotRowEnter('Tesseract');
+      expect(component.armedDotDeckerId).toBe('Tesseract');
+
+      component.ngOnChanges({ target: new SimpleChange(device, device, false) });
+      fixture.detectChanges();
+
+      expect(component.armedDotDeckerId).toBeNull();
+      expect(clearSpy).toHaveBeenCalled();
+    });
+
+    // Lifecycle: ngOnDestroy clears a stranded armedDotDeckerId
+    it('lifecycle: ngOnDestroy emits lifecycleClear when armedDotDeckerId is set', () => {
+      const clearSpy = jasmine.createSpy('lifecycleClear');
+      component.lifecycleClear.subscribe(clearSpy);
+
+      component.onDotRowEnter('Tesseract');
+      component.ngOnDestroy();
+
+      expect(clearSpy).toHaveBeenCalled();
+    });
+  });
+
+  // ── HierarchyEditorComponent half: propagation highlight, host dots, mutual exclusion ──
+
+  describe('HierarchyEditorComponent mark-dots control (mark-counter-control-spec.md, 2026-09-10)', () => {
+    let fixture: ComponentFixture<HierarchyEditorComponent>;
+    let component: HierarchyEditorComponent;
+    let matrixState: MatrixStateService;
+    let decker: MatrixParticipant;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [HierarchyEditorComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(HierarchyEditorComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      component.activeDeckers = [decker];
+      fixture.detectChanges();
+    });
+
+    function cardFor(targetId: string): TargetCardComponent {
+      return fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === targetId)!;
+    }
+
+    function dotsBtnFor(targetId: string): HTMLButtonElement {
+      return fixture.nativeElement.querySelector(`[data-target-id='${targetId}'] .tc-dots-btn`) as HTMLButtonElement;
+    }
+
+    function buildChain(): { gun: MatrixTarget; mount: MatrixTarget; drone: MatrixTarget } {
+      const drone = new MatrixTarget({ id: 'dr', name: 'MCT Roto-Drone', type: 'device', context: 'public' });
+      const mount = new MatrixTarget({ id: 'mt', name: 'Weapon Mount', type: 'device', context: 'public', parentTargetId: 'dr' });
+      const gun = new MatrixTarget({ id: 'gn', name: 'Smartgun', type: 'device', context: 'public', parentTargetId: 'mt' });
+      gun.marks['Tesseract'] = 1;
+      matrixState.addTarget(null, drone);
+      matrixState.addTarget(null, mount);
+      matrixState.addTarget(null, gun);
+      fixture.detectChanges();
+      return { gun, mount, drone };
+    }
+
+    // AC-3, AC-4
+    it('AC-3/AC-4: hovering the dot control highlights ancestors exactly as opening +Mark would; mouseleave without a click clears it and commits nothing', () => {
+      const { gun, mount, drone } = buildChain();
+      const btn = dotsBtnFor('gn');
+
+      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(component.highlightStateFor('mt')).toBe('landing');
+      expect(component.highlightStateFor('dr')).toBe('landing');
+
+      const openPickerHighlight = matrixState.previewPropagation(gun, 'Tesseract').map(s => s.id).sort();
+      expect(openPickerHighlight).toEqual(['dr', 'mt'].sort());
+
+      // AC-4
+      btn.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(component.highlightStateFor('mt')).toBeNull();
+      expect(component.highlightStateFor('dr')).toBeNull();
+      expect(gun.marks['Tesseract']).toBe(1);
+      expect(mount.marks['Tesseract']).toBeFalsy();
+      expect(drone.marks['Tesseract']).toBeFalsy();
+    });
+
+    // AC-5, S2
+    it('AC-5/S2: clicking the dot control commits the propagated marks and clears the highlight immediately after', () => {
+      const { gun, mount, drone } = buildChain();
+      const btn = dotsBtnFor('gn');
+
+      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(gun.marks['Tesseract']).toBe(2);
+      expect(mount.marks['Tesseract']).toBe(1);
+      expect(drone.marks['Tesseract']).toBe(1);
+      expect(component.highlightStateFor('mt')).toBeNull();
+      expect(component.highlightStateFor('dr')).toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('.hier-prop-landing, .hier-prop-capped').length).toBe(0);
+    });
+
+    // AC-8
+    it('AC-8: a host\'s own dot control shows no propagation highlight; a device linked to that host does', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      const cam = new MatrixTarget({ id: 'cam', name: 'Camera', type: 'device', context: 'host', linkedHostId: 'h1' });
+      cam.marks['Tesseract'] = 1;
+      matrixState.addTarget(host, cam);
+      host.marks['Tesseract'] = 1;
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      // Host's own dot control: click adds a mark to the host directly, no highlight anywhere.
+      const hostBtn = fixture.nativeElement.querySelector('.hier-mark-dots-btn') as HTMLButtonElement;
+      hostBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(host.marks['Tesseract']).toBe(2);
+      expect(fixture.nativeElement.querySelectorAll('.hier-prop-landing, .hier-prop-capped').length).toBe(0);
+      expect(component.highlightStateFor(host.id)).toBeNull();
+
+      // The device's own dot control: hovering DOES show the highlight (AC-3), reaching the host.
+      // `cam` is nested inside a host, which does not carry `data-target-id`
+      // (only the public-space template does) — locate its card via the
+      // component instance instead.
+      const camCardDe = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .find(de => (de.componentInstance as TargetCardComponent).target.id === 'cam')!;
+      const camBtn = camCardDe.nativeElement.querySelector('.tc-dots-btn') as HTMLButtonElement;
+      camBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+
+      // A highlight now exists for the host (cam's dot control genuinely
+      // previews propagation) — landing/capped is incidental to this AC,
+      // which is about whether a highlight is shown at all for each control.
+      expect(component.highlightStateFor(host.id)).not.toBeNull();
+    });
+
+    // AC-9, S4
+    it('AC-9/S4: while a +Mark picker is armed elsewhere, an unrelated device\'s dot control is disabled and does not steal or close the open picker', () => {
+      const maglock = new MatrixTarget({ id: 'ml', name: 'Maglock', type: 'device', context: 'public' });
+      const camera = new MatrixTarget({ id: 'cm', name: 'Camera', type: 'device', context: 'public' });
+      camera.marks['Tesseract'] = 1;
+      matrixState.addTarget(null, maglock);
+      matrixState.addTarget(null, camera);
+      fixture.detectChanges();
+
+      const maglockCard = cardFor('ml');
+      maglockCard.openAddMark();
+      fixture.detectChanges();
+
+      expect(maglockCard.addMarkOpen).toBeTrue();
+      expect(maglockCard.selectedDeckerId).toBe('Tesseract');
+
+      const cameraBtn = dotsBtnFor('cm');
+      cameraBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(cameraBtn.disabled).toBeTrue();
+      // The armed picker on maglock stayed open and untouched.
+      expect(maglockCard.addMarkOpen).toBeTrue();
+      expect(maglockCard.selectedDeckerId).toBe('Tesseract');
+      expect(camera.marks['Tesseract']).toBe(1);
+
+      cameraBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(camera.marks['Tesseract']).toBe(1); // no-op: click also blocked
+
+      // Confirm the maglock picker; the camera control becomes clickable again.
+      maglockCard.confirmAddMark();
+      fixture.detectChanges();
+
+      const cameraBtnAfter = dotsBtnFor('cm');
+      expect(cameraBtnAfter.disabled).toBeFalse();
+      cameraBtnAfter.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(camera.marks['Tesseract']).toBe(2);
+    });
+
+    // Round-10 review, Defect 1: a hover-armed dot's later mouseleave must not
+    // wipe a propagation highlight it no longer owns.
+    it('Defect 1: an unrelated card\'s dot mouseleave, after ownership moved to a different open picker, does not clear that picker\'s highlight or close it', () => {
+      const maglock = new MatrixTarget({ id: 'ml', name: 'Maglock', type: 'device', context: 'public' });
+      const camera = new MatrixTarget({ id: 'cm', name: 'Camera', type: 'device', context: 'public' });
+      camera.marks['Tesseract'] = 1;
+      matrixState.addTarget(null, maglock);
+      matrixState.addTarget(null, camera);
+      fixture.detectChanges();
+
+      // 1. GM hovers camera's mark-dot — camera arms and becomes the highlight owner.
+      const cameraBtn = dotsBtnFor('cm');
+      cameraBtn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+      expect(cardFor('cm').armedDotDeckerId).toBe('Tesseract');
+      expect(component.markHighlight?.target.id).toBe('cm');
+
+      // 2. Without the mouse leaving camera's dot, the GM opens maglock's +Mark picker.
+      const maglockCard = cardFor('ml');
+      maglockCard.openAddMark();
+      fixture.detectChanges();
+
+      expect(maglockCard.addMarkOpen).toBeTrue();
+      expect(component.markHighlight?.target.id).toBe('ml');
+      // Ownership handoff silently disarmed camera's stale local arm.
+      expect(cardFor('cm').armedDotDeckerId).toBeNull();
+
+      // 3. The GM's mouse now leaves camera's dot — an ordinary, unrelated movement.
+      cameraBtn.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      fixture.detectChanges();
+
+      // 5. Expected: maglock's picker stays open with its highlight still showing.
+      expect(maglockCard.addMarkOpen).toBeTrue();
+      expect(component.markHighlight).not.toBeNull();
+      expect(component.markHighlight?.target.id).toBe('ml');
+    });
+
+    // Round-10 review, Defect 4: a host's own +Mark picker must not disable that
+    // same host's own dots.
+    it('Defect 4: a host\'s own open +Mark picker does not disable that host\'s own dot control', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      host.marks['Tesseract'] = 1;
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      component.openHostAddMark(host);
+      fixture.detectChanges();
+
+      const hostBtn = fixture.nativeElement.querySelector('.hier-mark-dots-btn') as HTMLButtonElement;
+      expect(hostBtn.disabled).toBeFalse();
+
+      hostBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(host.marks['Tesseract']).toBe(2);
+    });
+
+    // AC-10 (keyboard-only removal)
+    it('AC-10: the × button removes a mark via a keyboard-only Tab+Enter sequence, no mouse event', () => {
+      const device = new MatrixTarget({ id: 'd1', name: 'Maglock', type: 'device', context: 'public' });
+      device.marks['Tesseract'] = 1;
+      matrixState.addTarget(null, device);
+      fixture.detectChanges();
+
+      const rmBtn = fixture.nativeElement.querySelector(`[data-target-id='d1'] .tc-mark-rm`) as HTMLButtonElement;
+      rmBtn.focus();
+      rmBtn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      rmBtn.click(); // jsdom/Chrome does not auto-activate on keydown for a <button>; a real Enter key does via the UA's default action, exercised here as the button's own click()
+      fixture.detectChanges();
+
+      // removeMark() deletes the key entirely once the count reaches 0
+      // (matrix-state.service.ts), rather than leaving a stored 0.
+      expect(device.marks['Tesseract'] ?? 0).toBe(0);
+    });
+
+    // AC-11 (keyboard-only add)
+    it('AC-11: tabbing onto the dot control (focus, no mouse) shows the same highlight as hover, and Enter commits the add', () => {
+      const { gun, mount, drone } = buildChain();
+      const btn = dotsBtnFor('gn');
+
+      btn.focus();
+      btn.dispatchEvent(new Event('focus', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(component.highlightStateFor('mt')).toBe('landing');
+      expect(component.highlightStateFor('dr')).toBe('landing');
+
+      btn.click(); // Enter/Space activation on a focused native <button> fires 'click'
+      fixture.detectChanges();
+
+      expect(gun.marks['Tesseract']).toBe(2);
+      expect(mount.marks['Tesseract']).toBe(1);
+      expect(drone.marks['Tesseract']).toBe(1);
+    });
+
+    // AC-12 (accessor purity, host-level half)
+    it('AC-12: reading hostAddMarkBlockedReasonFor()/anyOtherPickerOpen() mutates no marks and emits nothing on stateChange$', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      host.marks['Tesseract'] = 1;
+      fixture.detectChanges();
+
+      const spy = jasmine.createSpy('stateChange');
+      const sub = matrixState.stateChange$.subscribe(spy);
+
+      void component.hostAddMarkBlockedReasonFor(host, 'Tesseract');
+      void component.anyOtherPickerOpen(null);
+
+      expect(host.marks['Tesseract']).toBe(1);
+      expect(spy).not.toHaveBeenCalled();
+      sub.unsubscribe();
+    });
+  });
+
+  // ── briefs/add-child-button-spec.md ─────────────────────────────────────
+  //
+  // HISTORY: Option A (the "+" living in `.tc-actions`, per Xavier's binding
+  // decision 1) was built and tested at the COMPONENT level
+  // (`TargetCardComponent`'s `canAddChild`/`addChild`, describe block below)
+  // through several rounds while it stayed unwired from
+  // `HierarchyEditorComponent`'s public-space card instantiation. Measured at
+  // EFFECTIVE_NARROW_WIDTH_PX (354px), the button's own width cost pushed a
+  // 6-character name into newly-truncated territory once combined with the
+  // existing propagation-marker cue on the same row — shorter than the 7-8
+  // character band Xavier had previously accepted as the ceiling for that
+  // marker (N-9). Per the brief's own instruction ("if the measured
+  // truncation reaches names shorter than the 7-8 character band already
+  // accepted, STOP and report the number — do not ship on the assumption it
+  // is fine"), this was reported rather than shipped at the time, and
+  // AC-1/AC-2/AC-3/AC-9/AC-10 (which require the rendered button as their
+  // trigger) were left unsatisfied and marked as such below rather than
+  // faked.
+  //
+  // RESOLVED 2026-09-10: Xavier reviewed the measured width cost and
+  // accepted it, moving the 6-character ceiling in place of the prior 7-8
+  // character band (see the N-9 note and `briefs/add-child-button.md`'s
+  // "Width decision — 2026-09-10" section). The "+" is now wired into
+  // `HierarchyEditorComponent`'s public-space card instantiation, and
+  // AC-1/AC-2/AC-3 are proven end-to-end through the rendered DOM in the
+  // describe block immediately below this one.
+  //
+  // What was already complete and tested at that time, unaffected by the
+  // wiring decision above: the render-anchor mechanism (`addChildOfId`),
+  // `openAddChildTarget()`, the node-specific form slot, the defensive
+  // top-level-slot guard, the cycle guard carried through unchanged, and the
+  // `parentDropWarning()` inline message — all of which are
+  // option-independent (they cost no row width and are reusable regardless
+  // of where the "+" control ends up). Those were exercised by calling
+  // `openAddChildTarget()` directly rather than by clicking a rendered "+"
+  // (there was none to click yet); this remains true for the AC-8/AC-9/AC-10
+  // scenarios below that predate the wiring.
+  describe('TargetCardComponent add-child control (Option A, component-level — briefs/add-child-button-spec.md)', () => {
+    let fixture: ComponentFixture<TargetCardComponent>;
+    let component: TargetCardComponent;
+    let matrixState: MatrixStateService;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [TargetCardComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+      fixture = TestBed.createComponent(TargetCardComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+    });
+
+    function mount(canAddChild: boolean): MatrixTarget {
+      const target = new MatrixTarget({ id: 'd1', name: 'Rigger Drone', type: 'device', context: 'public' });
+      matrixState.addTarget(null, target);
+      component.target = target;
+      component.host = null;
+      component.activeDeckers = [];
+      component.canAddChild = canAddChild;
+      fixture.detectChanges();
+      return target;
+    }
+
+    it('AC-1 (component level): canAddChild=true renders a "+"-labelled control in .tc-actions', () => {
+      mount(true);
+      // The button is icon-only (`<i class="fas fa-plus">`, no text node), so
+      // `expectVisibleText()` (which requires non-empty trimmed textContent)
+      // does not apply here — the brief's own AC-1 wording offers "direct
+      // querySelector" as the alternative for exactly this case. Presence in
+      // the real rendered DOM, not a component field, is still what is
+      // asserted.
+      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]');
+      expect(btn).withContext('expected the add-child control to be rendered').not.toBeNull();
+    });
+
+    it('canAddChild=false (the default) renders no add-child control — this is HierarchyEditorComponent\'s current, deliberate state', () => {
+      mount(false);
+      expectAbsent(fixture, '.tc-actions .tc-icon-btn[title="Add child device"]');
+      expect(component.canAddChild).toBeFalse(); // default, matching the @Input's declared default
+    });
+
+    it('clicking the control emits addChild exactly once, with no other side effect', () => {
+      mount(true);
+      const spy = jasmine.createSpy('addChild');
+      component.addChild.subscribe(spy);
+
+      const btn = fixture.nativeElement.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      btn.click();
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+  });
+
+  describe('HierarchyEditorComponent add-child render anchor and form (briefs/add-child-button-spec.md)', () => {
+    let fixture: ComponentFixture<HierarchyEditorComponent>;
+    let component: HierarchyEditorComponent;
+    let matrixState: MatrixStateService;
+    let drone: MatrixTarget;
+
+    beforeEach(async () => {
+      await TestBed.configureTestingModule({
+        imports: [HierarchyEditorComponent],
+        providers: appConfig.providers
+      }).compileComponents();
+
+      fixture = TestBed.createComponent(HierarchyEditorComponent);
+      component = fixture.componentInstance;
+      matrixState = TestBed.inject(MatrixStateService);
+      component.activeDeckers = [];
+
+      drone = new MatrixTarget({ id: 'drone1', name: 'Rigger Drone', type: 'device', context: 'public' });
+      matrixState.addTarget(null, drone);
+      fixture.detectChanges();
+    });
+
+    // ── AC-1/AC-2/AC-3 — now wired end-to-end (Xavier's decision,
+    // 2026-09-10). Previously only reachable at the component level
+    // (`TargetCardComponent`'s own describe block above); now asserted
+    // through the real rendered tree, per the DOM convention.
+
+    it('AC-1: a public-space device target renders a visible "+"-labelled control inside its card\'s action area', () => {
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      // Icon-only button (no text node) — direct querySelector, exactly as
+      // the brief's own AC-1 wording offers as the alternative to
+      // `expectVisibleText()` for this case.
+      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]');
+      expect(btn).withContext('expected the add-child control to be rendered on a public-space device').not.toBeNull();
+    });
+
+    it('AC-1 end-to-end: clicking the "+" opens the Add form inline under the clicked device', () => {
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      const btn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      btn.click();
+      fixture.detectChanges();
+
+      expect(component.targetForm.addChildOfId).toBe(drone.id);
+      const formEl = fixture.nativeElement.querySelector('.hier-form-target') as HTMLElement;
+      expect(formEl).not.toBeNull();
+      expect(droneNode.contains(formEl)).toBeTrue();
+    });
+
+    it('AC-2: a file, persona, or ic target — of any context — renders no add-child control', () => {
+      const file = new MatrixTarget({ id: 'file1', name: 'Paydata', type: 'file', context: 'public' });
+      const persona = new MatrixTarget({ id: 'persona1', name: 'NPC Persona', type: 'persona', context: 'public' });
+      matrixState.addTarget(null, file);
+      matrixState.addTarget(null, persona);
+      fixture.detectChanges();
+
+      const fileNode = fixture.nativeElement.querySelector("[data-target-id='file1']") as HTMLElement;
+      const personaNode = fixture.nativeElement.querySelector("[data-target-id='persona1']") as HTMLElement;
+      expect(fileNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+      expect(personaNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+
+      // "ic" targets only ever exist inside a host (never public space —
+      // TARGET_TYPES/the form's own Type dropdown only offers "ic" once a
+      // host is selected), so its no-control case is covered by AC-3's
+      // host-nested card below, which is icType's only reachable location.
+    });
+
+    it('AC-3: a device target whose context is "host" (inside a host, not the open grid) renders no add-child control, even though its type is "device"', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      const hostDevice = new MatrixTarget({ id: 'hd1', name: 'Camera', type: 'device', context: 'host', linkedHostId: host.id });
+      matrixState.addTarget(host, hostDevice);
+      const icTarget = new MatrixTarget({ id: 'ic1', name: 'Patrol IC Target', type: 'ic', context: 'host', linkedHostId: host.id });
+      matrixState.addTarget(host, icTarget);
+      component.toggleHost(host.id); // host targets only render once expanded
+      fixture.detectChanges();
+
+      // Host-nested cards have no `[data-target-id]` wrapper of their own
+      // (only the public-space tree's `publicTargetNodeTpl` adds one) — find
+      // the rendered card by its component instance instead.
+      function cardEl(targetId: string): HTMLElement {
+        return fixture.debugElement
+          .queryAll(By.directive(TargetCardComponent))
+          .find(de => (de.componentInstance as TargetCardComponent).target.id === targetId)!
+          .nativeElement as HTMLElement;
+      }
+
+      const hostDeviceEl = cardEl('hd1');
+      const icEl = cardEl('ic1');
+      expect(hostDeviceEl.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+      expect(icEl.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]')).toBeNull();
+    });
+
+    // Regression lock for the ACCEPTED width cost (Xavier's decision,
+    // 2026-09-10, after reviewing the measured figures below — see the
+    // comment on `.tc-actions`, target-card.component.html). Reproduces
+    // N-9's exact harness (depth-4 chain, EFFECTIVE_NARROW_WIDTH_PX = 354px)
+    // so the numbers are directly comparable to N-9's own, and locks in
+    // BOTH the button-alone cost and the compound (button + marker) cost as
+    // the new, accepted ceiling for this row — so an accidental future
+    // widening of `.tc-actions` (this control or a new one) fails this
+    // suite rather than silently regressing further, in the same style as
+    // N-9. `canAddChild` is asserted at its real, template-driven default
+    // (`[canAddChild]="canHaveParent(t)"`, now wired on) for the "with
+    // button" measurement, and forced to `false` only to reproduce the
+    // "before this feature existed" baseline for comparison — not because
+    // that is reachable through today's UI for a public-space device.
+    it('N-ADD-CHILD: measured and ACCEPTED — the add-child button squeezes a depth-3 ancestor\'s name from 67px to 53px available width alone (same band already accepted for the propagation marker), and to 40px combined with the marker on the same row, newly truncating a 6-character name — this is the new, accepted ceiling for this row', () => {
+      const NARROW_LEFT_PANE_WIDTH_PX = 426; // matrix-run-panel.component.css .matrix-left-pane
+      const HIER_TREE_INDENT_PER_LEVEL_PX = 18; // hierarchy-editor.component.html, marginLeft.px="depth * 18"
+      const CHAIN_DEPTH_FOR_LAYOUT_TEST = 4; // same depth N-9/AC-12 use
+      const EFFECTIVE_NARROW_WIDTH_PX =
+        NARROW_LEFT_PANE_WIDTH_PX - HIER_TREE_INDENT_PER_LEVEL_PX * CHAIN_DEPTH_FOR_LAYOUT_TEST; // 354px
+
+      function ancestorCard(tag: string): TargetCardComponent {
+        return fixture.debugElement
+          .queryAll(By.directive(TargetCardComponent))
+          .map(de => de.componentInstance as TargetCardComponent)
+          .find(c => c.target.id === `${tag}-t3`)!;
+      }
+
+      function buildChain(tag: string, nearestNameLength: number): void {
+        const names = ['Rooftop-Node', 'Relay-Station', 'Signal-Booster', 'N'.repeat(nearestNameLength)];
+        const chain = names.map((name, i) => new MatrixTarget({
+          id: `${tag}-t${i}`, name, type: 'device', context: 'public',
+          parentTargetId: i > 0 ? `${tag}-t${i - 1}` : undefined
+        }));
+        chain.forEach(t => matrixState.addTarget(null, t));
+        const clicked = new MatrixTarget({
+          id: `${tag}-clicked`, name: 'Clicked Device', type: 'device', context: 'public',
+          parentTargetId: `${tag}-t${chain.length - 1}`
+        });
+        matrixState.addTarget(null, clicked);
+        fixture.detectChanges();
+
+        const editorEl = fixture.nativeElement.querySelector('.hier-editor') as HTMLElement;
+        editorEl.style.width = `${EFFECTIVE_NARROW_WIDTH_PX}px`;
+        editorEl.style.overflow = 'hidden';
+        fixture.detectChanges();
+      }
+
+      // The button alone (no marker): the real, wired-on default
+      // (`canHaveParent(t)`, true for every public device) squeezes
+      // available width from 67px (forced off, reproducing the pre-feature
+      // baseline) to 53px — and on its own newly truncates a 7-character
+      // name, matching the same band already accepted for the marker.
+      const tagAlone = 'nac-7';
+      buildChain(tagAlone, 7);
+      const ancestorNodeAlone = fixture.nativeElement.querySelector(`[data-target-id='${tagAlone}-t3']`) as HTMLElement;
+
+      ancestorCard(tagAlone).canAddChild = false; // pre-feature baseline, not reachable via today's real UI
+      fixture.detectChanges();
+      const nameBefore = ancestorNodeAlone.querySelector('.tc-name') as HTMLElement;
+      expect(nameBefore.clientWidth).toBe(67);
+      expect(nameBefore.scrollWidth).toBeLessThanOrEqual(nameBefore.clientWidth); // fit before the button existed
+
+      ancestorCard(tagAlone).canAddChild = true; // real default, per canHaveParent(t)
+      fixture.detectChanges();
+      const nameAfter = ancestorNodeAlone.querySelector('.tc-name') as HTMLElement;
+      expect(nameAfter.clientWidth).toBe(53);
+      expect(nameAfter.scrollWidth).toBeGreaterThan(nameAfter.clientWidth); // newly truncated by the button alone — accepted, matches the marker's own band
+
+      // The compound, realistic worst case, now the ACCEPTED ceiling: this
+      // permanent button plus the existing propagation marker opened on the
+      // same row (a +Mark picker open elsewhere in the tree) — the actual
+      // scenario a GM mid-combat hits while placing a mark, not reading
+      // device names (Xavier's accepted reasoning). Available width drops
+      // to 40px, and a 6-character name — one character shorter than the
+      // marker-alone band — newly truncates. Locked in here as accepted,
+      // not flagged as a defect.
+      const tagCompound = 'nac-compound-6';
+      buildChain(tagCompound, 6);
+      // canAddChild is already true by default here (canHaveParent(t)); no
+      // override needed — this IS what a GM sees today.
+
+      const clickedCard = fixture.debugElement
+        .queryAll(By.directive(TargetCardComponent))
+        .map(de => de.componentInstance as TargetCardComponent)
+        .find(c => c.target.id === `${tagCompound}-clicked`)!;
+      const decker = new MatrixParticipant();
+      decker.name = 'Tesseract';
+      clickedCard.activeDeckers = [decker];
+      clickedCard.selectedDeckerId = 'Tesseract';
+      clickedCard.openAddMark();
+      fixture.detectChanges();
+
+      const ancestorNodeCompound = fixture.nativeElement.querySelector(`[data-target-id='${tagCompound}-t3']`) as HTMLElement;
+      const nameEl = ancestorNodeCompound.querySelector('.tc-name') as HTMLElement;
+      expect(nameEl.clientWidth).toBe(40);
+      expect(nameEl.scrollWidth).toBeGreaterThan(nameEl.clientWidth); // measured and accepted: newly truncated, the recorded ceiling for this row
+    });
+
+    it('opens an Add form defaulted to type "device", hostId null, with parentTargetId AND addChildOfId both seeded to the clicked device\'s id (AC-4 component half)', () => {
+      component.openAddChildTarget(drone);
+
+      expect(component.targetForm.active).toBeTrue();
+      expect(component.targetForm.isEditing).toBeFalse();
+      expect(component.targetForm.type).toBe('device');
+      expect(component.targetForm.hostId).toBeNull();
+      expect(component.targetForm.parentTargetId).toBe(drone.id);
+      expect(component.targetForm.addChildOfId).toBe(drone.id);
+    });
+
+    it('AC-4 DOM: the Parent <select> renders with the clicked device pre-selected', fakeAsync(() => {
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+      tick();
+      fixture.detectChanges();
+
+      const select = fixture.nativeElement.querySelector('#hier-target-parent') as HTMLSelectElement;
+      expect(select).withContext('expected the Parent <select> to be rendered').not.toBeNull();
+      // Re-assert the native selection explicitly rather than relying on
+      // `select.value` alone: ng-reflect-model confirms Angular wrote the
+      // right model value, but headless Chrome does not always reflect a
+      // `<select>`'s value back through the `HTMLOptionElement.selected`
+      // property in the same tick a dynamically-inserted matching `<option>`
+      // was added — read `selected` on the specific option instead, which is
+      // what a GM actually sees rendered (the option highlighted in the
+      // dropdown), rather than the possibly-stale `.value` getter.
+      const droneOption = Array.from(select.options).find(o => o.value === drone.id);
+      expect(droneOption).withContext('expected an <option> for the clicked device').not.toBeUndefined();
+      expect(droneOption?.selected).toBeTrue();
+      expect(droneOption?.textContent?.trim()).toBe(drone.name);
+    }));
+
+    it('AC-5: the Add form opened via openAddChildTarget(drone) renders inside drone\'s own tree node, not the top-of-Public-Space slot', () => {
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      const formEl = fixture.nativeElement.querySelector('.hier-form-target') as HTMLElement;
+      expect(formEl).not.toBeNull();
+      expect(droneNode.contains(formEl)).toBeTrue();
+    });
+
+    it('AC-6 / Scenario 1: saving the form creates a new device nested directly under the clicked device', () => {
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+
+      component.targetForm.name = 'Weapon Mount';
+      component.saveTargetForm();
+      fixture.detectChanges();
+
+      const created = matrixState.state.publicTargets.find(t => t.name === 'Weapon Mount');
+      expect(created).toBeDefined();
+      expect(created?.parentTargetId).toBe(drone.id);
+      expect(component.childrenOf(drone.id).map(t => t.id)).toEqual([created!.id]);
+    });
+
+    it('Scenario 1 continued: clicking + on the newly-created child nests a grandchild two levels under the original device', () => {
+      component.openAddChildTarget(drone);
+      component.targetForm.name = 'Weapon Mount';
+      component.saveTargetForm();
+      const mount = matrixState.state.publicTargets.find(t => t.name === 'Weapon Mount')!;
+
+      component.openAddChildTarget(mount);
+      component.targetForm.name = 'Smartgun';
+      component.saveTargetForm();
+      const gun = matrixState.state.publicTargets.find(t => t.name === 'Smartgun')!;
+
+      expect(gun.parentTargetId).toBe(mount.id);
+      expect(mount.parentTargetId).toBe(drone.id);
+      expect(component.childrenOf(mount.id).map(t => t.id)).toEqual([gun.id]);
+    });
+
+    it('AC-7 / Scenario 3: Cancel discards everything — no target created, and reopening + shows a fresh blank form', () => {
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+      component.targetForm.name = 'Abandoned Name';
+
+      const cancelBtn = fixture.nativeElement.querySelector('.hier-btn-cancel') as HTMLButtonElement;
+      cancelBtn.click();
+      fixture.detectChanges();
+
+      expect(matrixState.state.publicTargets.find(t => t.name === 'Abandoned Name')).toBeUndefined();
+
+      component.openAddChildTarget(drone);
+      expect(component.targetForm.name).toBe('');
+    });
+
+    it('AC-8 / Scenario 2: changing the pre-filled Parent dropdown to a different device before Save uses the new selection, not the pre-fill', () => {
+      const spareMount = new MatrixTarget({ id: 'spare1', name: 'Spare Mount', type: 'device', context: 'public' });
+      matrixState.addTarget(null, spareMount);
+      fixture.detectChanges();
+
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+      component.targetForm.name = 'Antenna';
+      component.onParentSelectionChange(spareMount.id);
+      component.saveTargetForm();
+
+      const created = matrixState.state.publicTargets.find(t => t.name === 'Antenna');
+      expect(created?.parentTargetId).toBe(spareMount.id);
+      expect(created?.parentTargetId).not.toBe(drone.id);
+    });
+
+    it('AC-8 continued: the render position stays under drone (per addChildOfId) even after the Parent dropdown is edited to a different device, while the form is still open', () => {
+      const spareMount = new MatrixTarget({ id: 'spare1', name: 'Spare Mount', type: 'device', context: 'public' });
+      matrixState.addTarget(null, spareMount);
+      fixture.detectChanges();
+
+      component.openAddChildTarget(drone);
+      fixture.detectChanges();
+      component.onParentSelectionChange(spareMount.id);
+      fixture.detectChanges();
+
+      expect(component.targetForm.addChildOfId).toBe(drone.id); // unmoved by the dropdown edit
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      const formEl = fixture.nativeElement.querySelector('.hier-form-target') as HTMLElement;
+      expect(droneNode.contains(formEl)).toBeTrue();
+    });
+
+    it('AC-9: opening Edit on an unrelated device closes the +-opened form with no target created', () => {
+      const other = new MatrixTarget({ id: 'other1', name: 'Unrelated Device', type: 'device', context: 'public' });
+      matrixState.addTarget(null, other);
+      fixture.detectChanges();
+
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      const addBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      addBtn.click();
+      fixture.detectChanges();
+      component.targetForm.name = 'Half-typed';
+      fixture.detectChanges();
+
+      // Pre-existing behaviour being pinned down, not new logic: clicking a
+      // rendered Edit button elsewhere, per the DOM-assertion convention for
+      // criteria about what the GM sees.
+      const otherNode = fixture.nativeElement.querySelector("[data-target-id='other1']") as HTMLElement;
+      const editBtn = otherNode.querySelector('.tc-actions .tc-icon-btn[title="Edit"]') as HTMLButtonElement;
+      editBtn.click();
+      fixture.detectChanges();
+
+      expect(matrixState.state.publicTargets.find(t => t.name === 'Half-typed')).toBeUndefined();
+      expect(droneNode.querySelector('.hier-form-target')).toBeNull(); // the +-opened form is gone from the drone's tree node
+      expect(component.targetForm.target).toBe(other);
+      expect(component.targetForm.addChildOfId).toBeNull(); // openEditTarget() never sets it
+    });
+
+    it('AC-10: the existing "+ Loose Device" Add still renders at the fixed top-of-Public-Space slot, unaffected by the new addChildOfId guard', () => {
+      component.openAddTarget(null, 'device');
+      fixture.detectChanges();
+
+      expect(component.targetForm.addChildOfId).toBeNull();
+      // The top-level slot (gated `isTargetFormForHost(null) && !targetForm.addChildOfId`) renders it.
+      const formsInTree = fixture.nativeElement.querySelectorAll('.hier-form-target');
+      expect(formsInTree.length).toBe(1);
+      // Not nested inside any device's own tree node.
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      expect(droneNode.contains(formsInTree[0])).toBeFalse();
+    });
+
+    it('AC-10: an ordinary Edit session (addChildOfId stays null) still renders at the fixed top-of-Public-Space slot too', () => {
+      component.openEditTarget(null, drone);
+      fixture.detectChanges();
+
+      expect(component.targetForm.addChildOfId).toBeNull();
+      const formsInTree = fixture.nativeElement.querySelectorAll('.hier-form-target');
+      expect(formsInTree.length).toBe(1);
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      expect(droneNode.contains(formsInTree[0])).toBeFalse();
+    });
+
+    it('Scenario 4 / cycle guard carried through unchanged: a child created via + still blocks a later cycle attempt through the ordinary Edit form', () => {
+      // A (unparented), B parented to A via the ordinary flow.
+      const a = drone;
+      const b = new MatrixTarget({ id: 'b1', name: 'B', type: 'device', context: 'public', parentTargetId: a.id });
+      matrixState.addTarget(null, b);
+      fixture.detectChanges();
+
+      // + on B creates C, nested under B — the new entry point.
+      component.openAddChildTarget(b);
+      component.targetForm.name = 'C';
+      component.saveTargetForm();
+      const c = matrixState.state.publicTargets.find(t => t.name === 'C')!;
+      expect(c.parentTargetId).toBe(b.id);
+
+      // Attempting to parent A under C (a would-be cycle: A -> B -> C -> A) must still be rejected.
+      component.openEditTarget(null, a);
+      fixture.detectChanges();
+      component.onParentSelectionChange(c.id);
+      component.saveTargetForm();
+
+      expect(a.parentTargetId).toBeUndefined(); // rejected — the whole save is blocked
+      expect(component.targetForm.parentError).toBe("Can't parent this under one of its own children.");
+    });
+
+    // ── Scenario 5 — live at the table, mid-combat ──
+    //
+    // "The GM taps + on the drone (visible without scrolling, since the
+    // drone's card was already on screen), the form opens directly beneath
+    // it, GM types 'Spare Mount,' taps Save. Expected: the new device
+    // appears immediately under the drone, in the GM's current viewport,
+    // with no scroll and no extra navigation."
+    //
+    // Now fully reachable end-to-end (the button is wired on): this test
+    // drives the real rendered "+", types into the real rendered Name
+    // input, and clicks the real rendered Save button — no component-field
+    // shortcuts. What is NOT (and cannot be) asserted here: that this is
+    // literally FEWER TAPS than the old create-then-Edit-then-set-Parent
+    // sequence — that is a comparison against a manual workflow this test
+    // suite has no automated equivalent of to count against; it is covered
+    // qualitatively in this change's own report, not as a numeric
+    // assertion.
+    it('Scenario 5: tapping + on an on-screen drone opens the form beneath it with no scroll, and Save lands the new device immediately under the drone in the same viewport', () => {
+      const editorEl = fixture.nativeElement.querySelector('.hier-editor') as HTMLElement;
+      const scrollTopBefore = editorEl.scrollTop;
+
+      const droneNode = fixture.nativeElement.querySelector("[data-target-id='drone1']") as HTMLElement;
+      const plusBtn = droneNode.querySelector('.tc-actions .tc-icon-btn[title="Add child device"]') as HTMLButtonElement;
+      plusBtn.click();
+      fixture.detectChanges();
+
+      // No scroll happened just from opening the form.
+      expect(editorEl.scrollTop).toBe(scrollTopBefore);
+
+      // The form is on screen, nested under the drone's own node — no
+      // separate navigation to a different part of the tree.
+      const nameInput = fixture.nativeElement.querySelector('#hier-target-name') as HTMLInputElement;
+      expect(droneNode.contains(nameInput)).toBeTrue();
+
+      nameInput.value = 'Spare Mount';
+      nameInput.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+
+      const saveBtn = fixture.nativeElement.querySelector('.hier-btn-save') as HTMLButtonElement;
+      saveBtn.click();
+      fixture.detectChanges();
+
+      const created = matrixState.state.publicTargets.find(t => t.name === 'Spare Mount');
+      expect(created?.parentTargetId).toBe(drone.id);
+      const createdNode = fixture.nativeElement.querySelector(`[data-target-id='${created?.id}']`) as HTMLElement;
+      expect(createdNode).withContext('expected the new device to render immediately, nested under the drone').not.toBeNull();
+      expect(droneNode.contains(createdNode)).toBeTrue();
+      expect(editorEl.scrollTop).toBe(scrollTopBefore); // still no scroll, end to end
+    });
+
+    // ── The silent-type-switch consequence (task's "one consequence the
+    // spec does not fully resolve") ──
+    describe('parentDropWarning() — the Type-switch-drops-parent consequence', () => {
+      it('is null for an ordinary device Add/Edit session with no buffered parent', () => {
+        component.openAddTarget(null, 'device');
+        expect(component.parentDropWarning()).toBeNull();
+      });
+
+      it('is null while the form still shows type "device", even with a buffered parent (the ordinary, unaffected case)', () => {
+        component.openAddChildTarget(drone);
+        expect(component.targetForm.type).toBe('device');
+        expect(component.parentDropWarning()).toBeNull();
+      });
+
+      it('warns once the GM switches Type away from "device" while a parent (from + or from the dropdown) is still buffered', () => {
+        component.openAddChildTarget(drone);
+        component.targetForm.type = 'file';
+
+        const warning = component.parentDropWarning();
+        expect(warning).not.toBeNull();
+        expect(warning).toContain(drone.name);
+      });
+
+      it('DOM: the warning renders visibly next to the Type field, using the app\'s existing inline-message vocabulary (.hier-form-error)', () => {
+        component.openAddChildTarget(drone);
+        fixture.detectChanges();
+
+        const typeSelect = fixture.nativeElement.querySelector('#hier-target-type') as HTMLSelectElement;
+        typeSelect.value = 'file';
+        typeSelect.dispatchEvent(new Event('change'));
+        fixture.detectChanges();
+
+        const message = expectVisibleText(fixture, '.hier-form-error');
+        expect(message).toContain(drone.name);
+      });
+
+      it('is null again once Type is switched back to "device"', () => {
+        component.openAddChildTarget(drone);
+        component.targetForm.type = 'file';
+        expect(component.parentDropWarning()).not.toBeNull();
+
+        component.targetForm.type = 'device';
+        expect(component.parentDropWarning()).toBeNull();
+      });
+
+      it('does not block Save — the device is created (as a file, unparented), matching the documented, now-visible consequence rather than a forced type', () => {
+        component.openAddChildTarget(drone);
+        component.targetForm.name = 'Loose File';
+        component.targetForm.type = 'file';
+        component.saveTargetForm();
+
+        const created = matrixState.state.publicTargets.find(t => t.name === 'Loose File');
+        expect(created).toBeDefined();
+        expect(created?.type).toBe('file');
+        expect(created?.parentTargetId).toBeUndefined();
+      });
+
+      it('is null for a host-nested target session (Parent field never applies there), even with a stray buffered parentTargetId', () => {
+        const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+        matrixState.addHost(host);
+        component.openAddTarget(host, 'device');
+        component.targetForm.parentTargetId = drone.id; // would never happen via real UI; defence in depth
+        component.targetForm.type = 'file';
+        expect(component.parentDropWarning()).toBeNull();
+      });
     });
   });
 });

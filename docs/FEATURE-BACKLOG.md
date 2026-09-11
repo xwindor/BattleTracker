@@ -345,3 +345,4 @@ is renumbered here.
   player view's transport-drop warning and the server's `gmConnected` presence
   signal end up saying similar things for different causes, so a player cannot
   tell "my connection dropped" from "the GM has left".
+- **N9's CSS comment cites superseded width figures.** `target-card.component.css:338-358`'s N-9 comment still says 67px/55px and "7-8 characters", but the tested reality since Xavier's Width decision (2026-09-10, `briefs/add-child-button.md`, "Width decision — 2026-09-10" section) is 53px/40px and a 6-character ceiling. Not fixed this round because another session was mid-edit in that same file; correct it the next time that file is safely editable by one session alone.

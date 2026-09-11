@@ -41,8 +41,14 @@
       <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: t, depth: 0 }"></ng-container>
       }
 
-      <!-- Target form: public space -->
-      @if (isTargetFormForHost(null)) {
+      <!-- Target form: public space. Defensive `!targetForm.addChildOfId`
+           guard (briefs/add-child-button-spec.md, "Affected paths" — Public
+           Space top-level slot): a session opened via `openAddChildTarget()`
+           must render ONLY at the node-specific slot below, never
+           simultaneously here too. Both `openAddTarget()` and
+           `openEditTarget()` leave `addChildOfId` at `null`, so Loose
+           Device Add and every Edit session are unaffected. -->
+      @if (isTargetFormForHost(null) && !targetForm.addChildOfId) {
       <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: null }"></ng-container>
       }
     </div>
@@ -182,7 +188,15 @@
         @for (entry of hostMarkEntries(host); track entry.deckerId) {
         <span class="hier-mark-entry">
           <span class="hier-mark-decker">{{ entry.deckerId }}</span>
-          <span class="hier-mark-dots">{{ dots(entry.count) }}</span>
+          <button type="button" class="hier-mark-dots-btn"
+            (click)="onHostDotClick(host, entry.deckerId)"
+            (contextmenu)="onHostDotRightClick($event, host, entry.deckerId)"
+            [disabled]="anyOtherPickerOpen(host.id)"
+            [class.hier-mark-dots-capped]="hostAddMarkBlockedReasonFor(host, entry.deckerId) !== null"
+            [attr.aria-label]="'Add 1 mark to ' + entry.deckerId + ' on this host; right-click to remove one'"
+            [title]="hostAddMarkBlockedReasonFor(host, entry.deckerId) ?? 'Click to add 1 mark; right-click to remove 1'">
+            <span class="hier-mark-dots">{{ dots(entry.count) }}</span>
+          </button>
           @if (host.propagatedMarks[entry.deckerId]) {
           <i class="fas fa-link hier-propagated-badge"
             ngbTooltip="At least one of these marks arrived by propagation from a slaved device on this host's WAN (p. 233), not a direct click here."
@@ -305,6 +319,7 @@
           [activeDeckers]="activeDeckers"
           [editing]="isEditingTarget(t)"
           [propagationDestination]="highlightStateFor(t.id)"
+          [dotAddBlocked]="anyOtherPickerOpen(t.id)"
           (editTarget)="openEditTarget(host, t)"
           (deleteTarget)="deleteTarget(host, t)"
           (cycleVisibilityRequested)="cycleVisibility(host, t)"
@@ -354,6 +369,17 @@
       <option value="ic">IC Target</option>
       }
     </select>
+    <!-- Xavier, add-child-button-spec.md, "One consequence the spec does
+         not fully resolve": switching Type away from "device" silently
+         drops a buffered Parent (whether pre-filled by "+" or picked by
+         hand) at Save time, and the Parent row itself is about to
+         disappear once Type is no longer "device" — so this warns BEFORE
+         that row is gone, using the same inline-message vocabulary as the
+         AC-8 rejection message (`.hier-form-error`) rather than a silent
+         drop. Does not block Save; canHaveParent() stays device-only. -->
+    @if (parentDropWarning()) {
+    <span class="hier-form-error">{{ parentDropWarning() }}</span>
+    }
   </div>
 
   @if (targetForm.type === 'device') {
@@ -443,18 +469,40 @@
     [activeDeckers]="activeDeckers"
     [editing]="isEditingTarget(t)"
     [propagationDestination]="highlightStateFor(t.id)"
+    [dotAddBlocked]="anyOtherPickerOpen(t.id)"
+    [canAddChild]="canHaveParent(t)"
     (editTarget)="openEditTarget(null, t)"
     (deleteTarget)="deleteTarget(null, t)"
     (cycleVisibilityRequested)="cycleVisibility(null, t)"
     (propagationHighlightChange)="onPropagationHighlightChange($event)"
     (pickerOpened)="onPickerOpened($event)"
-    (lifecycleClear)="onLifecycleClear()">
+    (lifecycleClear)="onLifecycleClear()"
+    (addChild)="openAddChildTarget(t)">
   </app-target-card>
+  <!-- `[canAddChild]="canHaveParent(t)"` (briefs/add-child-button-spec.md,
+       Xavier's decision 2026-09-10, after reviewing the measured cost
+       below): reuses the same device/public-space gate the Parent field
+       already uses, so a host-nested device (never reaching this template —
+       see the host-subsection card instantiation, which deliberately does
+       NOT bind `canAddChild`) structurally cannot show the control, with no
+       second copy of that condition. See `target-card.component.html`'s
+       `.tc-actions` comment for the accepted width-cost figures. -->
 
   <!-- Setting/clearing this target's parent moved into the shared target
        Edit/Add form (briefs/parent-picker-into-edit-view-spec.md) — the
        tree no longer shows a live Parent control. The tree's own nesting
        (childrenOf()/parentTargetId) still reflects the result. -->
+
+  <!-- Add-child form: renders inline, nested directly under the device
+       whose "+" was clicked (briefs/add-child-button-spec.md, Open
+       Decision 2 — inline rendering). `targetForm.addChildOfId === t.id`
+       is the render anchor set by `openAddChildTarget(t)`; it is fixed at
+       open time and does not move if the GM edits the Parent dropdown
+       inside the form (AC-8). Uses the same `targetFormTpl` the other two
+       fixed slots already use. -->
+  @if (isTargetFormForHost(null) && targetForm.addChildOfId === t.id) {
+  <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: null }"></ng-container>
+  }
 
   @for (child of childrenOf(t.id); track child.id) {
   <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: child, depth: depth + 1 }"></ng-container>

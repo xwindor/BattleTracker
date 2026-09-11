@@ -62,6 +62,18 @@ interface TargetFormState {
    * a stale message can never linger past the condition that caused it.
    */
   parentError: string | null;
+  /**
+   * Render anchor for a form opened via a device's "+" control
+   * (`briefs/add-child-button-spec.md`) — the id of the device this form was
+   * opened as a child of, or `null` for every other Add/Edit session
+   * (Loose Device, per-type host buttons, Edit). Deliberately distinct from
+   * `parentTargetId` above: this field only decides WHERE the form renders
+   * (`publicTargetNodeTpl`'s node-specific slot vs. the fixed top-of-
+   * Public-Space slot) and is fixed at open time; it must not move if the
+   * GM edits the Parent dropdown mid-session (AC-8), which only affects
+   * `parentTargetId`.
+   */
+  addChildOfId: string | null;
 }
 
 const BLANK_HOST_FORM: HostFormState = {
@@ -74,7 +86,7 @@ const BLANK_TARGET_FORM: TargetFormState = {
   active: false, isEditing: false, target: null, hostId: null,
   name: "", type: "device", visibility: "hidden",
   deviceRating: 4, linkedParticipantId: "", parentTargetId: "",
-  parentError: null
+  parentError: null, addChildOfId: null
 };
 
 /**
@@ -504,13 +516,42 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
       deviceRating: target.deviceRating,
       linkedParticipantId: target.linkedParticipantId ?? "",
       parentTargetId: target.parentTargetId ?? "",
-      parentError: null
+      parentError: null,
+      addChildOfId: null
     };
     this.hostForm = { ...BLANK_HOST_FORM };
   }
 
   closeTargetForm(): void {
     this.targetForm = { ...BLANK_TARGET_FORM };
+  }
+
+  /**
+   * Opens a fresh Add-device form pre-seeded as a child of `parentTarget`
+   * (`briefs/add-child-button-spec.md`), from the "+" control on a device's
+   * own card. Reuses `BLANK_TARGET_FORM` rather than duplicating
+   * `openAddTarget()`'s body, so both share one source of truth for what a
+   * fresh Add session defaults to. Always public space (`hostId: null`,
+   * `type: "device"`) — `canHaveParent()` only ever gates a public-space
+   * device, so a caller-supplied `parentTarget` is always one.
+   *
+   * Seeds two fields, deliberately different in nature: `parentTargetId` is
+   * the ordinary buffered Parent-dropdown value (editable, matches Save's
+   * existing commit path unchanged); `addChildOfId` is a separate render
+   * anchor recording where the form should appear, fixed at open time —
+   * changing the Parent dropdown afterwards must not move it (AC-8).
+   */
+  openAddChildTarget(parentTarget: MatrixTarget): void {
+    this.targetForm = {
+      ...BLANK_TARGET_FORM,
+      active: true,
+      hostId: null,
+      type: "device",
+      visibility: "hidden",
+      parentTargetId: parentTarget.id,
+      addChildOfId: parentTarget.id
+    };
+    this.hostForm = { ...BLANK_HOST_FORM };
   }
 
   /**
@@ -848,16 +889,86 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
    * Open Decision 1).
    */
   hostAddMarkBlockedReason(host: MatrixHost): string | null {
-    const s = this.getHostMarkState(host.id);
-    if (!s.selectedDeckerId) return "Pick a decker first";
-    if ((host.marks[s.selectedDeckerId] ?? 0) >= MARK_CAP) {
-      return `${s.selectedDeckerId} already holds the maximum ${MARK_CAP} marks on this host (p. 236)`;
+    return this.hostAddMarkBlockedReasonFor(host, this.getHostMarkState(host.id).selectedDeckerId);
+  }
+
+  /**
+   * Parameterized twin of `hostAddMarkBlockedReason()` — same relationship
+   * as `TargetCardComponent.blockedReasonFor()` has to
+   * `addMarkBlockedReason`: `hostAddMarkBlockedReason()` delegates here so
+   * the two definitions cannot drift (`briefs/mark-counter-control-spec.md`,
+   * affected-paths table D). The host's own dot row's decker is fixed by
+   * `hostMarkEntries()` and is not necessarily the picker's own
+   * `selectedDeckerId`.
+   */
+  hostAddMarkBlockedReasonFor(host: MatrixHost, deckerId: string): string | null {
+    if (!deckerId) return "Pick a decker first";
+    if ((host.marks[deckerId] ?? 0) >= MARK_CAP) {
+      return `${deckerId} already holds the maximum ${MARK_CAP} marks on this host (p. 236)`;
     }
     return null;
   }
 
   canConfirmHostAddMark(host: MatrixHost): boolean {
     return this.hostAddMarkBlockedReason(host) === null;
+  }
+
+  /**
+   * Host dots get the same click/right-click ergonomics as a device's own
+   * dot row, with **no** propagation preview — a host is never itself a
+   * propagation source (`collectPropagationStops()` only ever emits a host
+   * as a destination, never walks upward FROM one; matches
+   * `openHostAddMark()`'s existing no-preview behaviour). No-op if blocked
+   * elsewhere in the tree (`anyOtherPickerOpen()`) or if this decker is
+   * already capped on this host.
+   *
+   * Round-10 review, Defect 4: excludes `host.id`, matching the template's
+   * `[disabled]="anyOtherPickerOpen(host.id)"` (`html:188`) — a card
+   * excludes only its own id (`anyOtherPickerOpen(t.id)`), and a host row's
+   * dots must do the same, or this host's own OPEN `+Mark` picker would
+   * block this host's OWN dots even though nothing else in the tree has a
+   * picker open. Passing `null` here (no exclusion) while the template
+   * excludes `host.id` would also have desynced the two: the button would
+   * render enabled but silently no-op on click.
+   */
+  onHostDotClick(host: MatrixHost, deckerId: string): void {
+    if (this.anyOtherPickerOpen(host.id) || this.hostAddMarkBlockedReasonFor(host, deckerId) !== null) return;
+    this.matrixState.addMarkToHost(host, deckerId, 1);
+  }
+
+  /** Suppresses the native context menu on this control, then delegates to the existing, unchanged `removeHostMark()`. */
+  onHostDotRightClick(event: MouseEvent, host: MatrixHost, deckerId: string): void {
+    event.preventDefault();
+    this.removeHostMark(host, deckerId);
+  }
+
+  /**
+   * True when a `+Mark` picker — a card's own, or any host's own — is open
+   * and unconfirmed somewhere in the tree other than `excludeTargetId`
+   * (Open Decision 2, Option B, `briefs/mark-counter-control-spec.md`).
+   * Feeds each card's `dotAddBlocked` @Input (`excludeTargetId = t.id`, so a
+   * card's own picker does not block its own dots) and each host row's own
+   * dot-disabled state (`excludeTargetId = host.id`, so a host's own open
+   * `+Mark` picker does not block that same host's own dots — round-10
+   * review, Defect 4; a host never owns an id that could collide with a
+   * target's, so excluding `host.id` here is safe even though `hostMarkState`
+   * and `markHighlight.target` are keyed from two different id spaces).
+   *
+   * `markHighlight` is non-null only while some card's own picker is open
+   * AND unblocked (`TargetCardComponent.emitHighlight()` emits `null` for a
+   * blocked one), which is exactly the "armed, about to commit" state this
+   * method exists to guard against.
+   */
+  anyOtherPickerOpen(excludeTargetId: string | null): boolean {
+    if (this.markHighlight && this.markHighlight.target.id !== excludeTargetId) {
+      return true;
+    }
+    for (const [hostId, state] of this.hostMarkState) {
+      if (state.open && hostId !== excludeTargetId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -1144,6 +1255,35 @@ export class HierarchyEditorComponent implements OnInit, OnChanges, OnDestroy {
   onParentSelectionChange(parentId: string): void {
     this.targetForm.parentTargetId = parentId;
     this.targetForm.parentError = null;
+  }
+
+  /**
+   * Inline warning for a silent consequence the "+" child-add entry point
+   * makes newly reachable (`briefs/add-child-button-spec.md`, "One
+   * consequence the spec does not fully resolve"): the Type dropdown stays
+   * editable even after a form is seeded with a buffered `parentTargetId`
+   * (whether from a device's own Edit session or from `openAddChildTarget()`),
+   * but `commitParentField()` drops the buffered parent silently at Save
+   * time the moment `type !== "device"` — `canHaveParent()` is device-only.
+   * Once the GM switches Type away from "device", the Parent row itself
+   * stops rendering (`type === 'device'` gate on that row), so the GM has no
+   * other way to see that the parent they picked (or that was pre-filled
+   * by "+") is about to be thrown away. Returns `null` when there is nothing
+   * to warn about — most sessions.
+   *
+   * Deliberately not folded into `parentError`: that field reports a
+   * REJECTED Save attempt (a cycle) and blocks the whole save until fixed;
+   * this is a heads-up about an accepted save's actual outcome, shown before
+   * Save is even clicked, and never blocks anything — Xavier's decision was
+   * to surface it, not to force the type back to `device`
+   * (`canHaveParent()` stays device-only, unwidened).
+   */
+  parentDropWarning(): string | null {
+    const f = this.targetForm;
+    if (f.type === "device" || f.hostId !== null || !f.parentTargetId) return null;
+    const parent = this.state.publicTargets.find(t => t.id === f.parentTargetId);
+    const parentName = parent?.name ?? "the selected parent";
+    return `Saving as ${this.typeLabel(f.type)} will NOT nest this under ${parentName} — only a device can have a parent. It will appear at the top level.`;
   }
 
   setParent(target: MatrixTarget, parentId: string): void {

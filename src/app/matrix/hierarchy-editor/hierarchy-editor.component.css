@@ -721,6 +721,38 @@ input[type="number"]::-webkit-inner-spin-button {
   color: var(--matrix-text, #00ff9f);
 }
 
+/* Mark-dots control (`briefs/mark-counter-control-spec.md`): click adds 1
+   mark, right-click removes 1. Mirrors `target-card.component.css`'s
+   `.tc-dots-btn` — a native <button> reset to render identically to the
+   plain `.hier-mark-dots` span it replaces. */
+.hier-mark-dots-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hier-mark-dots-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Round-10 review, Defect 3: mirrors `target-card.component.css`'s
+   `.tc-dots-capped` — reuses the amber/dashed capped vocabulary instead of
+   a second, generic dim treatment for the same "capped" state. */
+.hier-mark-dots-capped {
+  cursor: not-allowed;
+  color: rgba(255, 179, 64, 0.9);
+  outline: 1px dashed rgba(255, 179, 64, 0.5);
+  outline-offset: 2px;
+}
+
+.hier-mark-dots-capped .hier-mark-dots {
+  color: rgba(255, 179, 64, 0.9);
+}
+
 .hier-mark-rm {
   background: transparent;
   border: none;

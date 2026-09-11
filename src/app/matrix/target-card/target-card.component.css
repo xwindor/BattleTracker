@@ -146,6 +146,40 @@
   font-size: 0.77rem;
 }
 
+/* Mark-dots control (`briefs/mark-counter-control-spec.md`): click adds 1
+   mark, right-click removes 1. Reset to render identically to the plain
+   `.tc-dots` span it replaces — a native <button> for Tab-reachability and
+   free Enter/Space activation (no touch gesture is built). */
+.tc-dots-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tc-dots-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Round-10 review, Defect 3: a capped decker (already at MARK_CAP on this
+   icon) reuses the same amber/dashed "capped" vocabulary `.tc-prop-capped`
+   already established below, rather than the generic dim `:disabled` above
+   — two different visual languages for "capped" on the same screen was the
+   defect. */
+.tc-dots-capped {
+  cursor: not-allowed;
+  color: rgba(255, 179, 64, 0.9);
+  outline: 1px dashed rgba(255, 179, 64, 0.5);
+  outline-offset: 2px;
+}
+
+.tc-dots-capped .tc-dots {
+  color: rgba(255, 179, 64, 0.9);
+}
+
 .tc-mark-rm {
   background: transparent;
   border: none;

@@ -1351,13 +1351,20 @@ What changes is **discoverability**, not the mechanic: the GM must be able to
 see that a mark on one icon also placed a mark somewhere else, before and
 after the fact.
 
-- **Before committing:** the `+Mark` control on a device indicates what it will
-  *also* mark by highlighting those icons in the hierarchy tree — amber for an
-  icon that will receive the mark, dimmed and outlined for one already at the
-  3-mark cap that will receive nothing — before the GM confirms
+- **Before committing:** the `+Mark` control and the mark-dots control both
+  indicate what a mark will also mark, by highlighting those icons in the
+  hierarchy tree, before the GM commits it — amber for an icon that will
+  receive the mark, dimmed and outlined for one already at the 3-mark cap
+  that will receive nothing
   (`HierarchyEditorComponent.highlightStateFor()`). Superseded the earlier
   text preview on 2026-09-05: the sentence could not fit the panel at
-  realistic nesting depths.
+  realistic nesting depths. Widened 2026-09-10
+  (`briefs/mark-counter-control-spec.md`) to name the mark-dots control
+  alongside `+Mark`: a naming fix only, since the dots control reuses the
+  same highlight mechanism and does not amend this ruling's substance. The
+  host's own dot control is the one exception — a host is never itself a
+  propagation source, so it shows no highlight, matching the host's own
+  `+Mark` control's existing behaviour.
 - **After the fact:** an icon whose current mark for a decker includes at
   least one that arrived by propagation shows a badge on that decker's mark
   row (`MatrixTarget.propagatedMarks` / `MatrixHost.propagatedMarks`),
