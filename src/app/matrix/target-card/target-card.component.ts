@@ -482,8 +482,38 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * `dotAddBlocked` (`briefs/mark-counter-control-spec.md`'s S4 exists
    * exactly to catch this).
    */
+  /**
+   * Whether this card's dot controls refuse to arm or commit an add.
+   *
+   * Two independent reasons, deliberately combined here rather than in the
+   * template so `onDotRowEnter()`/`onDotClick()` and the `[disabled]`
+   * binding can never disagree:
+   *
+   * - `dotAddBlocked` — a picker is open somewhere ELSE in the tree
+   *   (`HierarchyEditorComponent.anyOtherPickerOpen(t.id)`, Xavier's
+   *   Option B, `briefs/mark-counter-control.md` 2026-09-10).
+   * - `addMarkOpen` — THIS card's own `+Mark` picker is open. The editor's
+   *   `anyOtherPickerOpen()` cannot supply this: it detects an open card
+   *   picker by inspecting the shared `markHighlight`, and a hovered dot
+   *   sets that same highlight, so a card passing its own id is the only
+   *   thing keeping its dots from disabling themselves on hover. That
+   *   self-exclusion left the same-card case uncovered — with a picker open
+   *   on decker A, brushing decker B's dots on the SAME icon hijacked the
+   *   highlight to B, and the following ordinary `mouseleave` cleared it
+   *   entirely, leaving A's picker open, confirmable, and showing no
+   *   disclosure at the moment of commit (round-3 review, 2026-09-10).
+   *   `RULINGS.md` 2026-09-03 requires that disclosure, so the dots go
+   *   inert while this card's own picker owns the decision.
+   *
+   * Removal is deliberately NOT gated on this — `onDotRightClick()` stays
+   * live in both cases, per the spec's "removal is never blocked".
+   */
+  get dotAddDisabled(): boolean {
+    return this.dotAddBlocked || this.addMarkOpen;
+  }
+
   onDotRowEnter(deckerId: string): void {
-    if (this.dotAddBlocked) return;
+    if (this.dotAddDisabled) return;
     this.armedDotDeckerId = deckerId;
     if (this.blockedReasonFor(deckerId) === null) {
       this.propagationHighlightChange.emit({ target: this.target, deckerId });
@@ -524,7 +554,7 @@ export class TargetCardComponent implements OnChanges, OnDestroy {
    * first, and the clearing emit goes after.
    */
   onDotClick(deckerId: string): void {
-    if (this.dotAddBlocked || this.blockedReasonFor(deckerId) !== null) return;
+    if (this.dotAddDisabled || this.blockedReasonFor(deckerId) !== null) return;
     this.matrixState.addMark(this.target, deckerId);
     this.armedDotDeckerId = null;
     this.propagationHighlightChange.emit(null);

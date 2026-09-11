@@ -5651,6 +5651,54 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       expect(component.markHighlight?.target.id).toBe('ml');
     });
 
+    // Round-11 review: the same-card case Option B never covered. A card's own
+    // dots stayed live while that card's OWN +Mark picker was open (the editor's
+    // `anyOtherPickerOpen(t.id)` self-exclusion), so brushing an already-marked
+    // decker's dots hijacked the picker's highlight, and the ordinary mouseleave
+    // that followed wiped it — leaving the picker open, confirmable, and showing
+    // no disclosure at the moment of commit, which `RULINGS.md` 2026-09-03
+    // requires. Fixed locally on the card via `dotAddDisabled`, since the editor
+    // cannot supply this (it detects an open card picker through the shared
+    // `markHighlight`, which a hovered dot also sets).
+    it('a card\'s own open +Mark picker makes that card\'s own dots inert, so brushing them cannot strip the picker\'s disclosure', () => {
+      const sparky = new MatrixParticipant();
+      sparky.name = 'Sparky';
+      component.activeDeckers = [decker, sparky];
+
+      const maglock = new MatrixTarget({ id: 'ml', name: 'Maglock', type: 'device', context: 'public' });
+      maglock.marks['Tesseract'] = 1; // so Tesseract's dot row renders at all
+      matrixState.addTarget(null, maglock);
+      fixture.detectChanges();
+
+      // GM opens this card's own picker and selects a DIFFERENT decker.
+      const card = cardFor('ml');
+      card.openAddMark();
+      card.onSelectedDeckerChange('Sparky');
+      fixture.detectChanges();
+
+      expect(card.addMarkOpen).toBeTrue();
+      expect(component.markHighlight?.deckerId).toBe('Sparky');
+
+      // The GM's mouse brushes Tesseract's dots on the SAME card.
+      const btn = dotsBtnFor('ml');
+      expect(btn.disabled).toBeTrue();
+      btn.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      fixture.detectChanges();
+
+      // The dots must not arm, and must not steal the picker's highlight.
+      expect(card.armedDotDeckerId).toBeNull();
+      expect(component.markHighlight?.deckerId).toBe('Sparky');
+
+      // ...and the ordinary mouseleave that follows must not wipe it.
+      btn.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      fixture.detectChanges();
+
+      expect(card.addMarkOpen).toBeTrue();
+      expect(component.markHighlight).not.toBeNull();
+      expect(component.markHighlight?.deckerId).toBe('Sparky');
+      expect(card.canConfirmAddMark).toBeTrue();
+    });
+
     // Round-10 review, Defect 4: a host's own +Mark picker must not disable that
     // same host's own dots.
     it('Defect 4: a host\'s own open +Mark picker does not disable that host\'s own dot control', () => {
@@ -5669,6 +5717,48 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       hostBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       fixture.detectChanges();
       expect(host.marks['Tesseract']).toBe(2);
+    });
+
+    // Round-11: the host-row equivalents of AC-2 and AC-6 that the spec's own
+    // regression-risk table required ("AC-2, AC-6, AC-8 all have host-row
+    // equivalents") but which were never written — `onHostDotRightClick()` had
+    // zero coverage until now.
+    it('AC-2 (host row): right-clicking the host dot control removes one mark and suppresses the native context menu', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      host.marks['Tesseract'] = 2;
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      const hostBtn = fixture.nativeElement.querySelector('.hier-mark-dots-btn') as HTMLButtonElement;
+      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      hostBtn.dispatchEvent(ev);
+      fixture.detectChanges();
+
+      expect(host.marks['Tesseract']).toBe(1);
+      expect(ev.defaultPrevented).toBeTrue();
+    });
+
+    it('AC-6 (host row): a capped decker\'s host dot control refuses the add and is marked capped, while right-click still removes', () => {
+      const host = new MatrixHost({ id: 'h1', name: 'Ares-7', rating: 4 });
+      matrixState.addHost(host);
+      host.marks['Tesseract'] = MARK_CAP;
+      component.toggleHost(host.id);
+      fixture.detectChanges();
+
+      const hostBtn = fixture.nativeElement.querySelector('.hier-mark-dots-btn') as HTMLButtonElement;
+      expect(hostBtn.classList).toContain('hier-mark-dots-capped');
+      expect(component.hostAddMarkBlockedReasonFor(host, 'Tesseract')).not.toBeNull();
+
+      // Adding is refused — the cap holds (p. 236).
+      hostBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(host.marks['Tesseract']).toBe(MARK_CAP);
+
+      // Removal is never blocked by the cap.
+      hostBtn.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+      expect(host.marks['Tesseract']).toBe(MARK_CAP - 1);
     });
 
     // AC-10 (keyboard-only removal)

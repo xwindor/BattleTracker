@@ -632,6 +632,57 @@ never silently disarm a decision the GM hadn't made yet.
 
 ---
 
+## Round-11 fix — the same-card case Option B never covered (2026-09-11)
+
+Option B, as specified above, is written entirely as "a picker is open
+**elsewhere in the tree**", and `anyOtherPickerOpen(excludeTargetId)` was
+given a self-exclusion so a card's own dots stay live during its own picker.
+AC-9 only ever tested the elsewhere case. The same-card case — dots and
+picker side by side on one icon — was never specified, and was reachable:
+
+- Icon has decker A at 1 mark (dots render) and decker B at 0 (picker only).
+- GM opens the card's own `+Mark`, selects B. Highlight shows B's targets.
+- GM's mouse brushes A's dots on the **same card**. They were live, so the
+  highlight silently switched to A's propagation set while the dropdown
+  still said B.
+- The ordinary `mouseleave` that follows cleared the highlight entirely.
+- The picker was still open, `selectedDeckerId` still B, `canConfirmAddMark`
+  still true — so confirming committed B's mark, with propagation, showing
+  no disclosure at the moment of commit. `RULINGS.md` 2026-09-03 requires
+  that disclosure, so this was a real defect, not a cosmetic one.
+
+**Fix:** `TargetCardComponent.dotAddDisabled` — `dotAddBlocked ||
+addMarkOpen`. The card's dots refuse to arm or commit while the card's own
+picker is open. Removal (`onDotRightClick`) stays live, per "removal is
+never blocked".
+
+**Why this is card-local and not another editor parameter.** The obvious fix
+— dropping the self-exclusion so the dots pass `null` — breaks the feature
+outright: `anyOtherPickerOpen()` detects an open card picker by inspecting
+the shared `markHighlight`, and a hovered dot sets that same highlight, so a
+card passing `null` disables its own dots the instant it is hovered. The
+self-exclusion is load-bearing; the missing half is a card-local fact
+(`addMarkOpen`) the editor cannot supply. Do not "simplify" these back
+together.
+
+**AC-9 is therefore incomplete as written** — it covers only the elsewhere
+case. The same-card case is pinned by its own regression test in the
+`HierarchyEditorComponent mark-dots control` describe block ("a card's own
+open +Mark picker makes that card's own dots inert…"), verified to fail
+against the pre-fix code.
+
+**The host row keeps its self-exclusion** (`anyOtherPickerOpen(host.id)`,
+round-10 Defect 4) and is correct as-is: host dots carry no hover handlers
+and a host picker carries no highlight, so there is nothing on a host row to
+hijack.
+
+**Host-row coverage, also closed in round 11.** The regression-risk table
+above requires "AC-2, AC-6, AC-8 all have host-row equivalents"; only AC-8
+ever got one, leaving `onHostDotRightClick()` with zero tests. Both are now
+written ("AC-2 (host row)…", "AC-6 (host row)…"), each verified to fail
+against a gutted `onHostDotRightClick()`. That table's claim is true now;
+it was not when written.
+
 ## Open decisions
 
 ### 1. Click-adds-one vs. click-sets-count-to-N.

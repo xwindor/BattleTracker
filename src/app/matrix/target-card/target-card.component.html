@@ -99,7 +99,7 @@
         (blur)="onDotRowBlur(entry.deckerId)"
         (click)="onDotClick(entry.deckerId)"
         (contextmenu)="onDotRightClick($event, entry.deckerId)"
-        [disabled]="dotAddBlocked"
+        [disabled]="dotAddDisabled"
         [class.tc-dots-capped]="blockedReasonFor(entry.deckerId) !== null"
         [attr.aria-label]="'Add 1 mark to ' + deckerLabel(entry.deckerId) + '; right-click to remove one'"
         [title]="blockedReasonFor(entry.deckerId) ?? 'Click to add 1 mark; right-click to remove 1'">
