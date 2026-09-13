@@ -2084,9 +2084,17 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
     });
   });
 
-  // ── T4 — matrix-graph markDots (marks are per-persona, p. 236) ─────────
+  // ── T4 — matrix-graph markRows (marks are per-persona, p. 236) ─────────
+  //
+  // `markDots()` was replaced by `markRows()` in the graph-readability pass
+  // (`briefs/matrix-graph-readability-spec.md`, R1) — it now returns
+  // structured rows (`{ owner, initials, filled }`) instead of one flattened
+  // string, so the template can render filled+empty dots to `MARK_CAP` like
+  // every other mark display in the app. Every property these tests
+  // originally asserted is preserved below; see the spec's R1 table for the
+  // full migration mapping (AC-10, AC-7/AC-8, AC-9, AC-12, AC-11).
 
-  describe('MatrixGraphComponent.markDots (T4)', () => {
+  describe('MatrixGraphComponent.markRows (T4, AC-7/AC-8/AC-9/AC-10/AC-11/AC-12)', () => {
     let fixture: ComponentFixture<MatrixGraphComponent>;
     let component: MatrixGraphComponent;
 
@@ -2100,42 +2108,56 @@ describe('Matrix port rules correctness (briefs/matrix-port-rules-correctness-sp
       component = fixture.componentInstance;
     });
 
-    it('T4: three deckers with one mark each render distinguishably from one decker holding three', () => {
-      const threeDeckers = component.markDots({ A: 1, B: 1, C: 1 });
-      const oneDecker = component.markDots({ A: 3 });
-      expect(threeDeckers).not.toBe(oneDecker);
+    it('AC-10: three deckers with one mark each render distinguishably from one decker holding three', () => {
+      const threeDeckers = component.markRows({ A: 1, B: 1, C: 1 });
+      const oneDecker = component.markRows({ A: 3 });
+      expect(threeDeckers.length).toBe(3);
+      expect(oneDecker.length).toBe(1);
+      expect(threeDeckers).not.toEqual(oneDecker);
     });
 
-    it('T4: one decker with 3 marks renders as their initials plus three unbroken dots', () => {
-      expect(component.markDots({ A: 3 })).toBe('A●●●');
+    it('AC-7/AC-8: one decker with 3 marks renders as their initials, filled 3, and glyphs "●●●"', () => {
+      const rows = component.markRows({ A: 3 });
+      expect(rows.length).toBe(1);
+      expect(rows[0].initials).toBe('A');
+      expect(rows[0].filled).toBe(3);
+      expect(component.markGlyphs(rows[0])).toBe('●●●');
     });
 
-    it('T4: each decker\'s marks stay capped at 3 dots individually, even past the cap', () => {
-      expect(component.markDots({ A: 5 })).toBe('A●●●');
+    it('AC-9: each decker\'s marks stay capped at MARK_CAP dots individually, even past the cap', () => {
+      const rows = component.markRows({ A: 5 });
+      expect(rows.length).toBe(1);
+      expect(rows[0].filled).toBe(5); // the raw value is preserved...
+      expect(component.markGlyphs(rows[0])).toBe('●●●'); // ...but the glyph string is capped.
     });
 
-    it('T4: no marks renders an empty string', () => {
-      expect(component.markDots({})).toBe('');
-      expect(component.markDots({ A: 0 })).toBe('');
+    it('AC-12: no marks produces zero mark rows', () => {
+      expect(component.markRows({})).toEqual([]);
+      expect(component.markRows({ A: 0 })).toEqual([]);
     });
 
     // Round-4 defect D-6: an earlier version had no cap on the number of
     // decker-groups rendered and discarded the owner key entirely
     // (`Object.values`, not `Object.entries`) — five deckers at three marks
     // each rendered 19 unlabelled glyphs.
-    it('D-6: the owner key is visible — each group is prefixed with that decker\'s initials', () => {
-      const result = component.markDots({ Tesseract: 2, 'dev grrl': 1 });
-      expect(result).toContain('TE●●');
-      expect(result).toContain('DG●');
+    it('D-6/AC-7: the owner key is visible — each row carries that decker\'s initials', () => {
+      const rows = component.markRows({ Tesseract: 2, 'dev grrl': 1 });
+      expect(rows).toContain(jasmine.objectContaining({ initials: 'TE', filled: 2 }));
+      expect(rows).toContain(jasmine.objectContaining({ initials: 'DG', filled: 1 }));
     });
 
-    it('D-6: five deckers at three marks each is capped, not 19 unbroken glyphs', () => {
+    it('D-6/AC-11: five deckers at three marks each is capped at MARK_DOT_MAX_OWNERS rows plus one overflow row, not 19 unbroken glyphs', () => {
       const marks = { Alice: 3, Bob: 3, Carl: 3, Dana: 3, Eve: 3 };
-      const result = component.markDots(marks);
-      // MARK_DOT_MAX_OWNERS = 4 groups shown, the 5th folded into a "+1" summary.
-      expect(result).toContain('+1');
-      const dotCount = (result.match(/●/g) ?? []).length;
-      expect(dotCount).toBe(12); // 4 shown groups x 3 dots, not 5 x 3 = 15
+      const rows = component.markRows(marks);
+      // MARK_DOT_MAX_OWNERS = 4 rows shown, the 5th folded into a "+1" summary row.
+      expect(rows.length).toBe(5);
+      expect(rows[4].overflow).toBeTrue();
+      expect(rows[4].owner).toBe('+1');
+      const dotCount = rows
+        .map(r => component.markGlyphs(r))
+        .join('')
+        .split('').filter(ch => ch === '●').length;
+      expect(dotCount).toBe(12); // 4 shown rows x 3 dots, not 5 x 3 = 15
     });
   });
 

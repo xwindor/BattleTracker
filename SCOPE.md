@@ -119,3 +119,19 @@ than a few days of work, it needs splitting before it enters the pipeline.
      Example:
      - Should the app roll a decker's Matrix initiative automatically when they
        jack in, or wait for the GM to trigger the roll? DECIDED: wait. -->
+
+- When the player view gets a Matrix display, whose marks does a player see?
+  **DECIDED 2026-09-11: their own marks only.** A player sees the marks they
+  themselves hold, and nothing about marks held by other deckers, NPC deckers
+  or IC.
+
+  Why this and not "every mark on every icon they can see": whether a decker
+  can actually *discover* how many marks sit on an icon is a Matrix Perception
+  question, and rules facts have to come from a page-cited brief rather than
+  anyone's memory of the game. "Your own marks" needs no such answer — it is
+  bookkeeping handed back to the person it already belongs to. The broader
+  option stays open, but it has to go through the rules pipeline first.
+
+  Not yet built. The player view has no Matrix display of any kind today, and
+  no Matrix state is broadcast to players. This decision governs that work when
+  it happens — see `briefs/matrix-graph-readability.md` ("Increment 2").

@@ -51,16 +51,9 @@
 
     @if (publicSpaceExpanded) {
     <div class="hier-section-body">
-      @if (state.publicTargets.length === 0 && !isTargetFormForHost(null)) {
-      <div class="hier-empty">No loose devices. Click "+ Loose Device" to add one.</div>
-      }
-      <!-- Nested by parentTargetId (Decision 7b) — weapons/files parented to
-           a device out on the open grid render indented beneath it. -->
-      @for (t of childrenOf(null); track t.id) {
-      <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: t, depth: 0 }"></ng-container>
-      }
-
-      <!-- Target form: public space. Defensive `!targetForm.addChildOfId`
+      <!-- Target form: public space. Rendered ABOVE the list so a newly added
+           icon's form is visible without scrolling past every existing icon
+           (Xavier, 2026-09-12 tap-through). Defensive `!targetForm.addChildOfId`
            guard (briefs/add-child-button-spec.md, "Affected paths" — Public
            Space top-level slot): a session opened via `openAddChildTarget()`
            must render ONLY at the node-specific slot below, never
@@ -69,6 +62,15 @@
            Device Add and every Edit session are unaffected. -->
       @if (isTargetFormForHost(null) && !targetForm.addChildOfId) {
       <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: null }"></ng-container>
+      }
+
+      @if (state.publicTargets.length === 0 && !isTargetFormForHost(null)) {
+      <div class="hier-empty">No loose devices. Click "+ Loose Device" to add one.</div>
+      }
+      <!-- Nested by parentTargetId (Decision 7b) — weapons/files parented to
+           a device out on the open grid render indented beneath it. -->
+      @for (t of childrenOf(null); track t.id) {
+      <ng-container *ngTemplateOutlet="publicTargetNodeTpl; context: { $implicit: t, depth: 0 }"></ng-container>
       }
     </div>
     }
@@ -328,6 +330,13 @@
           </div>
         </div>
 
+        <!-- Target form: inside host. Rendered ABOVE the list so a newly added
+             icon's form is visible without scrolling past every icon already
+             in the host (Xavier, 2026-09-12 tap-through). -->
+        @if (isTargetFormForHost(host.id)) {
+        <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: host }"></ng-container>
+        }
+
         @if (host.targets.length === 0 && !isTargetFormForHost(host.id)) {
         <div class="hier-empty">No targets. Use the buttons above to add one.</div>
         }
@@ -346,11 +355,6 @@
           (pickerOpened)="onPickerOpened($event)"
           (lifecycleClear)="onLifecycleClear()">
         </app-target-card>
-        }
-
-        <!-- Target form: inside host -->
-        @if (isTargetFormForHost(host.id)) {
-        <ng-container *ngTemplateOutlet="targetFormTpl; context: { $implicit: host }"></ng-container>
         }
       </div>
 

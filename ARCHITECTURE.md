@@ -1799,9 +1799,8 @@ active. Session sync is a one-way derived broadcast layered on top:
   calls `syncSharedState()` at its end) or `syncSharedState()` directly.
 - `syncSharedState()` builds a `SharedCombatState` (`round`, `pass`,
   `started`, `passEnded`, `currentInitiative`, `participants` from
-  `getSharedParticipants()`, `oocParticipantCount`, `oocOwnership`, and the
-  front-loaded Matrix fields `matrixTargets` / `currentHostName`) and pushes it
-  via `sessionSync.broadcastState()` → `session:update-state` → server
+  `getSharedParticipants()`, `oocParticipantCount`, `oocOwnership`) and pushes
+  it via `sessionSync.broadcastState()` → `session:update-state` → server
   rebroadcasts as `session:state` to everyone in the room, including the GM
   tab that sent it.
 - `getSharedParticipants()` recomputes `order` as the post-filter array index

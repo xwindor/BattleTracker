@@ -359,3 +359,90 @@ is renumbered here.
   signal end up saying similar things for different causes, so a player cannot
   tell "my connection dropped" from "the GM has left".
 - **N9's CSS comment cites superseded width figures.** `target-card.component.css:338-358`'s N-9 comment still says 67px/55px and "7-8 characters", but the tested reality since Xavier's Width decision (2026-09-10, `briefs/add-child-button.md`, "Width decision — 2026-09-10" section) is 53px/40px and a 6-character ceiling. Not fixed this round because another session was mid-edit in that same file; correct it the next time that file is safely editable by one session alone.
+
+## Matrix: persona icons and IC marks are unreachable at the table
+
+Found by Xavier's tap-through of the Matrix graph readability work
+(2026-09-12, `briefs/matrix-graph-readability.md`). The graph correctly
+*displays* marks on a decker's own persona icon - AC-13 and S6 both prove it -
+but no GM workflow can actually produce that state. Two separate causes, both
+parked by Xavier's decision on 2026-09-12 to ship the graph work and take these
+later.
+
+- **`personaOwner` and `linkedParticipantId` are two fields for the same
+  concept, and they never meet.** The icon editor's "Decker Link" dropdown
+  (`hierarchy-editor.component.html`, shown when `targetForm.type === 'persona'`)
+  writes `targetForm.linkedParticipantId`, which reaches
+  `MatrixTarget.linkedParticipantId`. Nothing reads that field - grep returns
+  only its own declaration and constructor assignment. Meanwhile
+  `MatrixGraphComponent.buildGMNodes()` and
+  `MatrixStateService.eraseMarksForDecker()` both match on
+  `MatrixTarget.personaOwner`, which no UI ever writes.
+
+  Two consequences, both observed: a GM-created persona icon is never folded
+  into its decker's graph node, so it renders as a second, unattached icon
+  (and, inside a host, draws a containment line from the host to it); and
+  `eraseMarksForDecker()` silently fails to clear marks on that persona when
+  the decker jacks out, because it is matching a field the editor never set.
+
+  This is a reconciliation, not a new feature - decide which field is
+  authoritative and make the editor write it. Check whether
+  `linkedParticipantId`'s documented second purpose ("for IC and personas:
+  links to the initiative tracker entry") is a real requirement before
+  collapsing the two, since the doc comment claims an IC use that also has no
+  reader today.
+
+- **Only jacked-in player deckers can own a mark.** `TargetCardComponent`'s
+  mark picker is populated by `get availableDeckers()`, which is
+  `activeDeckers` filtered for a non-empty name and room under `MARK_CAP`.
+  `activeDeckers` is the jacked-in player deckers, so there is no way to record
+  a mark placed *by* IC or an NPC decker on anything - including on a player's
+  own persona, which is the single most common case the graph's persona-mark
+  display exists to show.
+
+  Recording who placed a mark is bookkeeping, not rules resolution - the GM
+  decides whether the IC succeeded, the app only stores the outcome - so this
+  stays inside SCOPE.md's "GM resolves, the app records" line. It is still a
+  real change to what the mark model can express: it would touch the picker's
+  source list, the per-owner cap logic, `eraseMarksForDecker()`'s assumptions,
+  and the graph's `MARK_DOT_MAX_OWNERS` overflow behaviour once non-decker
+  owners can appear.
+
+Neither is a defect in the graph work itself, which renders correctly whatever
+marks it is given. They are the reason that feature cannot currently be
+exercised.
+
+## Matrix graph: loose ends from the readability pass (2026-09-12)
+
+Small items left open when the graph readability work shipped
+(`briefs/matrix-graph-readability.md`). None blocks table use; recorded so they
+are not rediscovered as if new.
+
+- **The dead `⚡` direct-connection overlay keeps an inline `font-size="10"`,
+  below the graph's 11px legibility floor.** Sanctioned, not an oversight -
+  Xavier's Decision 7 (2026-09-11) was to leave that control entirely alone
+  until the direct-connection workflow is built. It cannot render today: GM
+  mode always sets `directConnection: false`, and the only field that could
+  carry it (`SharedMatrixTarget.directConnection`) has no producer. Whoever
+  wires that control up must also raise its font size, or it will ship as the
+  one unreadable thing on an otherwise legible graph. Do **not** "fix" it by
+  driving it from `MatrixHost.accessMethod` - that is a host-level fact and
+  this is a per-icon glyph.
+
+- **Unproven resize-oscillation risk at the 70vh scroll cap.** When the graph
+  grows past `max-height: 70vh` a scrollbar appears, which can consume a few
+  pixels of width, which the `ResizeObserver` sees as a width change. The
+  round-3 reviewer traced the guard in `applyMeasuredWidth()` - it rebuilds
+  only when the *clamped* width actually changes - and could not make it loop
+  by reasoning, but did not reproduce it in a real browser either. If a GM ever
+  reports the graph flickering or juddering at a particular host size, this is
+  the first place to look.
+
+- **The icon editor's above-the-list position has no automated test.** The form
+  was moved above the icon list in both the public-space and inside-host slots
+  (`hierarchy-editor.component.html`, 2026-09-12) so a newly added icon's form
+  is reachable without scrolling. The full suite passes, but nothing asserts
+  the DOM ordering, so a future template edit could silently move it back. A
+  DOM-order assertion would pin it. Note the third form slot - the "add child
+  of" inline case - is deliberately still rendered beneath its parent icon,
+  because there the position carries meaning about where the new icon lands.

@@ -3,7 +3,7 @@ import { CommonModule } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { NgbModal, NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
 import { MatrixParticipant, MatrixHost, HostAccessMethod } from "Matrix";
-import { MatrixStateService } from "app/services/matrix-state.service";
+import { MatrixStateService, MARK_CAP } from "app/services/matrix-state.service";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { OsPromptComponent } from "app/matrix/os-prompt/os-prompt.component";
 
@@ -18,6 +18,9 @@ type AccessFlow = "none" | "hack-on-fly" | "brute-force";
 })
 export class AccessHostPanelComponent implements OnChanges {
   @Input({ required: true }) activeDeckers!: MatrixParticipant[];
+
+  /** Template-facing re-export so the mark-cap fraction reads from one place (`matrix-state.service.ts`). */
+  readonly MARK_CAP = MARK_CAP;
 
   flow: AccessFlow = "none";
   selectedDeckerId = "";
@@ -112,7 +115,7 @@ export class AccessHostPanelComponent implements OnChanges {
   get marksThatWillLand(): number {
     if (this.marksThisAttempt === null) return 0;
     const current = this.currentHostMarksForSelectedDecker;
-    return Math.min(3, current + this.marksThisAttempt) - current;
+    return Math.min(MARK_CAP, current + this.marksThisAttempt) - current;
   }
 
   /** Whether Apply may be pressed — mirrors `OsPromptComponent.canApply`'s "an empty box is not a deliberate 0" rule (Decision 6, 2026-09-02). */

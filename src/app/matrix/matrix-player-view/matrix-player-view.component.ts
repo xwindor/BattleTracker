@@ -2,6 +2,7 @@ import { Component, Input } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { NgbTooltipModule } from "@ng-bootstrap/ng-bootstrap";
 import { SharedMatrixTarget } from "app/services/session-sync.service";
+import { MARK_CAP } from "app/services/matrix-state.service";
 
 @Component({
   standalone: true,
@@ -51,9 +52,9 @@ export class MatrixPlayerViewComponent {
     }
   }
 
-  /** Dot string for up to 3 marks. */
+  /** Dot string for up to `MARK_CAP` marks. */
   dots(count: number): string {
-    return "●".repeat(count) + "○".repeat(Math.max(0, 3 - count));
+    return "●".repeat(count) + "○".repeat(Math.max(0, MARK_CAP - count));
   }
 
   typeIcon(type: string): string {

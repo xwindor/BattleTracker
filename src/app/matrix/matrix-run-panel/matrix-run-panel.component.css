@@ -189,23 +189,35 @@
 
 .matrix-two-pane {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* The graph moved to its own full-width row below (Decision 5,
+     briefs/matrix-graph-readability-spec.md §6) — this pane no longer has a
+     right column to size against. */
+  grid-template-columns: 1fr;
   gap: 0.5rem;
   min-height: 140px;
 }
 
-@media (max-width: 900px) {
-  .matrix-two-pane {
-    grid-template-columns: 1fr;
-  }
-}
-
-.matrix-left-pane,
-.matrix-right-pane {
+.matrix-left-pane {
   border: 1px solid var(--matrix-border, #1a4a1a);
   border-radius: 3px;
   background: var(--matrix-bg-mid, #040f04);
   overflow: hidden;
+}
+
+/* ── Node graph row (Decision 5) ─────────────────────────────────────────── */
+
+.matrix-graph-row {
+  border: 1px solid var(--matrix-border, #1a4a1a);
+  border-radius: 3px;
+  background: var(--matrix-bg-mid, #040f04);
+  overflow: hidden;
+}
+
+/* Grows with the graph up to 70vh, then scrolls rather than pushing the
+   initiative order off screen (Decision 6). */
+.mgn-scroll {
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
 .pane-header {
@@ -311,34 +323,3 @@
   border-bottom-color: var(--matrix-border, #1a4a1a);
 }
 
-/* ── Right pane: graph stub ──────────────────────────────────────────────── */
-
-.graph-stub {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  height: calc(100% - 28px);  /* subtract pane-header height */
-  min-height: 100px;
-  color: #1e3a1e;
-  padding: 1rem;
-}
-
-.graph-stub-icon {
-  font-size: 2rem;
-  color: #1e3a1e;
-}
-
-.graph-stub-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #2a5a2a;
-  letter-spacing: 0.05em;
-}
-
-.graph-stub-sub {
-  font-size: 0.65rem;
-  color: #1e3a1e;
-  font-style: italic;
-}

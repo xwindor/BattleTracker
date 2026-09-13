@@ -7,7 +7,10 @@
   border-radius: 4px;
   overflow: hidden;
   transition: background-color 0.7s ease;
-  min-height: 300px;
+  /* R3: was a flexbox min-height fighting the SVG's own flex-grow. The SVG
+     now has an intrinsic height (svgH, §1), so the container just needs a
+     floor that matches the graph's own minimum. */
+  min-height: 300px; /* GRAPH_MIN_HEIGHT, matrix-graph.component.ts */
 }
 
 .mgn-container.mgn-in-host {
@@ -78,15 +81,16 @@
 
 /* ── SVG canvas ──────────────────────────────────────────────────────── */
 
+/* Rendered 1:1 (§1): width/height come from svgW/svgH, not the box the
+   container happens to have, so `width: 100%`/`flex: 1` would fight the
+   SVG's own intrinsic size and must not be reintroduced (R3). */
 .mgn-svg {
-  width: 100%;
-  flex: 1;
   display: block;
 }
 
 /* Canvas host label (inside-host header) */
 .mgn-canvas-host-label {
-  font-size: 11px;
+  font-size: 15px;
   fill: #4040aa;
   letter-spacing: 0.08em;
   font-weight: 600;
@@ -128,19 +132,26 @@
   50%       { opacity: 1;    }
 }
 
+/* ── Edges (Decision 3) ─────────────────────────────────────────────── */
+
+.mgn-edge {
+  stroke: #1e3a4a;
+  stroke-width: 1.25;
+}
+
 /* ── Node text ───────────────────────────────────────────────────────── */
 
 .mgn-node-symbol {
-  font-size: 14px;
+  font-size: 20px;
   fill: #5a8aaa;
   pointer-events: none;
   user-select: none;
 }
 
-.mgn-host         .mgn-node-symbol { fill: #3070c0; font-size: 17px; }
+.mgn-host         .mgn-node-symbol { fill: #3070c0; font-size: 24px; }
 .mgn-device       .mgn-node-symbol { fill: #207080; }
 .mgn-file         .mgn-node-symbol { fill: #508030; }
-.mgn-persona-me   .mgn-node-symbol { fill: #00c8a0; font-size: 16px; }
+.mgn-persona-me   .mgn-node-symbol { fill: #00c8a0; font-size: 22px; }
 .mgn-persona-other .mgn-node-symbol { fill: #808080; }
 .mgn-ic           .mgn-node-symbol { fill: #cc4444; }
 .mgn-unknown      .mgn-node-symbol { fill: #404040; }
@@ -149,7 +160,8 @@
 .mgn-vis-running-silent .mgn-node-symbol { fill: #505050; }
 
 .mgn-node-label {
-  font-size: 9px;
+  font-size: 13px;
+  font-weight: 600;
   fill: #8aacbf;
   pointer-events: none;
   user-select: none;
@@ -160,20 +172,21 @@
 }
 
 .mgn-node-sublabel {
-  font-size: 7.5px;
+  font-size: 11px;
   fill: #3a5568;
   pointer-events: none;
   user-select: none;
 }
 
-.mgn-mark-dots {
-  font-size: 8px;
+.mgn-mark-row {
+  font-size: 12px;
   fill: #c07030;
   pointer-events: none;
   user-select: none;
 }
 
 .mgn-vis-badge {
+  font-size: 13px;
   fill: #7aacbf;
   pointer-events: none;
   user-select: none;
@@ -204,3 +217,4 @@
 .mgn-leg-file         { color: #508030; }
 .mgn-leg-ic           { color: #cc4444; }
 .mgn-leg-unknown      { color: #505050; }
+.mgn-leg-marks        { color: #c07030; }

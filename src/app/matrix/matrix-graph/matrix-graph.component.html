@@ -24,8 +24,9 @@
   </div>
   } @else {
   <svg class="mgn-svg"
-    [attr.viewBox]="'0 0 ' + svgW + ' ' + svgH"
-    preserveAspectRatio="xMidYMid meet">
+    [attr.width]="svgW"
+    [attr.height]="svgH"
+    [attr.viewBox]="'0 0 ' + svgW + ' ' + svgH">
 
     <!-- ── Background grid ─────────────────────────────────────────── -->
     <defs>
@@ -33,13 +34,20 @@
         <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(0,200,160,0.06)" stroke-width="0.5"/>
       </pattern>
     </defs>
-    <rect width="800" height="460" fill="url(#mgGrid)"/>
+    <rect [attr.width]="svgW" [attr.height]="svgH" fill="url(#mgGrid)"/>
 
     <!-- ── Host label (inside-host view) ───────────────────────────── -->
     @if (insideHost) {
-    <text class="mgn-canvas-host-label" x="400" y="20" text-anchor="middle">
+    <text class="mgn-canvas-host-label" [attr.x]="svgW / 2" y="20" text-anchor="middle">
       {{ hostLabel }}
     </text>
+    }
+
+    <!-- ── Edges (Decision 3) — drawn before nodes so nodes paint on top ── -->
+    @for (edge of edges; track edge.fromId + '->' + edge.toId) {
+    <line class="mgn-edge"
+      [attr.x1]="nodeById(edge.fromId)?.x ?? 0" [attr.y1]="nodeById(edge.fromId)?.y ?? 0"
+      [attr.x2]="nodeById(edge.toId)?.x ?? 0" [attr.y2]="nodeById(edge.toId)?.y ?? 0"/>
     }
 
     <!-- ── Nodes ───────────────────────────────────────────────────── -->
@@ -55,43 +63,48 @@
         {{ nodeSymbol(node) }}
       </text>
 
-      <!-- Direct-connection plug overlay -->
+      <!-- Direct-connection plug overlay. Dead pending the direct-connection
+           workflow (Decision 7, briefs/matrix-graph-readability-spec.md):
+           GM mode never sets `node.directConnection`, so this never renders
+           today. Left as-is on purpose — do not wire it from
+           `MatrixHost.accessMethod`, a host-level fact, as if it were a
+           per-icon one (SQ-3). -->
       @if (node.directConnection) {
       <text class="mgn-dc-overlay" x="14" y="-14" text-anchor="middle" font-size="10">⚡</text>
       }
 
       <!-- GM visibility badge -->
       @if (gmMode) {
-      <text class="mgn-vis-badge" [attr.x]="nodeRadius(node) - 4" [attr.y]="-nodeRadius(node) + 4"
-        text-anchor="middle" font-size="10">
+      <text class="mgn-vis-badge" [attr.x]="visBadgeX(node)" [attr.y]="visBadgeY(node)"
+        text-anchor="middle">
         {{ visBadge(node) }}
       </text>
       }
 
       <!-- Name label -->
       @if (node.visibility !== 'running-silent' || gmMode) {
-      <text class="mgn-node-label" [attr.y]="nodeRadius(node) + 14"
+      <text class="mgn-node-label" [attr.y]="nodeLabelY(node)"
         text-anchor="middle">
         {{ node.label }}
       </text>
       } @else {
-      <text class="mgn-node-label mgn-label-ghost" [attr.y]="nodeRadius(node) + 14"
+      <text class="mgn-node-label mgn-label-ghost" [attr.y]="nodeLabelY(node)"
         text-anchor="middle">■ Unknown</text>
       }
 
       <!-- Sub-label (type / visibility) -->
       @if (node.subLabel) {
-      <text class="mgn-node-sublabel" [attr.y]="nodeRadius(node) + 25"
+      <text class="mgn-node-sublabel" [attr.y]="nodeSubLabelY(node)"
         text-anchor="middle">
         {{ node.subLabel }}
       </text>
       }
 
-      <!-- Mark dots -->
-      @if (markDots(node.marks)) {
-      <text class="mgn-mark-dots" [attr.y]="nodeRadius(node) + 36"
+      <!-- Mark rows — one per decker holding a mark on this icon (§4). -->
+      @for (row of markRows(node.marks); track row.owner; let i = $index) {
+      <text class="mgn-mark-row" [attr.y]="markRowY(node, i)"
         text-anchor="middle">
-        {{ markDots(node.marks) }}
+        {{ markRowText(row) }}
       </text>
       }
 
@@ -109,6 +122,7 @@
     <span class="mgn-leg mgn-leg-file">▣ File</span>
     <span class="mgn-leg mgn-leg-ic">◆ IC</span>
     <span class="mgn-leg mgn-leg-unknown">■ Unknown</span>
+    <span class="mgn-leg mgn-leg-marks">●●○ = marks (per decker)</span>
     @if (gmMode) {
     <span class="mgn-leg">👁=Active 👻=Silent ✕=Hidden</span>
     }

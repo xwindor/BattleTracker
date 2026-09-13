@@ -45,17 +45,19 @@
         }
       </div>
 
-      <!-- Right: node graph -->
-      <div class="matrix-right-pane">
-        <div class="pane-header">
-          <i class="fas fa-project-diagram me-1"></i>Matrix Graph
-        </div>
+    </div>
+
+    <!-- ── Node graph: full-width row below the two-pane layout (Decision 5) ── -->
+    <div class="matrix-graph-row">
+      <div class="pane-header">
+        <i class="fas fa-project-diagram me-1"></i>Matrix Graph
+      </div>
+      <div class="mgn-scroll">
         <app-matrix-graph
           [gmMode]="true"
           [activeDeckers]="activeDeckers">
         </app-matrix-graph>
       </div>
-
     </div>
   </div>
   }
