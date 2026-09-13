@@ -2,7 +2,7 @@
 name: sr5-change-reviewer
 description: Adversarially reviews a non-rules change against its spec, architecture fit, and live-table usability. Use after implementation. Reports only — never fixes code.
 tools: Read, Grep, Glob, Bash
-model: opus
+model: sonnet
 effort: high
 ---
 

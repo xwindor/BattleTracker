@@ -69,11 +69,11 @@ When you relay the validator's output to me, lead with its Plain summary. Do
 not paste raw technical output as the first thing I read.
 
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list back to a
-fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at two
-loops.
+fresh `sr5-implementer`, then re-run a fresh `sr5-rules-validator`. Cap at one
+loop.
 
-On a third failure, stop and diagnose before fixing anything further. Report
-which of these it is:
+If that single fix round still fails, stop and diagnose before fixing anything
+further. Report which of these it is:
 
 - The brief is wrong or incomplete — citations don't hold up, acceptance
   criteria are ambiguous or missing cases. Go back to Stage 1.
@@ -85,7 +85,7 @@ which of these it is:
 - Genuinely separate defects — unrelated problems that surfaced together. Say
   so, and I'll decide whether to fix or backlog each.
 
-Never launch a third fix round without naming which of the three this is.
+Never launch a second fix round without naming which of the three this is.
 
 ## Stage 4 — approval brief
 
@@ -113,7 +113,29 @@ other technical detail go below it.
 4. If I answered a scope question in a way that changes the product boundary,
    update `SCOPE.md` with the decision and today's date — the same way table
    rulings go to `RULINGS.md`. Show me the diff.
-5. Stage everything and show me the diff summary. Don't commit unless I ask.
+5. Update `docs/rules-notes/` (`matrix.md`, `astral.md`, `core-combat.md`) —
+   both halves of this, and show me the diff:
+
+   **Append** any citation newly derived during this feature, in that file's
+   entry format — printed page, paraphrase, interactions, anything left
+   undefined — with `verified: analyst <today's date>`. Take these from the
+   analyst's brief. Citations already in the notes are not re-appended.
+
+   **Upgrade** every entry the validator independently re-derived and confirmed
+   during Stage 3: change its `verified:` line to
+   `validator-confirmed <today's date>`. That is two separate readings of the
+   page agreeing, and it is the only way an entry earns that level — so do not
+   skip it, and do not apply it to anything the validator merely didn't
+   contradict. Only citations it actually re-derived and reported on qualify.
+
+   Where the validator *disputed* an entry, correct the paraphrase or page to
+   what it found and mark that `validator-confirmed <today's date>` too; if the
+   rule turned out not to exist, delete the entry. Never downgrade a
+   `validator-confirmed` entry back to `analyst`.
+
+   This is what keeps later features from re-deriving the same pages, and what
+   tells them how far to trust each entry.
+6. Stage everything and show me the diff summary. Don't commit unless I ask.
 
 ## Standing rules
 

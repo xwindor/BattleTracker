@@ -60,9 +60,10 @@ When you relay the reviewer's output to me, lead with its Plain summary. Do not
 paste raw technical output as the first thing I read.
 
 If the verdict is FAIL or PASS WITH FIXES, delegate the defect list to a fresh
-`sr5-implementer`, then re-run a fresh `sr5-change-reviewer`. Cap at two loops.
+`sr5-implementer`, then re-run a fresh `sr5-change-reviewer`. Cap at one loop.
 
-On a third failure, stop and diagnose before fixing further. Report which it is:
+If that single fix round still fails, stop and diagnose before fixing further.
+Report which it is:
 
 - The spec is wrong or incomplete — go back to Stage 1.
 - The implementation is incomplete — the same defect keeps appearing in paths
@@ -70,7 +71,7 @@ On a third failure, stop and diagnose before fixing further. Report which it is:
   propose one shared choke point. Show me the design before implementing.
 - Genuinely separate defects — say so and I'll decide what to fix or backlog.
 
-Never launch a third fix round without naming which of the three this is.
+Never launch a second fix round without naming which of the three this is.
 
 ## Stage 4 — summary
 
@@ -93,7 +94,19 @@ other technical detail go below it.
 3. If I answered a scope question in a way that changes the product boundary,
    update `SCOPE.md` with the decision and today's date — the same way table
    rulings go to `RULINGS.md`. Show me the diff.
-4. Stage everything and show the diff summary. Don't commit unless I ask.
+4. Append any rules citations newly derived during this change to the relevant
+   `docs/rules-notes/` file (`matrix.md`, `astral.md`, `core-combat.md`), in
+   that file's entry format — printed page, paraphrase, interactions, anything
+   left undefined — each with `verified: analyst <today's date>`. Citations
+   already in the notes need no re-appending, and this is the non-rules
+   pipeline, so usually there are none: if nothing new was derived, say so and
+   change nothing. Never invent a citation to fill the step.
+
+   This pipeline has no validator, so nothing here is ever marked
+   `validator-confirmed` — that upgrade only happens in `/feature` Stage 5,
+   where a citation has been independently re-derived. Do not upgrade an
+   existing entry from this pipeline. Show me the diff.
+5. Stage everything and show the diff summary. Don't commit unless I ask.
 
 ## Standing rules
 
