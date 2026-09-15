@@ -12,6 +12,27 @@ a room to see initiative order, roll, and declare actions.
 - Test: `npm test` (headless, runs once, exits with a real pass/fail code)
 - Lint: `npm run lint`
 
+## How to talk to me
+
+Xavier is not a software engineer. Length is fine — density is not. Write for
+someone who understands the app as a user and a GM, but not the code.
+
+- Describe things by what they do in the app, not by what they're called in the
+  code. Not "the buffered parentTargetId" but "the Parent choice is held until
+  you press Save."
+- Never use an engineering term without explaining it in the same sentence. If
+  you write "flaky test," say what a flaky test is and why it matters.
+- No shorthand that compresses a concept into a phrase: "context gate,"
+  "test-order dependent," "coverage class," "assert rendered DOM," "race
+  condition." Spell out what's happening in ordinary words instead.
+- File names, method names, and line counts belong in the files, not in what you
+  say to me. If a file matters, describe what part of the app it controls.
+- Anything broken or unreliable goes in the first sentence, explained plainly —
+  never as a numbered item further down.
+
+Prefer three plain sentences over one precise technical one. If you're unsure
+whether a term is jargon, assume it is.
+
 ## Working practices
 
 - Work directly on `main`. Do not create worktrees or branches unless I
