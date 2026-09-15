@@ -71,6 +71,15 @@ whether a term is jargon, assume it is.
 
 Shadowrun 5e rules facts must come only from a page-cited brief backed by
 `rules/` (via `sr5-rules-analyst`) — never from your own memory of the game.
+Every citation must name the book and the printed page, e.g. `(Core p. 159)`.
+`rules/INDEX.md` lists the rulebooks and which are in use.
+
+**Only the core rulebook is in use.** The other books under `rules/` are
+extracted but not yet approved for use: do not search them, cite them, or
+propose rules from them. If something can't be answered from the core rulebook,
+say so and stop rather than reaching for another book. A book becomes usable
+only once its page offset is verified by hand against three pages and Xavier
+approves it.
 
 ## Current focus
 

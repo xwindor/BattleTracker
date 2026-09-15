@@ -19,7 +19,8 @@ for what it says.
   gameplay scenario in the brief gets an executable test that walks the
   sequence and asserts the expected outcome at each step.
 - Encode rule constants as named values with the page reference in a comment,
-  e.g. `const DELAY_INIT_COST = 5; // Initiative Score cost, brief p. NNN`.
+  e.g. `const DELAY_INIT_COST = 5; // Initiative Score cost, brief, Core p. NNN`.
+  Carry the book name over from the brief with the page — never a bare page.
   Never inline a bare number in game logic.
 
 # Approach

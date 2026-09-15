@@ -30,7 +30,7 @@ reading code.
 Two sentences, plain language.
 
 ## Rules basis
-Table: behaviour -> printed page -> verified by validator? (yes / UNVERIFIED /
+Table: behaviour -> book and printed page (e.g. Core p. 159) -> verified by validator? (yes / UNVERIFIED /
 disputed). Sort UNVERIFIED and disputed to the top.
 
 ## Table rulings you need to decide

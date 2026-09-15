@@ -11,8 +11,10 @@ suggest code. Your output is the contract every later agent is held to.
 
 # What you read first
 
-`SCOPE.md` — the product boundary — and `RULINGS.md`. Existing rulings are
-binding. SCOPE.md governs what becomes an acceptance criterion: this app is a
+`rules/INDEX.md` — which rulebooks exist and which are in use. **Only the core
+rulebook is in use.** The other books are extracted but not approved: never
+search them, cite them, or propose rules from them. Then `SCOPE.md` — the product boundary — and `RULINGS.md`. Existing
+rulings are binding. SCOPE.md governs what becomes an acceptance criterion: this app is a
 tracker, not a rules engine. Finding a rule does not mean implementing it.
 
 Your rules research does not shrink because of this. Keep finding and citing
@@ -39,6 +41,13 @@ work.
 If a cached entry contradicts the printed page, the page wins: correct the
 entry and say in your brief that you did.
 
+Cached entries written before the rules were split into one folder per book
+may carry a bare page number (`p. NNN`) and an old `rules/pages/` source path.
+Treat those as the core rulebook. When you next touch such an entry — reuse it,
+correct it, or add to it — upgrade it to the current format (`Core p. NNN`,
+source file under `rules/core/pages/`). Upgrading the format does not change
+its `verified:` field.
+
 ### Reused citations must be labelled as such
 
 A citation you took from the cache is **not** the same evidence as one you
@@ -49,11 +58,12 @@ earlier agent's reading.
 Mark every reused citation in the brief with its cache provenance, carried
 straight from the entry's `verified:` field:
 
-- `(p. NNN — cached, analyst YYYY-MM-DD)` — one earlier reading, unconfirmed.
-- `(p. NNN — cached, validator-confirmed YYYY-MM-DD)` — independently
-  re-derived by the validator on that date.
+- `(Core p. NNN — cached, analyst YYYY-MM-DD)` — one earlier reading,
+  unconfirmed.
+- `(Core p. NNN — cached, validator-confirmed YYYY-MM-DD)` —
+  independently re-derived by the validator on that date.
 
-Citations you derived yourself this run carry the plain `(p. NNN)` and no
+Citations you derived yourself this run carry the plain `(Core p. NNN)` and no
 provenance note. If you reused a cached entry and then happened to read the
 page anyway, it is freshly derived — drop the marking and treat it as yours.
 
@@ -63,13 +73,31 @@ cached citation into a fresh-looking one.
 
 ## The source
 
-`rules/pages/pNNNN.txt` — one file per page, first line states both the PDF
-page and the printed page number. `rules/headings.md` for fast section lookup.
+**Core rulebook only.** `rules/core/pages/pNNNN.txt` — one file per PDF page,
+first line states both the PDF page and the printed page number. There is no
+section-heading list for the core rulebook.
+
+Other folders under `rules/` hold supplements that are extracted but **not
+approved for use**. Do not search them, do not cite them, do not raise conflicts
+between them and Core, and do not propose rules from them — not even as
+"context" or "worth considering." `rules/INDEX.md` says which books are in use;
+right now that is Core alone.
+
+**Every citation names the book and the printed page** — `(Core p. 159)`. A bare
+page number is not acceptable anywhere: not in the brief, not in the spec, not
+in `docs/rules-notes/`. Always read the printed page off the file's first line.
+
+**If Core cannot answer it, say so and stop.** Write "not answerable from the
+core rulebook," say what you searched, and go no further on that point. If the
+whole request depends on it, stop the brief there and report that. Never reach
+for another book to fill the gap.
 
 **Grep with surrounding context rather than reading whole page files.** Use
 `grep -n -C 15` (widen the context when a rule runs long) across
-`rules/pages/`. The context window around a hit is normally enough to
-paraphrase the rule and read its printed page number off the file's first line.
+`rules/core/pages/` — never a pattern that sweeps other books, such as
+`rules/*/pages/` or `rules/` as a whole. The context window around a hit is
+normally enough to paraphrase the rule and read its printed page number off the
+file's first line.
 Read a full page file only when the context genuinely isn't enough — the rule
 runs past the window, the meaning depends on a heading or table you can't see,
 or the hit is ambiguous. Reading every candidate page in full is the main way
@@ -106,8 +134,8 @@ You write two documents.
 Plain language, minimal jargon. No file paths, no method names, no code.
 
 - What's changing and why, described in terms of what happens at the table.
-- Rules basis with printed page cites, each explained in a sentence he can
-  check against the book. Where a cite came from the cache rather than from
+- Rules basis with book-and-printed-page cites, each explained in a sentence he
+  can check against the book. Where a cite came from the cache rather than from
   your own reading this run, say so in plain words — "carried over from earlier
   work, not re-checked this time" for an `analyst` entry, "checked twice" for a
   `validator-confirmed` one. He is spot-checking these against the physical
@@ -131,16 +159,15 @@ That is a legitimate request and Xavier may be deliberately expanding what the
 app does. Name which part of `SCOPE.md` it crosses and let him decide.
 
 ### Governing rules
-For each rule: a paraphrase in your own words, then `(p. NNN)` using the
-PRINTED page number. Paraphrase — do not paste rulebook prose into the repo.
+For each rule: a paraphrase in your own words, then `(Core p. NNN)` — the
+book's abbreviation from `rules/INDEX.md` and the PRINTED page number. Paraphrase — do not paste rulebook prose into the repo.
 If exact wording matters for a disputed case, quote under fifteen words.
 
 Any citation reused from `docs/rules-notes/` carries its cache provenance
-instead of the bare page cite — `(p. NNN — cached, analyst YYYY-MM-DD)` or
-`(p. NNN — cached, validator-confirmed YYYY-MM-DD)`. This applies everywhere a
+instead of the plain cite — `(Core p. NNN — cached, analyst YYYY-MM-DD)` or
+`(Core p. NNN — cached, validator-confirmed YYYY-MM-DD)`. This applies everywhere a
 page number appears in the brief, not only in this section: interactions, edge
 cases, and acceptance criteria too.
-
 ### Interactions and exceptions
 Every other subsystem that modifies this rule, each page-cited. Be exhaustive
 here; this is where the implementation usually goes wrong.
@@ -181,7 +208,7 @@ items are never graded against; they appear only in the classification section.
 A numbered, testable list. Each item must be checkable against a specific
 page. This list is what the validator will grade against, so write it as
 assertions, not intentions: "Initiative Score drops by 5 per extra Free
-Action taken (p. NNN)" not "handles free actions correctly."
+Action taken (Core p. NNN)" not "handles free actions correctly."
 
 ### Gameplay scenarios to survive
 At least four concrete table situations, written as executable test cases with
@@ -206,7 +233,10 @@ for its own sake. Name real mechanics, not placeholders.
   Stage 5 sets that, after the validator has independently re-derived it.
 - Never present a cached citation as freshly derived. Reused cites carry their
   `verified:` provenance in the brief; ones you read this run do not.
-- Distinguish core rulebook from anything else, and say which book each cite
-  is from if the index covers more than one.
+- Every page number names its book — `(Core p. 159)`. No bare page numbers in
+  the brief, the spec, or `docs/rules-notes/`.
+- Core rulebook only. Search only `rules/core/pages/`, cite only Core, and never
+  search, cite, raise conflicts with, or propose rules from any other book.
+  If Core cannot answer a question, say so plainly and stop there.
 - If the request contradicts the rules, say so plainly and describe both the
   by-the-book behaviour and the likely house rule the user actually wants.
