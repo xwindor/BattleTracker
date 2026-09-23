@@ -640,9 +640,18 @@
 
 /* Rolled Initiative column. Its input-group holds only the rolled-total input
    and the roll-die button, so unlike .gm-stats-roll-group it neither needs to
-   wrap nor to stretch to the full column width. */
+   wrap nor to stretch to the full column width. Stacked column, not row
+   (overriding the template's `d-flex align-items-center`, which is a row by
+   default): the ask-to-roll button and the roll-status badge (QA fix round 3)
+   sit in their own row below the input-group rather than squeezed onto the
+   same line, so the column's fixed width at desktop (`.gm-col-rolled`,
+   `>= 992px`) never has to hold three side-by-side controls plus a marker
+   sentence. `align-items: center` (from the template's own `align-items-
+   center` class) still centres both rows horizontally in a column layout. */
 .gm-rolled-ini-col {
   min-width: 0;
+  flex-direction: column;
+  row-gap: 0.2rem;
 }
 
 .gm-rolled-ini-group {
@@ -651,10 +660,70 @@
   justify-content: center;
 }
 
+/* QA fix round 3: the ask-to-roll button and the roll-status badge, on their
+   own row directly under the rolled-total input-group so the ask button
+   stays visually grouped with the dice-roll button beside it above (Xavier:
+   "keep the ask button visually grouped with the existing dice button").
+   Wraps rather than overflows if both the button and a badge are present at
+   once in the narrow desktop column. */
+.gm-roll-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+/* Same square-icon-button shape as `.gm-roll-btn` above, from the same
+   tokens, so the two controls read as one matched pair rather than a big
+   button next to a mismatched small one. */
+.gm-ask-roll-btn {
+  width: var(--ui-icon-btn-w);
+  min-width: var(--ui-icon-btn-w);
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  padding-left: 0;
+  padding-right: 0;
+  flex: 0 0 auto;
+}
+
+/* Roll-status badges: compact pills, not stacked sentences (Xavier: "the
+   messages in the row are all messed up formatting wise... prefer compact
+   badges"). Same self-contained light-background/dark-text/border shape as
+   `.participant-badge` above, colours reused from the existing text-warning/
+   text-info semantics the two markers already carried before this fix. */
+.gm-roll-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Same amber as `.participant-badge-lieutenant` - a state the GM needs to
+   notice, not yet acted on. */
+.gm-roll-badge-needed {
+  background: rgba(255, 193, 7, 0.18);
+  color: #997404;
+  border: 1px solid rgba(255, 193, 7, 0.55);
+}
+
+/* Same cyan as `.participant-badge-group` - informational, already handled. */
+.gm-roll-badge-asked {
+  background: rgba(13, 202, 240, 0.18);
+  color: #087990;
+  border: 1px solid rgba(13, 202, 240, 0.45);
+}
+
 /* Narrowed from min 3.5rem / max 5rem (Xavier: "the rolled initiative column
    could be much narrower too, the max ini dice is 5 so it really doesn't have
    to be so wide... now its wide enough for like a 8 digit number"). The value
-   is a rolled Initiative Score: attribute + at most 5D6 (p. 161), so two digits
+   is a rolled Initiative Score: attribute + at most 5D6 (Core p. 161), so two digits
    is the ceiling.
 
    The old 5rem was a reaction to this input being clipped at 3.6rem back when
@@ -987,7 +1056,7 @@
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    player-view.component.css. */
-/* Glitch/critical glitch (p. 45) keep bold weight - the label always has to
+/* Glitch/critical glitch (Core p. 45) keep bold weight - the label always has to
    stand out - but no colour or pill of their own; the whole line is already
    .log-text-glitch. */
 :host ::ng-deep .log-keyword-glitch,
@@ -1024,7 +1093,7 @@
   color: #5b21b6;
 }
 
-/* The GM rolled these dice for a non-player combatant (p. 44). Its own colour
+/* The GM rolled these dice for a non-player combatant (Core p. 44). Its own colour
    so an NPC's roll is not read as a player character's own roll at a glance. */
 .log-badge-npc {
   background: #fee2e2;
@@ -1040,7 +1109,7 @@
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    player-view.component.css. */
-/* GM narration attached to a glitch (p. 45): indented so the flat list still
+/* GM narration attached to a glitch (Core p. 45): indented so the flat list still
    reads as one entry commenting on another. The entry names its parent roll
    in .log-entry-ref, because the list is flat and the roll it is about may be
    many lines further up. */

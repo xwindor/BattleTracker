@@ -8,20 +8,20 @@ import { IParticipant } from "./IParticipant";
 /**
  * Amount subtracted from every participant's running Initiative Score at the
  * end of each Initiative Pass. Brief "Running Initiative Score Across Passes"
- * F2 / acceptance criterion 2, printed pp. 159-160.
+ * F2 / acceptance criterion 2, printed Core pp. 159-160.
  */
 export const INITIATIVE_PASS_DECAY = 10;
 
 /**
  * Minimum Initiative Dice: everyone has at least one Initiative Die (brief
- * "Precise Definitions" / F1, printed p. 159).
+ * "Precise Definitions" / F1, printed Core p. 159).
  */
 export const MIN_INITIATIVE_DICE = 1;
 
 /**
  * Hard cap on Initiative Dice: "Everyone has one and can gain up to four more,
  * hard cap 5D6" (brief "Precise Definitions" / acceptance criterion 9, printed
- * pp. 52 and 288). Enforced in exactly one place - `clampInitiativeDiceCount()`
+ * Core pp. 52 and 288). Enforced in exactly one place - `clampInitiativeDiceCount()`
  * below - so every write path inherits it.
  */
 export const MAX_INITIATIVE_DICE = 5;
@@ -43,7 +43,7 @@ export const PARTICIPANT_DEFAULT_BASE_INI = 6;
 /**
  * Base Initiative Dice for Physical initiative, i.e. what a participant drops
  * back to when they lose a deck / astral form (brief "Precise Definitions":
- * "Base is 1D6 Physical", printed p. 159).
+ * "Base is 1D6 Physical", printed Core p. 159).
  */
 export const PHYSICAL_INITIATIVE_DICE = 1;
 
@@ -51,11 +51,69 @@ export const PHYSICAL_INITIATIVE_DICE = 1;
  * Display floor for a participant's rolled Initiative Dice total. Purely a UI
  * concern (0 means "has not rolled yet"); it is *not* a floor on the running
  * Initiative Score, which has none - the book keeps subtracting past zero
- * (brief F3 / criterion 3, printed p. 160, p. 191). Lives here rather than in
+ * (brief F3 / criterion 3, printed Core p. 160, Core p. 191). Lives here rather than in
  * the GM component because `changeDiceCount()` below is what has to apply the
  * floored-off remainder as a separate Score delta.
  */
 export const MIN_DISPLAYED_DICE_TOTAL = 1;
+
+/**
+ * Has `p` completed this Combat Turn's Initiative Test?
+ *
+ * This is the single, canonical definition of "has rolled" - every other copy
+ * of this test in the codebase must read this function rather than
+ * re-deriving `p.diceIni > 0` by hand (round-6 defect 5,
+ * `briefs/seize-initiative-spec.md`: this exact rule had drifted into four
+ * independent copies - this one, `Grunts/NpcRowParticipant.ts`'s
+ * `hasRolledInitiativeThisTurn` (now a re-export of this function, kept under
+ * its original name for its existing public API), the GM template's Seize
+ * button condition, and a hand-typed `p.diceIni > 0` in
+ * `battle-tracker.component.ts`'s `applyRegisteredDiceCount()`). Consumers:
+ * `CombatManager.canParticipantActThisPass()`, `CombatManager.isOver()`,
+ * `CombatManager.hasMoreIniPasses()`, `CombatManager.seizeInitiative()`,
+ * `BattleTrackerComponent.canParticipantInterrupt()`,
+ * `BattleTrackerComponent.hasRolledThisTurn()` (the template-facing wrapper -
+ * see its own doc comment for why templates cannot call this bare function
+ * directly), and `BattleTrackerComponent.applyRegisteredDiceCount()`.
+ *
+ * Lives here rather than in `CombatManager.ts` (its previous home) because
+ * `Grunts/NpcRowParticipant.ts` needs it too, and `Grunts` only depends on
+ * `Combat/Participants` - depending on `Combat/CombatManager.ts` would be a
+ * genuine import cycle, since `CombatManager.ts` itself imports from
+ * `Grunts/NpcRowParticipant.ts` (see that file's own "imported by module
+ * path" comment). `Participant.ts` has no dependency on either `CombatManager`
+ * or `Grunts`, so it is the one place both can safely import this from.
+ *
+ * **Seizing the Initiative does not change this test.** Until 2026-09-21 the
+ * eligibility predicate built on this fact (then named `hasRolledOrSeized`)
+ * also treated an unrolled, seized participant (`p.edge`) as eligible - Core
+ * p. 160's "regardless of your Initiative Score" was read as extending to an
+ * *absent* Score, not just a low one. Xavier's table ruling R1
+ * (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's rulings,
+ * 2026-09-21"): "you cannot seize initiative until you have rolled" - a fresh
+ * seize declaration cannot set `p.edge` without a rolled Score
+ * (`CombatManager.seizeInitiative()` enforces this), so a fresh "unrolled
+ * seizer" is no longer reachable and the exemption is dead code removed, not
+ * tuned. Eligibility is simply "has rolled this Combat Turn". (One narrow,
+ * pre-existing exception is not a fresh declaration: the round-5-item-5
+ * same-player type-mismatch re-registration path in
+ * `battle-tracker.component.ts` carries an already-seized character's
+ * `p.edge` onto its replacement object directly, bypassing this guard,
+ * because it is preserving a fact already true for the Combat Turn - Core
+ * p. 161's "lasts for the entire Combat Turn" - not declaring a new seize;
+ * see that carry's own comment.)
+ *
+ * **Table ruling, not a printed rule** (round 3 item 2, 2026-09-19): the core
+ * rulebook does not say what happens to a combatant who is in the fight
+ * without a rolled Initiative Score at all - it is silent on that case. Core
+ * p. 160 has a late entrant "roll for their Initiative Score as normal"
+ * before they can act, which Xavier reads as implying there is no Score to
+ * act on until they do; that inference is the table ruling, not a printed
+ * instruction.
+ */
+export function hasRolledThisTurn(p: IParticipant): boolean {
+  return p.diceIni > 0;
+}
 
 /** Faces on an Initiative Die. */
 const INITIATIVE_DIE_FACES = 6;
@@ -68,7 +126,7 @@ export function rollInitiativeDie(): number {
 /**
  * Normalise an Initiative Dice count to a whole number inside
  * [MIN_INITIATIVE_DICE, MAX_INITIATIVE_DICE]. The single enforcement point for
- * the 5D6 hard cap (brief criterion 9, pp. 52/288): both `dices` write paths
+ * the 5D6 hard cap (brief criterion 9, Core pp. 52/288): both `dices` write paths
  * (`setDicesWithoutRoll` and `changeDiceCount`) go through it, so no caller can
  * exceed the cap.
  */
@@ -151,7 +209,7 @@ export class Participant implements IParticipant {
   set baseIni(val: number) {
     this._baseIni = val;
     // A change to the Initiative attribute applies as a same-sized delta to
-    // the running Initiative Score (brief F4, p. 160).
+    // the running Initiative Score (brief F4, Core p. 160).
     this.syncInitiativeAttribute();
   }
 
@@ -162,10 +220,10 @@ export class Participant implements IParticipant {
   /**
    * Sum of the Initiative Dice rolled for this Combat Turn. Assigning it
    * moves the running Initiative Score by the difference only:
-   *  - 0 -> n is the once-per-turn Initiative Test (brief F1, p. 159): the
+   *  - 0 -> n is the once-per-turn Initiative Test (brief F1, Core p. 159): the
    *    Score becomes Initiative attribute + dice result.
    *  - n -> m mid-turn is a dice change: only the delta is added or
-   *    subtracted, never a recompute (brief F5, p. 160).
+   *    subtracted, never a recompute (brief F5, Core p. 160).
    */
   set diceIni(val: number) {
     const previous = this._diceIni;
@@ -179,7 +237,7 @@ export class Participant implements IParticipant {
    * Write the rolled-dice total *without* moving the running Initiative
    * Score. For display/bounds clamping only (e.g. keeping `diceIni` within
    * `dices * 6` after an unrelated field edit). The Score only ever moves
-   * when dice are actually rolled (brief F5, p. 160), so a cosmetic clamp
+   * when dice are actually rolled (brief F5, Core p. 160), so a cosmetic clamp
    * must not become a silent Score change.
    */
   setDiceIniWithoutScoreChange(val: number) {
@@ -190,7 +248,7 @@ export class Participant implements IParticipant {
    * The participant's Initiative Dice count. Deliberately read-only: there is
    * no plain setter, because assigning a new count mid-turn is a *rules event*
    * that has to roll the gained/lost dice and move the running Initiative
-   * Score (brief F5 / criteria 7-8, p. 160). Write it through
+   * Score (brief F5 / criteria 7-8, Core p. 160). Write it through
    * `changeDiceCount()` (a real change) or `setDicesWithoutRoll()`
    * (construction / restore / reset, where no roll is owed). Removing the
    * setter is what makes "forgot to roll the delta" a compile error rather
@@ -206,7 +264,7 @@ export class Participant implements IParticipant {
    * `setDiceIniWithoutScoreChange`: for the cases that are not a mid-turn dice
    * change - object construction, `hardReset()`, rebuilding a participant from
    * broadcast state, and initial character setup from `register_character`.
-   * The 5D6 hard cap still applies (brief criterion 9, pp. 52/288).
+   * The 5D6 hard cap still applies (brief criterion 9, Core pp. 52/288).
    */
   setDicesWithoutRoll(val: number) {
     this._dices = clampInitiativeDiceCount(val);
@@ -214,9 +272,9 @@ export class Participant implements IParticipant {
 
   /**
    * Change the Initiative Dice count as a mid-turn rules event
-   * (brief F5 / criteria 7-8, p. 160).
+   * (brief F5 / criteria 7-8, Core p. 160).
    *
-   *  - The new count is clamped to the 5D6 hard cap (criterion 9, pp. 52/288).
+   *  - The new count is clamped to the 5D6 hard cap (criterion 9, Core pp. 52/288).
    *  - If the participant has not taken their once-per-Combat-Turn Initiative
    *    Test yet (`diceIni <= 0`), or the count does not actually change, the
    *    count is simply written: nothing to roll, no Score movement.
@@ -272,13 +330,13 @@ export class Participant implements IParticipant {
   set hasPainEditor(val: boolean) {
     this._hasPainEditor = val;
     // Toggling the Pain Editor changes the wound modifier and therefore the
-    // Initiative attribute (brief p. 160, p. 169).
+    // Initiative attribute (brief Core p. 160, Core p. 169).
     this.syncInitiativeAttribute();
   }
 
   /**
    * The current running Initiative Score (brief: "one mutable
-   * currentInitiativeScore per participant per Combat Turn", p. 159-160).
+   * currentInitiativeScore per participant per Combat Turn", Core p. 159-160).
    * Seeded once per Combat Turn by the Initiative Test and thereafter only
    * ever moved by signed deltas. Never recomputed from a base.
    */
@@ -293,7 +351,7 @@ export class Participant implements IParticipant {
   /**
    * The Initiative attribute value that is currently folded into
    * `currentInitiativeScore`. Used to turn an attribute change into a
-   * one-time same-sized Score delta (brief F4, p. 160) instead of a
+   * one-time same-sized Score delta (brief F4, Core p. 160) instead of a
    * recompute.
    */
   get appliedInitiativeAttribute(): number {
@@ -308,7 +366,7 @@ export class Participant implements IParticipant {
    * Live Initiative attribute: the participant's base Initiative (Reaction +
    * Intuition, or the mode-appropriate formula set by subclasses) reduced by
    * the wound modifier. Wound modifiers hit the attribute, not the Score
-   * directly, so that they propagate (brief p. 160, p. 169).
+   * directly, so that they propagate (brief Core p. 160, Core p. 169).
    */
   get initiativeAttribute(): number {
     return this.baseIni - this.wm;
@@ -427,7 +485,7 @@ export class Participant implements IParticipant {
   set physicalDamage(val: number) {
     this._physicalDamage = val;
     // Wound modifiers apply to the Initiative attribute immediately on
-    // injury, and thence to the Score (brief criterion 10, pp. 158/160/169).
+    // injury, and thence to the Score (brief criterion 10, Core pp. 158/160/169).
     this.syncInitiativeAttribute();
   }
 
@@ -541,7 +599,7 @@ export class Participant implements IParticipant {
     // character, so it does not inherit Full Defense etc.), so the Initiative
     // already committed to Interrupt Actions is folded straight into its
     // running Score instead. The reduction happens at the time of the
-    // Interrupt Action (brief F9, p. 167) and must not be refunded by a copy.
+    // Interrupt Action (brief F9, Core p. 167) and must not be refunded by a copy.
     clone._currentInitiativeScore = this.getCurrentInitiative();
     clone._appliedInitiativeAttribute = this._appliedInitiativeAttribute;
     clone._actionHistory = []
@@ -561,10 +619,10 @@ export class Participant implements IParticipant {
    * off the Score so that resetting an action returns the points; both
    * accumulators are cleared at the same moment (the Combat Turn
    * boundary, `softReset()`), so the value matches debit-at-declaration
-   * (brief F9, p. 167) at every point in the turn.
+   * (brief F9, Core p. 167) at every point in the turn.
    *
    * Deliberately unclamped: negative Scores are load-bearing (brief F3,
-   * p. 160 shows -4 and p. 191 shows -9 gating a Parry). See Open Ruling
+   * Core p. 160 shows -4 and Core p. 191 shows -9 gating a Parry). See Open Ruling
    * Question 7 - no floor is the brief's recommended default.
    */
   getCurrentInitiative() {
@@ -574,7 +632,7 @@ export class Participant implements IParticipant {
   /**
    * Apply a signed delta to the running Initiative Score. Every mid-turn
    * change to the Score goes through here; nothing recomputes it from a base
-   * after the Initiative Test (brief points 2-4, p. 160).
+   * after the Initiative Test (brief points 2-4, Core p. 160).
    */
   applyInitiativeScoreDelta(delta: number) {
     if (delta === 0) {
@@ -586,7 +644,7 @@ export class Participant implements IParticipant {
   /**
    * Fold any change in the live Initiative attribute (base initiative and/or
    * wound modifier) into the running Score as a single same-sized delta
-   * (brief F4 / criterion 6, p. 160): attribute 8 / Score 11 raised to
+   * (brief F4 / criterion 6, Core p. 160): attribute 8 / Score 11 raised to
    * attribute 10 yields Score 13, not a recompute.
    */
   syncInitiativeAttribute() {
@@ -602,7 +660,7 @@ export class Participant implements IParticipant {
   /**
    * Discard the running Score at a Combat Turn boundary. The Score drops back
    * to the bare Initiative attribute; the next Initiative Test (`diceIni`)
-   * adds the dice result to produce the new turn's Score (brief F1, p. 159).
+   * adds the dice result to produce the new turn's Score (brief F1, Core p. 159).
    */
   resetInitiativeScore() {
     this.appliedInitiativeAttribute = this.initiativeAttribute;
@@ -611,7 +669,7 @@ export class Participant implements IParticipant {
 
   canUseAction(action: Action): boolean {
     // Gated on the running Score, so Initiative already spent on earlier
-    // Interrupt Actions this turn stays spent (brief F9 / S3, p. 167).
+    // Interrupt Actions this turn stays spent (brief F9 / S3, Core p. 167).
     if (Math.abs(action.iniMod) > this.getCurrentInitiative()) {
       return false;
     }
@@ -657,7 +715,7 @@ export class Participant implements IParticipant {
   }
 
   /**
-   * The Initiative Test: rolled once per Combat Turn (brief F1, p. 159).
+   * The Initiative Test: rolled once per Combat Turn (brief F1, Core p. 159).
    * Assigning `diceIni` seeds the running Score with
    * Initiative attribute + dice result.
    */
@@ -672,7 +730,7 @@ export class Participant implements IParticipant {
   softReset(revive = false) {
     this.diceIni = 0;
     // New Combat Turn: the old running Score is discarded and re-rolled
-    // (brief, p. 159 Step 5 / Precise Definitions).
+    // (brief, Core p. 159 Step 5 / Precise Definitions).
     this.resetInitiativeScore();
     this.edge = false;
     this.status = StatusEnum.Waiting;

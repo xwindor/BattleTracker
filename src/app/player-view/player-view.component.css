@@ -123,9 +123,17 @@
   justify-content: flex-start;
 }
 
+/* QA fix round 3 (Xavier hands-on test): this panel's light background is
+   hard-coded, but it used to have no `color` of its own, so its text fell
+   back to the modal body's colour - `--cd-text` (the cyberdeck theme's pale
+   mint-green, #d5ffe9), meant to read against the dark theme, not this
+   panel's own pale blue. Pale-on-pale was reported as "white on white".
+   Explicit dark text, self-paired with this exact background/border, matches
+   the same trio already used for `.log-text-action` elsewhere in this file. */
 .roll-banner {
   border: 1px solid #93c5fd;
   background: #eff6ff;
+  color: #1e3a8a;
   border-radius: 0.4rem;
   padding: 0.65rem 0.75rem;
 }
@@ -157,6 +165,28 @@
 .roll-input {
   flex: 1 1 12rem;
   max-width: 12rem;
+}
+
+/* QA fix round 2 (briefs/player-initiative-prompt-spec.md): the settled-roll
+   summary and Done button shown inside the roll modals once a result is in
+   and waiting to be acknowledged. */
+/* Same defect and fix as `.roll-banner` above: light green background with no
+   explicit text colour used to inherit the modal body's pale theme colour
+   (`--cd-text`), unreadable against this panel's own light background.
+   Reuses the exact dark-green already paired with these same background/
+   border colours in `.action-validation-ok` elsewhere in this file. */
+.roll-result-summary {
+  border: 1px solid #86efac;
+  background: #f0fdf4;
+  color: #166534;
+  border-radius: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 1.05rem;
+}
+
+.roll-modal-done {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
@@ -371,7 +401,7 @@
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    battle-tracker.component.css. */
-/* Glitch/critical glitch (p. 45) keep bold weight - the label always has to
+/* Glitch/critical glitch (Core p. 45) keep bold weight - the label always has to
    stand out - but no colour or pill of their own; the whole line is already
    .log-text-glitch. */
 :host ::ng-deep .log-keyword-glitch,
@@ -408,7 +438,7 @@
   color: #5b21b6;
 }
 
-/* The GM rolled these dice for a non-player combatant (p. 44). Its own colour
+/* The GM rolled these dice for a non-player combatant (Core p. 44). Its own colour
    so an NPC's roll is not read as a player character's own roll at a glance. */
 .log-badge-npc {
   background: #fee2e2;
@@ -417,7 +447,7 @@
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    battle-tracker.component.css. */
-/* GM narration attached to a glitch (p. 45): indented so the flat list still
+/* GM narration attached to a glitch (Core p. 45): indented so the flat list still
    reads as one entry commenting on another. The entry names its parent roll
    in .log-entry-ref, because the list is flat and the roll it is about may be
    many lines further up. */
@@ -489,12 +519,12 @@
     width: 100%;
   }
 
-  .roll-banner .roll-input {
+  .roll-modal-manual .roll-input {
     flex: 1 1 100%;
     max-width: 100%;
   }
 
-  .roll-banner .btn {
+  .roll-modal-manual .btn {
     flex: 1 1 100%;
   }
 }

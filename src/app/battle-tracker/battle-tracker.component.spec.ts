@@ -4,7 +4,7 @@ import { appConfig } from 'app/app.config';
 import { CombatManager } from 'Combat';
 import { Participant } from 'Combat/Participants/Participant';
 import { IParticipant } from 'Combat/Participants/IParticipant';
-import { SharedCombatState } from 'app/services/session-sync.service';
+import { SharedCombatState, SessionSyncService, SharedLogEntry } from 'app/services/session-sync.service';
 import { MatrixParticipant } from 'Matrix/MatrixParticipant';
 import { VRMode } from 'Matrix/VRMode';
 import { MatrixHost } from 'Matrix/MatrixHost';
@@ -13,7 +13,7 @@ import { AstralParticipant } from 'Magic';
 import { LogHandler } from 'Logging';
 import { interruptTable } from 'InterruptTable';
 
-/** Full Defense: an Interrupt Action costing -10 Initiative Score (brief F9, p. 167). */
+/** Full Defense: an Interrupt Action costing -10 Initiative Score (brief F9, Core p. 167). */
 const FULL_DEFENSE = interruptTable.find(a => a.key === 'fullDefense')!;
 
 /** Reset the singleton CombatManager to a clean, un-started encounter. */
@@ -71,7 +71,7 @@ describe('BattleTrackerComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  // Acceptance criterion 8 (brief F5, p. 160): a mid-turn Initiative Dice
+  // Acceptance criterion 8 (brief F5, Core p. 160): a mid-turn Initiative Dice
   // decrease rolls the lost dice and subtracts the *whole* total.
   describe('mid-turn Initiative Dice decrease', () => {
     it('subtracts the full rolled total from the Score even when the roll exceeds the dice-total display floor', () => {
@@ -98,7 +98,7 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // The Score only moves when dice are actually rolled (brief F5, p. 160), so
+  // The Score only moves when dice are actually rolled (brief F5, Core p. 160), so
   // bounds-clamping triggered by an unrelated edit must be Score-neutral.
   it('clamping diceIni after an unrelated field edit does not change the Score', () => {
     const p = rolled('Typo', 10, 3, 18);  // Score 28
@@ -112,7 +112,7 @@ describe('BattleTrackerComponent', () => {
   });
 
   // Defect 2: the restored Score must match the pass count it is restored at
-  // (brief pp. 159-160).
+  // (brief Core pp. 159-160).
   describe('restoreFromSharedState', () => {
     function state(pass: number, score: number): SharedCombatState {
       return {
@@ -147,7 +147,7 @@ describe('BattleTrackerComponent', () => {
     // Defect 2: a restored participant who had already rolled must not come
     // back marked as still needing to roll, and a stale roll must not stack a
     // fresh Initiative Test on the already-decayed Score (rolled once per
-    // Combat Turn, pp. 159-160).
+    // Combat Turn, Core pp. 159-160).
     describe('already-rolled state (rejoin at pass 3)', () => {
       /** GM was broadcast at pass 3: Wombat rolled 4 on 1D6, Score now 4. */
       function midCombatState(): SharedCombatState {
@@ -244,7 +244,7 @@ describe('BattleTrackerComponent', () => {
   });
 
   // Defect 1: a typed dice-total edit must move the running Initiative Score
-  // only by the legitimate rolled-total delta (p. 160), and the DOM input must
+  // only by the legitimate rolled-total delta (Core p. 160), and the DOM input must
   // end up showing the clamped model value. Exercised through the real DOM so
   // the ngModel write-ordering bug (raw value reaching the Score-moving setter
   // before any validation) is actually reproduced.
@@ -309,7 +309,7 @@ describe('BattleTrackerComponent', () => {
 
   });
 
-  // Defect 6 / acceptance criterion 8 (p. 160): losing Initiative Dice
+  // Defect 6 / acceptance criterion 8 (Core p. 160): losing Initiative Dice
   // mid-combat rolls the lost dice and subtracts the total, "along with any
   // decrease to their Initiative Attribute" - both halves.
   describe('demoteToParticipant (deck removed mid-combat)', () => {
@@ -355,9 +355,9 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // Acceptance criterion 5 (brief p. 160): a character at Score 0 or below can
+  // Acceptance criterion 5 (brief Core p. 160): a character at Score 0 or below can
   // still defend, so the Interrupts UI stays on screen - individual actions are
-  // disabled by canUseAction() instead (brief F9, p. 167).
+  // disabled by canUseAction() instead (brief F9, Core p. 167).
   it('keeps the Interrupts dropdown visible at Initiative Score 0', () => {
     const p = rolled('Spent', 6, 1, 4); // Score 10
     CombatManager.nextIniPass();        // -> 0
@@ -384,8 +384,8 @@ describe('BattleTrackerComponent', () => {
   // ---------------------------------------------------------------------
   // Regressions for the three call sites that could change a participant's
   // Initiative Dice count without rolling the delta and moving the running
-  // Initiative Score (brief F5 / criteria 7-8, p. 160), plus the 5D6 hard cap
-  // (criterion 9, pp. 52/288).
+  // Initiative Score (brief F5 / criteria 7-8, Core p. 160), plus the 5D6 hard cap
+  // (criterion 9, Core pp. 52/288).
   // ---------------------------------------------------------------------
 
   /**
@@ -467,7 +467,7 @@ describe('BattleTrackerComponent', () => {
       expect(p.currentInitiativeScore).toBe(13); // 20 - 7
     });
 
-    // Acceptance criterion 9 (pp. 52/288): 5D6 hard cap, call site 1 of 2.
+    // Acceptance criterion 9 (Core pp. 52/288): 5D6 hard cap, call site 1 of 2.
     it('rejects a count above the 5D6 hard cap', async () => {
       const p = rolled('Wired', 8, 1, 3); // Score 11
       CombatManager.started = true;
@@ -482,7 +482,7 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // Acceptance criterion 9 (pp. 52/288): 5D6 hard cap, call site 2 of 2 - the
+  // Acceptance criterion 9 (Core pp. 52/288): 5D6 hard cap, call site 2 of 2 - the
   // participant-row dice-count box.
   describe('row Initiative Dice count input (DOM)', () => {
     it('rejects a count above the 5D6 hard cap', async () => {
@@ -563,11 +563,11 @@ describe('BattleTrackerComponent', () => {
   // built on turned out to be wrong:
   //   - AR was treated as a Matrix mode using DP + INT at a fixed 1D6. It is
   //     not: "When in AR, you use your normal Initiative and Initiative Dice"
-  //     (p. 229), and the Initiative Attribute Chart lists Matrix AR as
-  //     Reaction + Intuition (p. 159).
+  //     (Core p. 229), and the Initiative Attribute Chart lists Matrix AR as
+  //     Reaction + Intuition (Core p. 159).
   //   - VR dice were applied as though 1D6 were always the count to return to,
   //     which silently truncated any augmented decker.
-  describe('AR uses ordinary physical initiative (pp. 159, 229, 231)', () => {
+  describe('AR uses ordinary physical initiative (Core pp. 159, 229, 231)', () => {
     /**
      * A decker who is NOT jacked in. Reaction 4 + Intuition 5 = 9 physical,
      * against Data Processing 7 + Intuition 5 = 12 if the Matrix formula were
@@ -715,7 +715,7 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // Step 2. SR5 has exactly one Overwatch threshold: 40 (p. 232). The module
+  // Step 2. SR5 has exactly one Overwatch threshold: 40 (Core p. 232). The module
   // previously carried an 'ic-alert' tier at OS 20 attributed to "Section 9.2 /
   // Table 25" - a citation format SR5 does not use, for a rule that does not
   // exist (briefs/matrix-rules-verification.md, item 3b).
@@ -787,7 +787,7 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  describe('Overwatch Score resets on jack-out (pp. 240, 242)', () => {
+  describe('Overwatch Score resets on jack-out (Core pp. 240, 242)', () => {
     it('zeroes OS when jacking out', () => {
       const mp = new MatrixParticipant();
       mp.name = 'Decker';
@@ -853,7 +853,7 @@ describe('BattleTrackerComponent', () => {
       expect(target.marks['Decker']).toBeUndefined();
     });
 
-    it('erases marks another decker or IC placed on this decker\'s own persona icon (p. 242, "as well as the ones others may have put on your icon")', () => {
+    it('erases marks another decker or IC placed on this decker\'s own persona icon (Core p. 242, "as well as the ones others may have put on your icon")', () => {
       const mp = new MatrixParticipant();
       mp.name = 'Decker';
       mp.dataProcessing = 7;
@@ -985,10 +985,10 @@ describe('BattleTrackerComponent', () => {
   });
 
   // Astral Initiative is 3D6 total against Physical's 1D6 (Astral Attributes
-  // Table, printed p. 314, `rules/pages/p0316.txt`; RULINGS 2026-08-30
+  // Table, printed Core p. 314, `rules/pages/p0316.txt`; RULINGS 2026-08-30
   // supersedes the tracker's prior 2D6 reading), and projecting mid-turn
   // "gains the die (and the change in Initiative) for their Astral
-  // Initiative during that Combat Turn" (p. 160, `rules/pages/p0162.txt`
+  // Initiative during that Combat Turn" (Core p. 160, `rules/pages/p0162.txt`
   // line 53 - singular in the book because its example predates the 3D6
   // ruling above; under that ruling the actual gain is two dice, not one).
   // toggleAstralProjecting previously moved only the attribute half and left
@@ -1076,8 +1076,8 @@ describe('BattleTrackerComponent', () => {
 
     // Defect D1: the return trip used to re-apply the constant regardless of
     // what the outbound trip actually achieved. A dice decrease "rolls the
-    // number of lost dice and subtracts the total" (p. 160) - you only roll and
-    // subtract dice you actually lose - and the 5D6 hard cap (pp. 52/288) can
+    // number of lost dice and subtracts the total" (Core p. 160) - you only roll and
+    // subtract dice you actually lose - and the 5D6 hard cap (Core pp. 52/288) can
     // mean the outbound trip gained fewer dice than the full delta, or none.
     describe('round trip against the 5D6 cap (defect D1)', () => {
       it('gains nothing when already at the 5D6 cap: no roll, no Score change', () => {
@@ -1153,7 +1153,7 @@ describe('BattleTrackerComponent', () => {
 
   // A Score-neutral bounds clamp can leave the rolled-total box and the Score
   // column irreconcilable (attribute + rolled total != Score). That is correct
-  // per p. 160 but must not be silent - the clamp logs a line naming both.
+  // per Core p. 160 but must not be silent - the clamp logs a line naming both.
   describe('rolled-total clamp legibility', () => {
     /** Log entries added by `body`, newest last. */
     function logDuring(body: () => void): string[] {
@@ -1194,7 +1194,7 @@ describe('BattleTrackerComponent', () => {
     // Defect D2: the log used to read the raw `currentInitiativeScore` backing
     // field. The number the GM actually sees in the Ini column is
     // `getCurrentInitiative()` - the running Score plus Initiative already
-    // committed to Interrupt Actions (brief F9, p. 167) - so a participant
+    // committed to Interrupt Actions (brief F9, Core p. 167) - so a participant
     // holding Full Defense was named a number that appears nowhere on screen.
     describe('effective vs raw Initiative Score (defect D2)', () => {
       it('names the effective Score the Ini column shows, not the raw stored one', () => {
@@ -1252,7 +1252,7 @@ describe('BattleTrackerComponent', () => {
   // A `register_character` resent mid-combat with a changed dice count (the
   // player activated a drug/spell and re-submitted their form) is a mid-turn
   // Initiative Dice change, not setup: it must roll the delta and move the
-  // running Score (p. 160), not silently overwrite the count.
+  // running Score (Core p. 160), not silently overwrite the count.
   describe('register_character resent mid-combat', () => {
     function register(dice: number) {
       component['handleSessionCommand']({
@@ -1330,6 +1330,599 @@ describe('BattleTrackerComponent', () => {
 
       expect(p.dices).toBe(4);
       expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  // Fix round 3 (defect class: `participantPendingDeltaDice` keyed by object
+  // identity, `briefs/player-initiative-prompt-spec.md` fix round 3). Every
+  // path that replaces a participant object has to carry or clear this
+  // GM-local map, exactly as it already does for `participantStatblocks` /
+  // `participantEdgeRatings` / `pendingJoinAnnouncement`.
+  describe('participantPendingDeltaDice across participant-replacing paths', () => {
+    /** A jacked-in decker who already rolled this Combat Turn and is owed an
+     * unrolled VR-mode delta (the same shape `configure_deck`'s jack-in
+     * branch produces, without exercising the whole command). */
+    function jackedInDeckerOwingDelta(): MatrixParticipant {
+      const mp = new MatrixParticipant();
+      mp.name = 'Decker';
+      mp.dataProcessing = 7;
+      mp.setDicesWithoutRoll(1);
+      mp.baseIni = 10;
+      CombatManager.participants.insert(mp);
+      mp.diceIni = 4; // already rolled this Combat Turn
+      component['participantReactions'].set(mp, 5);
+      component['participantIntuitions'].set(mp, 5);
+      component['participantPendingDeltaDice'].set(mp, 3);
+      return mp;
+    }
+
+    it('promoteToAstralParticipant clears an owed delta instead of leaving it stranded on the discarded object', () => {
+      // Nothing in enableAstral() guards against Astral-projecting a
+      // participant that is currently jacked in - this is the scenario the
+      // brief's Astral-swap defect describes.
+      const mp = jackedInDeckerOwingDelta();
+      CombatManager.started = true;
+
+      const ap = component['promoteToAstralParticipant'](mp);
+
+      // Cleared, not carried: an unrolled VR-mode delta has no meaning once
+      // the character is an astral projector, and no Initiative Score
+      // correction is needed - the gained dice were never applied to the
+      // Score (only `dices` moved, via `setDicesWithoutRoll`).
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      expect(component['participantPendingDeltaDice'].has(ap)).toBeFalse();
+    });
+
+    it('promoteToMatrixParticipant clears a stale entry on the source, for consistency with the Astral case', () => {
+      // Defensive: nothing in the app can actually populate this map for a
+      // non-Matrix source today, but the helper must not carry it forward
+      // if it somehow existed, rather than silently reviving it on `mp`.
+      const p = new Participant();
+      p.name = 'Ganger';
+      p.baseIni = 8;
+      p.setDicesWithoutRoll(1);
+      CombatManager.participants.insert(p);
+      component['participantPendingDeltaDice'].set(p, 2);
+
+      const mp = component['promoteToMatrixParticipant'](p);
+
+      expect(component['participantPendingDeltaDice'].has(p)).toBeFalse();
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+    });
+
+    it('demoteFromAstralParticipant clears a stale entry on the source, for consistency', () => {
+      const ap = new AstralParticipant();
+      ap.name = 'Mage';
+      ap.astralProjecting = true;
+      ap.setDicesWithoutRoll(3);
+      ap.baseIni = 10;
+      CombatManager.participants.insert(ap);
+      component['participantReactions'].set(ap, 5);
+      component['participantIntuitions'].set(ap, 5);
+      component['participantPendingDeltaDice'].set(ap, 2);
+      CombatManager.started = true;
+      scriptDice(component, [4, 3]); // losing 2 dice (3 -> 1 physical)
+
+      const p = component['demoteFromAstralParticipant'](ap);
+
+      expect(component['participantPendingDeltaDice'].has(ap)).toBeFalse();
+      expect(component['participantPendingDeltaDice'].has(p)).toBeFalse();
+    });
+
+    it('btnDuplicate_Click carries an owed delta to the clone, not just the source', () => {
+      const mp = jackedInDeckerOwingDelta();
+
+      component.btnDuplicate_Click(mp);
+
+      const clone = CombatManager.participants.items.find(p => p !== mp)!;
+      expect(component['participantPendingDeltaDice'].get(clone)).toBe(3);
+      // The source keeps its own, independent entry too - duplicating does
+      // not resolve what the original still owes.
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(3);
+    });
+
+    it("upsertPlayerParticipant's type-mismatch re-registration deletes the stale entry instead of leaking it", () => {
+      component['handleSessionCommand']({
+        type: 'register_character',
+        player: 'Kicker',
+        payload: {
+          characterName: 'Kicker', initiativeDice: 1, reaction: 5, intuition: 5, isMatrix: true
+        },
+        timestamp: new Date().toISOString()
+      });
+      const mp = CombatManager.participants.items[0] as MatrixParticipant;
+      component['participantPendingDeltaDice'].set(mp, 2);
+
+      // Re-registered without a deck: a type mismatch, discards and
+      // recreates the participant.
+      component['handleSessionCommand']({
+        type: 'register_character',
+        player: 'Kicker',
+        payload: {
+          characterName: 'Kicker', initiativeDice: 1, reaction: 5, intuition: 5, isMatrix: false
+        },
+        timestamp: new Date().toISOString()
+      });
+
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      expect(CombatManager.participants.items.length).toBe(1);
+      const newTarget = CombatManager.participants.items[0];
+      expect(component['participantPendingDeltaDice'].has(newTarget)).toBeFalse();
+    });
+  });
+
+  // Fix round 4 (consistency follow-up, `briefs/player-initiative-prompt-spec.md`
+  // follow-on brief): a mode-to-mode VR dice *decrease*, after this Combat
+  // Turn's Initiative Test, now defers to the player exactly like a gain
+  // always has - it no longer rolls and applies the loss GM-side.
+  describe('configure_deck: a mode-to-mode dice decrease defers to the player (fix round 4)', () => {
+    function command(type: string, player: string, payload: Record<string, unknown> = {}) {
+      component['handleSessionCommand']({ type, player, payload, timestamp: new Date().toISOString() });
+    }
+
+    function registerDecker(player: string, name: string): MatrixParticipant {
+      command('register_character', player, {
+        characterName: name, initiativeDice: 1, reaction: 5, intuition: 5,
+        isMatrix: true, dataProcessing: 8, vrMode: 'AR'
+      });
+      return CombatManager.participants.items.find(p => p.name === name) as MatrixParticipant;
+    }
+
+    /**
+     * Jack the decker into Hot Sim (4D6) and take this Combat Turn's
+     * Initiative Test while jacked in, ready for a further mode switch - the
+     * decrease mirror of the existing AR(1) -> Hot Sim(4) = +3 gain scenario
+     * this same brief already covers on the player-view side.
+     */
+    function jackedInAndRolled(player: string, name: string): MatrixParticipant {
+      const mp = registerDecker(player, name);
+      command('configure_deck', player, { isMatrix: true, jackIn: true, vrMode: 'hot-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(4);
+      CombatManager.started = true;
+      mp.diceIni = 16; // this Combat Turn's Initiative Test, already taken
+      return mp;
+    }
+
+    it('does not roll or apply the *dice* loss GM-side: dices are left untouched and a negative delta is recorded (the Initiative Attribute half still applies immediately, as it always has)', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      const dicesBefore = mp.dices;
+
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'AR', dataProcessing: 8 });
+
+      expect(mp.dices).toBe(dicesBefore);
+      // Attribute half (DP+INT(13) -> REA+INT(10)) applies immediately and
+      // is unaffected by this fix - only the *dice* half (still owed) is
+      // deferred, which is why the brief's own report says the Score reads
+      // "too high", not "completely unchanged".
+      expect(mp.getCurrentInitiative()).toBe(scoreBefore - 3);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-3); // Hot Sim(4) -> AR(1)
+    });
+
+    it("mirrors the negative amount onto SharedParticipantState.pendingDeltaDice", () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'AR', dataProcessing: 8 });
+
+      const shared = component['buildSharedParticipant'](mp, 0);
+      expect(shared.pendingDeltaDice).toBe(-3);
+    });
+
+    it("the player's auto-rolled delta roll_submission resolves the loss through Participant.changeDiceCount, subtracting the full rolled total exactly once", () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'AR', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-3);
+
+      component.shareRoomCode = 'ABC123';
+      const sync = TestBed.inject(SessionSyncService);
+      const sent: SharedLogEntry[] = [];
+      spyOn(sync, 'appendLog').and.callFake((entry: SharedLogEntry) => sent.push(entry));
+
+      command('roll_submission', 'pl-decker', {
+        participantId: component['getParticipantId'](mp), roll: 11, diceValues: [5, 4, 2], isDelta: true
+      });
+
+      // `scoreBefore` was captured before the mode switch, so it still
+      // includes the attribute half's immediate -3 (DP+INT -> REA+INT); the
+      // roll then subtracts the dice half (-11) on top of that.
+      const expectedScore = scoreBefore - 3 - 11;
+      expect(mp.dices).toBe(1);
+      expect(mp.getCurrentInitiative()).toBe(expectedScore);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      // Exactly one Action Log line for this roll (requirement 3) - reusing
+      // the existing signed-delta formatter, not a new one.
+      expect(sent.length).toBe(1);
+      expect(sent[0].actor).toBe('Slamm-0');
+      expect(sent[0].text).toBe(`initiative delta: -[5, 4, 2] = -11 → score: ${expectedScore}`);
+    });
+
+    it('a manual-entry delta roll_submission (no discrete diceValues) resolves the Score the same way, via a synthesized in-range split, but logs it as a manual entry, not invented dice faces (fix round 5, Xavier\'s decision C)', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'AR', dataProcessing: 8 });
+
+      component.shareRoomCode = 'ABC123';
+      const sync = TestBed.inject(SessionSyncService);
+      const sent: SharedLogEntry[] = [];
+      spyOn(sync, 'appendLog').and.callFake((entry: SharedLogEntry) => sent.push(entry));
+
+      command('roll_submission', 'pl-decker', {
+        participantId: component['getParticipantId'](mp), roll: 9, isDelta: true
+      });
+
+      // Score math is unchanged by the wording fix: the synthesized in-range
+      // split (three dice summing to 9) still drives the engine.
+      expect(mp.dices).toBe(1);
+      expect(mp.getCurrentInitiative()).toBe(scoreBefore - 3 - 9); // attribute (-3) + dice (-9)
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      expect(sent.length).toBe(1);
+      // The log line now says plainly that this was a manually-entered
+      // total - `formatInitiativeDeltaLogText`'s own existing "manual(±N)"
+      // branch, the same style `formatManualInitiativeRollLogText` already
+      // uses for a typed Initiative Test - instead of listing the
+      // synthesized faces as though they had actually been rolled.
+      expect(sent[0].text).toBe(`initiative delta: manual(-9) → score: ${scoreBefore - 3 - 9}`);
+    });
+
+    // Fix round 5 (`briefs/player-initiative-prompt-spec.md`, Xavier's fix
+    // option A / guard A) supersedes the "known limitation" this test used
+    // to document and accept. A *second* mode switch before the first delta
+    // is ever rolled no longer computes its own delta against a `dices`
+    // value a still-outstanding loss left stale - `changeParticipantDiceCount`
+    // now settles any outstanding note itself, GM-side (rolled here,
+    // deterministically, via `scriptDice`), before computing the new change,
+    // so the resolved `dices` count is always asserted correctly, not
+    // skipped.
+    it('a second switch (a loss, after an unrolled gain) settles the first note GM-side before computing its own, leaving one correct, non-stale note - not two, and not stranded', () => {
+      const mp = registerDecker('pl-decker', 'Slamm-0');
+      CombatManager.started = true;
+      mp.diceIni = 4; // this Combat Turn's Initiative Test, taken while still in AR (1 die)
+
+      // AR(1) -> Hot Sim(4): a gain, +3, written immediately (unchanged, fix round 2/3).
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'hot-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(4);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(3);
+
+      // Hot Sim(4) -> Cold Sim(3): guard A settles the outstanding +3 gain
+      // GM-side first - a deterministic 3-die roll, applied straight to the
+      // Score (`dices` already carried the gain) - *then* computes this
+      // switch's own -1 loss against the now-current, fully settled `dices`
+      // (still 4; settling a gain never touches `dices`).
+      scriptDice(component, [2, 3, 4]); // settling the +3 gain
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+
+      // Exactly one note remains, and it is the *new* switch's own -1 loss -
+      // not an accumulation of the old +3 and the new -1 (that formula only
+      // ever applied to two changes of the same, uninterrupted debt; guard A
+      // settles the first one before the second is ever computed).
+      expect(mp.dices).toBe(4); // a loss is deferred - dices left untouched
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+    });
+
+    // RESOLVED, `briefs/mid-turn-joiner-spec.md` ("jack-out now prompts the
+    // player", Xavier 2026-09-20) - reverses the decision this test used to
+    // assert (recorded 2026-09-17 in this brief, and superseded): a
+    // *player*-initiated jack out no longer rolls the lost dice GM-side. It
+    // defers through the same `rollGainedDice: false` path a VR-mode-down
+    // switch already uses (see the describe block above), so no dice are
+    // rolled here at all - only the Initiative Attribute half (unaffected)
+    // applies immediately.
+    it("a player-initiated jack out no longer rolls the dice loss GM-side: dices are left untouched and a negative delta is recorded for the player to roll, same as a mode-to-mode decrease", () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      const dicesBefore = mp.dices;
+      // No `rollInitiativeDie()` call is expected on this path any more; a
+      // spy that returns nothing proves the point if the guard is ever
+      // reintroduced (an unexpected call resolves to undefined, so a
+      // regression here fails loudly rather than silently rolling zeroes).
+      scriptDice(component, []);
+
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackOut: true, dataProcessing: 8 });
+
+      expect(mp.dices).toBe(dicesBefore); // restored dice count deferred, not applied
+      // Attribute half (DP+INT(13) -> REA+INT(10), -3) still applies
+      // immediately - only the *dice* half is now deferred to the player.
+      expect(mp.getCurrentInitiative()).toBe(scoreBefore - 3);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-3); // Hot Sim(4) -> physical(1)
+    });
+
+    it("the player's own delta roll after jacking out resolves the loss through Participant.changeDiceCount exactly once, and the GM side never rolls it", () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackOut: true, dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-3);
+
+      component.shareRoomCode = 'ABC123';
+      const sync = TestBed.inject(SessionSyncService);
+      const sent: SharedLogEntry[] = [];
+      spyOn(sync, 'appendLog').and.callFake((entry: SharedLogEntry) => sent.push(entry));
+
+      command('roll_submission', 'pl-decker', {
+        participantId: component['getParticipantId'](mp), roll: 9, diceValues: [4, 3, 2], isDelta: true
+      });
+
+      expect(mp.dices).toBe(1);
+      expect(mp.getCurrentInitiative()).toBe(scoreBefore - 3 - 9);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      // Exactly one Action Log line for this roll - the same signed-delta
+      // formatter a mode-switch loss already uses, worded as a subtraction.
+      expect(sent.length).toBe(1);
+      expect(sent[0].actor).toBe('Slamm-0');
+      expect(sent[0].text).toBe(`initiative delta: -[4, 3, 2] = -9 → score: ${scoreBefore - 3 - 9}`);
+    });
+
+    it('removing the deck entirely still resolves immediately and never touches the pending-delta map', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+
+      command('configure_deck', 'pl-decker', { isMatrix: false });
+
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      // demoteToParticipant discards `mp` for a new plain Participant - the
+      // map must never gain an entry for either the old or new instance.
+      const replacement = CombatManager.participants.items.find(p => p.name === 'Slamm-0')!;
+      expect(component['participantPendingDeltaDice'].has(replacement)).toBeFalse();
+    });
+
+    it('a direct GM-side dice-count edit still rolls and applies immediately, unaffected by this change', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0');
+      const scoreBefore = mp.getCurrentInitiative();
+      scriptDice(component, [4]);
+
+      component.onParticipantDiceCountChanged(mp, 3); // Hot Sim's own dice box, edited by the GM directly
+
+      expect(mp.dices).toBe(3);
+      expect(mp.getCurrentInitiative()).toBe(scoreBefore - 4);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+    });
+  });
+
+  // Fix round 5 (`briefs/player-initiative-prompt-spec.md`, review FAILED the
+  // round-4 shape; Xavier's fix option A). Guard A: `changeParticipantDiceCount`
+  // - the single funnel every dice-count- or VR-mode-changing path already
+  // goes through (ARCHITECTURE.md §6) - now settles an outstanding, unrolled
+  // delta note immediately, GM-side, before computing any further change.
+  // Guard B: a delta `roll_submission` against a pending amount of zero/absent
+  // is discarded outright, never defaulted to a gain.
+  describe('guard A / guard B: never stack a second dice/VR-mode change on an unresolved one (fix round 5)', () => {
+    function command(type: string, player: string, payload: Record<string, unknown> = {}) {
+      component['handleSessionCommand']({ type, player, payload, timestamp: new Date().toISOString() });
+    }
+
+    function registerDecker(player: string, name: string): MatrixParticipant {
+      command('register_character', player, {
+        characterName: name, initiativeDice: 1, reaction: 5, intuition: 5,
+        isMatrix: true, dataProcessing: 8, vrMode: 'AR'
+      });
+      return CombatManager.participants.items.find(p => p.name === name) as MatrixParticipant;
+    }
+
+    function jackedInAndRolled(player: string, name: string): MatrixParticipant {
+      const mp = registerDecker(player, name);
+      command('configure_deck', player, { isMatrix: true, jackIn: true, vrMode: 'hot-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(4);
+      CombatManager.started = true;
+      mp.diceIni = 16; // this Combat Turn's Initiative Test, already taken
+      return mp;
+    }
+
+    // Scenario 1 (test list): AR -> Hot Sim -> Cold Sim -> AR, no player roll
+    // in between.
+    it('a full AR -> Hot Sim -> Cold Sim -> AR chain with no player roll in between settles each intermediate note GM-side, ending with a consistent dice count and a single non-stale note', () => {
+      const mp = registerDecker('pl-decker', 'Slamm-0');
+      CombatManager.started = true;
+      mp.diceIni = 4; // this Combat Turn's Initiative Test, taken while still in AR (1 die)
+
+      // AR(1) -> Hot Sim(4): a gain, +3, deferred.
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'hot-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(4);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(3);
+
+      // `rollInitiativeDie` can only be spied on once per test - script the
+      // whole remaining sequence up front: 3 dice settling the +3 gain
+      // (Hot Sim -> Cold Sim), then 1 die settling the -1 loss that switch
+      // leaves owed (Cold Sim -> AR).
+      scriptDice(component, [2, 3, 4, 5]);
+
+      // Hot Sim(4) -> Cold Sim(3): guard A settles the +3 gain first (the
+      // scripted 3-die roll above), then computes this switch's own -1 loss
+      // against the now-current `dices` (still 4 - settling a gain never
+      // moves `dices`).
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(4);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      // Cold Sim(3) -> AR(1): guard A settles the -1 loss first (the
+      // scripted 1-die roll above, which *does* move `dices` down to 3 - a
+      // loss resolves atomically through the engine), then computes this
+      // switch's own loss against the now-current, correctly-settled `dices`.
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'AR', dataProcessing: 8 });
+
+      // Nothing stranded: `dices` reflects every settlement made so far
+      // (Cold Sim's 3, the last one actually resolved), and the one
+      // remaining note is exactly what is still needed to reach AR's 1 die
+      // from there - not stale, not double-counted, not two prompts.
+      expect(mp.dices).toBe(3);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-2);
+    });
+
+    // Scenario 2 (test list): a chain that nets to zero while the player's
+    // modal is open, then the player rolls the stale prompt anyway.
+    it('guard B discards a stale delta roll_submission once its note has already been settled elsewhere, rather than defaulting it to a gain', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+
+      // Hot Sim(4) -> Cold Sim(3): a loss, -1, deferred - the player's modal
+      // opens showing this.
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      // Cold Sim re-confirmed (e.g. a resent command) before the player ever
+      // rolls: guard A settles the outstanding -1 GM-side first (a
+      // deterministic 1-die roll, landing `dices` at 3), then computes a
+      // fresh delta against that already-current count, which is 0 -
+      // nothing further is owed.
+      scriptDice(component, [6]);
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(mp.dices).toBe(3);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+
+      const scoreAfterSettle = mp.getCurrentInitiative();
+      component.shareRoomCode = 'ABC123';
+      const sync = TestBed.inject(SessionSyncService);
+      const sent: SharedLogEntry[] = [];
+      spyOn(sync, 'appendLog').and.callFake((entry: SharedLogEntry) => sent.push(entry));
+
+      // The player's browser still shows the original -1 note and rolls it
+      // now - stale, since guard A already resolved it. Guard B: discarded
+      // outright - no Score change, no log line.
+      command('roll_submission', 'pl-decker', {
+        participantId: component['getParticipantId'](mp), roll: 4, diceValues: [4], isDelta: true
+      });
+
+      expect(mp.dices).toBe(3);
+      expect(mp.getCurrentInitiative()).toBe(scoreAfterSettle);
+      expect(sent.length).toBe(0);
+    });
+
+    // Scenario 3 (test list), first half: the GM's own mode switch.
+    it("gmJackIn (the GM's own Jack In / Switch Mode control) settles an outstanding player-owed note before applying its own switch, and the note is retired", () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      // 1 die settling the outstanding -1 note, then 2 dice for the GM's own
+      // Cold Sim(3, post-settle) -> AR(1) switch.
+      scriptDice(component, [3, 2, 6]);
+      component.setPendingVrMode(mp, VRMode.AR);
+      component.gmJackIn(mp);
+
+      expect(mp.dices).toBe(1);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      // The note is off the wire too - the player's non-dismissible delta
+      // modal has nothing left to reopen for.
+      const shared = component['buildSharedParticipant'](mp, 0);
+      expect(shared.pendingDeltaDice).toBeUndefined();
+    });
+
+    // Scenario 3 (test list), second half: the GM's direct dice-count edit.
+    it('a GM direct dice-count edit settles an outstanding player-owed note before applying the edit, and the note is retired', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      // 1 die settling the outstanding -1 note (dices 4 -> 3), then 1 die for
+      // the GM's own edit down to 2 (3 -> 2).
+      scriptDice(component, [3, 4]);
+      component.onParticipantDiceCountChanged(mp, 2);
+
+      expect(mp.dices).toBe(2);
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      const shared = component['buildSharedParticipant'](mp, 0);
+      expect(shared.pendingDeltaDice).toBeUndefined();
+    });
+
+    // Scenario 4 (test list), first half: jack-out.
+    //
+    // RESOLVED, `briefs/mid-turn-joiner-spec.md` ("jack-out now prompts the
+    // player", Xavier 2026-09-20): jacking out no longer resolves its own
+    // loss GM-side (that part of the old title is superseded), but guard A
+    // still settles a *prior*, unrelated outstanding note (the Cold Sim
+    // switch below) before computing the jack-out's own deferred loss -
+    // ending with exactly one note, the jack-out's, not two and not stranded.
+    it('jacking out while a player-owed note is outstanding settles that prior note first (guard A), then defers its own loss to the player as a fresh note - never both at once', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      // 1 die settles the prior -1 note (guard A, dices 4 -> 3); the
+      // jack-out's own loss (3 -> 1) is deferred, not rolled here.
+      scriptDice(component, [3]);
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackOut: true, dataProcessing: 8 });
+
+      expect(mp.dices).toBe(3); // restored dice count deferred, not applied
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-2); // Cold Sim(3, post-settle) -> physical(1)
+    });
+
+    // Scenario 4 (test list), second half: deck removal.
+    it('removing the deck entirely while a player-owed note is outstanding retires it without leaving it stranded - no settlement roll is owed, because the note never moved the Score in the first place', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+
+      command('configure_deck', 'pl-decker', { isMatrix: false });
+
+      expect(component['participantPendingDeltaDice'].has(mp)).toBeFalse();
+      const replacement = CombatManager.participants.items.find(p => p.name === 'Slamm-0')!;
+      expect(component['participantPendingDeltaDice'].has(replacement)).toBeFalse();
+    });
+
+
+    // Scenario 6 (test list): the ordinary single-switch case, both
+    // directions, is unaffected by the guard (it only ever fires when
+    // something was already outstanding).
+    it('an ordinary single gain switch is unaffected - no prior note, so the guard is a no-op', () => {
+      const mp = registerDecker('pl-decker', 'Slamm-0');
+      CombatManager.started = true;
+      mp.diceIni = 4;
+
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'hot-sim', dataProcessing: 8 });
+
+      expect(mp.dices).toBe(4);
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(3);
+    });
+
+    it('an ordinary single loss switch is unaffected - no prior note, so the guard is a no-op', () => {
+      const mp = jackedInAndRolled('pl-decker', 'Slamm-0'); // Hot Sim(4), already rolled
+
+      command('configure_deck', 'pl-decker', { isMatrix: true, jackIn: true, vrMode: 'cold-sim', dataProcessing: 8 });
+
+      expect(mp.dices).toBe(4); // a loss is deferred - dices untouched
+      expect(component['participantPendingDeltaDice'].get(mp)).toBe(-1);
+    });
+  });
+
+  // ── Regression: "Request Player Rolls produced nothing" ──────────────────
+  // GM-component half of the fix: `btnStartRound_Click()` requests player
+  // rolls during initiative PREP, deliberately before `beginCombatTurn()`
+  // (the only place that sets `combatManager.started = true`) runs - it
+  // waits for every roll to be in first. This proves the broadcast the GM
+  // side actually sends during that window marks the pending player
+  // participant as `askedToRoll: true` while `started` is still `false`, so
+  // the two halves of the fix (this component's broadcast and the player
+  // view's open predicate) genuinely agree on what a "prep-time request"
+  // looks like on the wire. Updated for `briefs/mid-turn-joiner-spec.md`'s
+  // redesign (item A): the table-wide `rollsRequested` switch this test used
+  // to assert was replaced by this per-participant field.
+  describe('Regression: requesting player rolls during initiative prep (before the Combat Turn starts)', () => {
+    it('btnStartRound_Click broadcasts the pending player as askedToRoll: true while started is still false', async () => {
+      const sessionSync = TestBed.inject(SessionSyncService);
+      const broadcasts: SharedCombatState[] = [];
+      spyOn(sessionSync, 'broadcastState').and.callFake((state: SharedCombatState) => {
+        broadcasts.push(state);
+      });
+      spyOn(sessionSync, 'broadcastGmState');
+      spyOn(sessionSync, 'sendCommand');
+      component.shareRoomCode = 'ABC123';
+
+      // An unrolled, player-owned participant - the case that makes
+      // `getPendingPlayerRollCount() > 0` and so triggers `requestPlayerRolls()`.
+      const hero = new Participant();
+      hero.name = 'Hero';
+      hero.baseIni = 10;
+      hero.setDicesWithoutRoll(3);
+      CombatManager.participants.insert(hero);
+      component['participantOwners'].set(hero, 'player-1');
+
+      expect(CombatManager.started).toBeFalse();
+
+      await component.btnStartRound_Click();
+
+      expect(CombatManager.started).toBeFalse(); // still prep, not the Combat Turn itself
+      expect(broadcasts.length).toBeGreaterThan(0);
+      const last = broadcasts[broadcasts.length - 1];
+      expect(last.started).toBeFalse();
+      const heroWire = last.participants.find(p => p.id === component['getParticipantId'](hero));
+      expect(heroWire?.askedToRoll).toBeTrue();
     });
   });
 });

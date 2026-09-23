@@ -2,7 +2,7 @@ import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, Temp
 import { CommonModule } from "@angular/common";
 import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { Subscription } from "rxjs";
-import { CombatManager, StatusEnum, BTTime, IParticipant } from "Combat";
+import { CombatManager, StatusEnum, BTTime, IParticipant, canParticipantActThisPass, hasRolledThisTurn } from "Combat";
 import {
   Participant, PARTICIPANT_BASE_BACKING_FIELDS, MIN_DISPLAYED_DICE_TOTAL,
   PHYSICAL_INITIATIVE_DICE, DiceCountChangeResult, NO_DICE_COUNT_CHANGE,
@@ -44,6 +44,7 @@ import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRAS
 import {
   formatLogText, getLogTextClass,
   formatDiceRollLogText, formatInitiativeRollLogText, formatManualInitiativeRollLogText,
+  formatInitiativeRollSupersededLogText,
   formatInitiativeDeltaLogText, formatPassStartLogText, formatLogEntryReference,
   formatGroupWoundLogText, formatTurnStartLogText, formatTurnEndLogText,
   formatPassEndLogText, COMBAT_STARTED_LOG_TEXT, COMBAT_ENDED_LOG_TEXT
@@ -52,14 +53,38 @@ import { classifyRoll } from "app/shared/roll-utils";
 import { generateName, GeneratedNameKind, normaliseNameForComparison } from "app/shared/name-generator";
 
 /**
- * Options for `changeParticipantDiceCount`. `rollGainedDice: false` is the
- * session-protocol escape hatch: on a player-driven jack-in the *player*
- * client rolls the gained dice and submits them as a delta `roll_submission`,
- * so the GM must not roll them here or the gain would be counted twice. Lost
- * dice are always rolled GM-side.
+ * Options for `changeParticipantDiceCount`.
+ *
+ * `rollGainedDice: false` is the session-protocol escape hatch: on a
+ * player-driven VR mode switch, after this Combat Turn's Initiative Test,
+ * the *player* client rolls the changed dice - gained or lost - and submits
+ * them as a delta `roll_submission`, so this GM-side call must not roll
+ * either direction itself (fix round 4, consistency follow-up -
+ * `briefs/player-initiative-prompt-spec.md` follow-on: a loss used to be
+ * rolled GM-side unconditionally while only a gain deferred to the player;
+ * both directions now defer identically). Every other dice change - jacking
+ * out entirely, deck removal, initial deck creation, a promote/demote type
+ * swap, and any direct GM edit - is unaffected and still rolls immediately.
+ *
+ * `rollValues` resolves a change already deferred this way: the exact die
+ * faces the player rolled (or a synthesized in-range split of a typed
+ * manual total, see the `roll_submission {isDelta:true}` handler), consumed
+ * in order by `Participant.changeDiceCount` in place of a GM-side random
+ * roll, so the increase/decrease Score math is never written twice.
+ *
+ * `manualEntry` (fix round 5, Xavier's decision C): only meaningful together
+ * with `rollValues`, for the one case where those values were synthesized
+ * from a typed total rather than actual rolled faces. It changes nothing
+ * about the Score math (the synthesized values still feed the engine
+ * unchanged) - it only tells the resulting Action Log line to word itself as
+ * a manual entry (`formatInitiativeDeltaLogText`'s own "manual(±N)" branch,
+ * the same style `formatManualInitiativeRollLogText` already uses) instead of
+ * listing the invented faces as though they had been rolled.
  */
 interface DiceCountChangeOptions {
   rollGainedDice?: boolean;
+  rollValues?: number[];
+  manualEntry?: boolean;
 }
 
 interface LocalLogEntry {
@@ -71,8 +96,8 @@ interface LocalLogEntry {
  * Edge rating a linked NPC row is created with, and keeps.
  *
  * Grunts have no Edge attribute at all (brief "NPC Group Initiative"
- * criterion 10 / Decision 5, p. 380), and ERIC's first step is the Edge
- * attribute (p. 159) - so a row enters the tie-break with 0 and falls through
+ * criterion 10 / Decision 5, Core p. 380), and ERIC's first step is the Edge
+ * attribute (Core p. 159) - so a row enters the tie-break with 0 and falls through
  * to Reaction, then Intuition, then the coin toss. Deliberately *not* the
  * group's Professional Rating / Group Edge pool, which Decision 5 rules out.
  */
@@ -114,7 +139,7 @@ const PLACEHOLDER_SORT_ORDER_FIELD = "_sortOrder";
 /**
  * Name prefix for a grunt created with the "Add Grunt" button (brief addendum
  * Decision 9). Numbered per encounter so two grunts never share a name - the
- * combat log names the grunt whose wound or death it records (p. 379).
+ * combat log names the grunt whose wound or death it records (Core p. 379).
  */
 const STANDALONE_GRUNT_NAME_PREFIX = "Grunt";
 
@@ -146,7 +171,7 @@ const DEFAULT_ROW_NAME_PATTERN = new RegExp(`^${MERGED_GRUNT_ROW_NAME}(?: (\\d+)
  * Group 1 is out of action", brief Decision 19) and deliberately not
  * `STANDALONE_GRUNT_NAME_PREFIX` either, which is already the namespace of the
  * "Add Grunt" button's standalone NPCs - two combatants answering to "Grunt 1"
- * would make the log's per-NPC lines unattributable (p. 379 records
+ * would make the log's per-NPC lines unattributable (Core p. 379 records
  * alive-or-dead per NPC).
  */
 const DEFAULT_ROW_MEMBER_NAME_PREFIX = "NPC";
@@ -204,7 +229,7 @@ interface AddDraft {
   /**
    * kind === "grunt" only, and only meaningful when the selected template is
    * a lieutenant (U7): the row this lieutenant beats on an Initiative tie
-   * with his own team (p. 381). Never auto-filled - a lieutenant is never
+   * with his own team (Core p. 381). Never auto-filled - a lieutenant is never
    * auto-linked to a group (brief acceptance criterion 16 / U6).
    */
   lieutenantTeamRow: NpcRowParticipant | null;
@@ -266,7 +291,7 @@ interface QueuedJoinAnnouncement {
  * A participant needs a Score **above** this to take a Simple or Complex
  * action; at or below it they still get one Free Action per pass and still
  * defend normally (brief "NPC Group Initiative" Decision 16, `RULINGS.md`
- * 2026-08-07, p. 159-160). Applies to every participant type - PC, ordinary
+ * 2026-08-07, Core p. 159-160). Applies to every participant type - PC, ordinary
  * NPC, standalone grunt and linked row alike.
  */
 const MIN_ACTION_PHASE_INITIATIVE_SCORE = 0;
@@ -289,6 +314,16 @@ const NO_ACTION_PHASE_MESSAGE =
 export const MERGE_MESSAGE_DISMISS_MS = 12000;
 
 /**
+ * How long the Act window's "closed - here's why" toast
+ * (`actModalClosedReason`, round 5 item 3) stays up. Same shape and same
+ * reasoning as `MERGE_MESSAGE_DISMISS_MS` above: workflow feedback on a tap
+ * that already happened, not tracker state. Shorter than the merge message
+ * because the sentence is a single short clause rather than a multi-line
+ * refusal.
+ */
+export const ACT_MODAL_CLOSED_REASON_DISMISS_MS = 6000;
+
+/**
  * Damage Value the row panel's damage controls start on: one box, so an
  * ordinary chip of damage is still a single tap.
  */
@@ -297,7 +332,7 @@ const DEFAULT_ROW_MEMBER_DAMAGE_VALUE = 1;
 /**
  * Upper bound on a typed Damage Value. Nothing in the rules caps DV, but a
  * grunt's track is at most 8 + ceil(max(Body, Willpower)/2) boxes and takes no
- * overflow (brief "NPC Group Initiative" criterion 7, p. 379), so anything past
+ * overflow (brief "NPC Group Initiative" criterion 7, Core p. 379), so anything past
  * this is discarded on application anyway; the cap only stops a fat-fingered
  * entry (a stray extra digit) reaching the log and the alive/dead comparison.
  */
@@ -323,7 +358,7 @@ const MAX_ROW_MEMBER_COUNT = 50;
 /**
  * Marker appended to every GM-local log line the players never received.
  *
- * Whether the gamemaster's dice are seen is a table agreement (brief p. 330);
+ * Whether the gamemaster's dice are seen is a table agreement (brief Core p. 330);
  * once the table has chosen "hidden", the GM's own log still has to say which
  * lines went out and which did not, or a GM reading back the log after a
  * disconnect cannot tell the two apart. One constant so every hidden-write path
@@ -458,6 +493,19 @@ function gmCount(raw: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 }
 
+/**
+ * Shared-log text for a successful Seize the Initiative declaration (Core
+ * p. 160, "Initiative and Edge", continuing Core p. 161; one point of Edge,
+ * Core p. 56). Round-6 defect 3 (`briefs/seize-initiative-spec.md`): the tap used
+ * to write only a bare internal label (`"<Name> Edge_Click"`) to the GM's own
+ * log, and nothing at all to the shared log the players see - a dramatic,
+ * Edge-costing moment nobody at the table but the GM's own screen was told
+ * about. Phrased as a sentence, matching the other participant-attributed
+ * Action Log lines (e.g. `performAct`'s declared-action text), read through
+ * `appendParticipantEventLog` alongside `sender.name` as the actor.
+ */
+const SEIZE_LOG_TEXT = "seizes the Initiative";
+
 /** GM-action shared-log entries added by the Action Log attribution change. */
 const GM_LOG_TEXT = {
   leftCombat: (name: string) => `${name} left combat`,
@@ -489,7 +537,7 @@ const GM_LOG_TEXT = {
 })
 export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild("gmLogListContainer") gmLogListContainer?: ElementRef<HTMLElement>;
-  /** The GM's dice roller, so its sticky "Roll as" state can be reset (p. 44). */
+  /** The GM's dice roller, so its sticky "Roll as" state can be reset (Core p. 44). */
   @ViewChild("gmDiceRoller") gmDiceRoller?: DiceRollerComponent;
   combatManager = CombatManager
   indexToSelect = -1;
@@ -541,7 +589,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * Whether the gamemaster's dice are visible - rolled in front of the players
    * or behind a screen - is explicitly a table agreement, not a rule
-   * (brief p. 330). The table's chosen default here is *visible*: the
+   * (brief Core p. 330). The table's chosen default here is *visible*: the
    * tracker's whole value is a shared record, so a GM roll is broadcast unless
    * the GM says otherwise.
    */
@@ -590,7 +638,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * A participant nobody has claimed is run by the GM, so its initiative roll
    * is a GM roll and answers to the same visibility decision as the dice
-   * roller (brief p. 330).
+   * roller (brief Core p. 330).
    */
   private isGmControlled(p: IParticipant): boolean {
     return !this.participantOwners.has(p);
@@ -599,7 +647,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * Log an initiative-track entry for a participant, honouring GM roll
    * visibility for GM-run participants. Player-claimed participants are never
-   * hidden - the setting is about the *gamemaster's* dice (brief p. 330).
+   * hidden - the setting is about the *gamemaster's* dice (brief Core p. 330).
    *
    * `presetHidden` lets a batch (roll-outstanding) resolve the decision once
    * and apply it to every roll in the batch, so the one-shot is spent once per
@@ -635,7 +683,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Names offered by the dice roller's "Roll as" picker: the combatants the GM
    * actually runs. Anything `isPlayerCharacterName` claims is out - the
    * gamemaster governs the actions of the *non-player* characters (brief
-   * p. 44), so offering a player's character here could only ever produce a
+   * Core p. 44), so offering a player's character here could only ever produce a
    * roll impersonating them, badged NPC.
    *
    * Same predicate the roll-time re-validation in `onGmDiceRolled` uses, and
@@ -715,7 +763,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * character rather than a non-player combatant.
    *
    * The gamemaster governs the actions of the *non-player* characters (brief
-   * p. 44), so this is the one test for "not mine to roll as". Two states
+   * Core p. 44), so this is the one test for "not mine to roll as". Two states
    * count, joined by OR:
    *
    *  - a player owns the participant right now (`participantOwners`);
@@ -761,10 +809,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   onGmDiceRolled(request: DiceRollRequest): void {
     const values = request.values;
     // Hits, 1s and glitch status all come from the faces already rolled
-    // (brief pp. 44-45); nothing else about the test is modelled. Rolling on
+    // (brief Core pp. 44-45); nothing else about the test is modelled. Rolling on
     // behalf of an NPC changes the *attribution* only - the gamemaster governs
     // the actions of the non-player characters and determines the results of
-    // their tests (brief p. 44), using the same resolution as anyone else.
+    // their tests (brief Core p. 44), using the same resolution as anyone else.
     const glitch = classifyRoll(values).glitch;
     const logText = formatDiceRollLogText(values);
     const requestedName = (request.rollAs || "").trim();
@@ -932,6 +980,95 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   private isClosingSession = false;
   initiativePrepActive = false;
+  /**
+   * Per-person "the GM has asked this character to roll" record
+   * (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation round 2:
+   * redesign", item A) - the single choke point for "who has been asked".
+   * Replaces the earlier, table-wide `rollsRequested` boolean, which cleared
+   * itself the instant nobody was left pending (silently cancelling the
+   * request for the one player it was tracking if their connection dropped
+   * and they released/reclaimed - validator failure 1) and could not say
+   * "I only asked THIS person" (validator failure 3).
+   *
+   * Keyed by the stable participant id (`getParticipantId`), not object
+   * reference, for the same reason `participantLieutenantTeamRowId` is
+   * (ARCHITECTURE.md §1): object identity does not survive
+   * `restoreFromSharedState()`, but a string id does, and a promote/demote
+   * type swap already carries the same id onto the new object (§6) without
+   * this set needing to know that happened at all.
+   *
+   * Read (and opportunistically pruned once resolved) in
+   * `buildSharedParticipant()`, gated on `!p.ooc && pendingRoll` - see that
+   * method's doc comment for why that is the single place this "clears when
+   * a roll lands" rather than a patch at every roll-landing call site.
+   * Cleared wholesale at the moments the brief says "asked" stops applying
+   * table-wide: `beginCombatTurn()`, `logCombatTurnEnded()` (a Combat Turn
+   * boundary re-zeroes every `diceIni`, which would otherwise read as
+   * "everyone was just asked again"), `btnReset_Click()`'s End Combat, and
+   * leaving/closing a session. Explicitly removed per-id in
+   * `forgetParticipant()` when a participant is permanently removed.
+   */
+  private readonly participantsAskedToRoll = new Set<string>();
+  /**
+   * Item 5 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation round
+   * 3"): "the GM has already rolled this Combat Turn's Initiative Test for
+   * this participant with the per-row dice button (or Force Roll Outstanding
+   * / Roll Remaining Non-Player, which share the same `rollAndLogInitiative`
+   * choke point), and the player's own roll has not yet superseded it." The
+   * `roll_submission` handler's existing "already rolled this Combat Turn"
+   * guard reads this set to decide whether an incoming submission
+   * supersedes a GM roll (once) or is an ordinary stale/duplicate
+   * resubmission (ignored, unchanged) - see that handler's own comment.
+   *
+   * Keyed by the stable participant id, same rationale as
+   * `participantsAskedToRoll` above. Marked by `rollAndLogInitiative()`
+   * only for a player-owned participant (a `roll_submission` command can
+   * only ever be addressed to one). Cleared the moment the player's own
+   * roll actually supersedes it (so a *second* submission finds nothing
+   * here and is treated as an ordinary already-rolled resubmission - "only
+   * once"), and wholesale at every Combat Turn boundary
+   * (`beginCombatTurn()`, `logCombatTurnEnded()`) and End Combat, so a roll
+   * from a previous Combat Turn can never be superseded - "never from a
+   * previous Combat Turn". Explicitly removed per-id in
+   * `forgetParticipant()` when a participant is permanently removed.
+   */
+  private readonly participantsWithSupersedableGmRoll = new Set<string>();
+  /**
+   * Round 4 item 4 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation
+   * round 4"): "has this participant been asked to roll at any point this
+   * Combat Turn" - the precondition item 4 found missing from the
+   * supersede check above. Deliberately **not** the same set as
+   * `participantsAskedToRoll`: that one prunes itself the moment a roll
+   * lands (`isAskedToRoll()`'s read-time prune), and by the time a GM roll
+   * exists to supersede, the roll has already landed and `pendingRoll` is
+   * already `false` - so `participantsAskedToRoll` would already have
+   * forgotten the ask by the time this check needs it. This set only ever
+   * gains a member alongside `participantsAskedToRoll` (`askParticipantToRoll()`)
+   * and is cleared at the exact same moments `participantsWithSupersedableGmRoll`
+   * is: every Combat Turn boundary, End Combat, and `forgetParticipant()`/the
+   * type-mismatch re-registration path - so "asked this Combat Turn" can
+   * never survive into a later Combat Turn or outlive the participant.
+   */
+  private readonly participantsAskedThisCombatTurn = new Set<string>();
+  /**
+   * Round 5 item 4 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation
+   * round 5"): the second half of item 5's (round 3) supersede precondition,
+   * missing until now. A superseding player roll must be accepted only for a
+   * participant "asked to roll this Combat Turn" (the guard above) **and**
+   * "whose player has not already submitted one this Combat Turn" - without
+   * this, a GM who rolls again for the same participant later in the same
+   * Combat Turn (a deliberate re-roll) re-arms
+   * `participantsWithSupersedableGmRoll`, and a duplicate or delayed resend
+   * of the player's *earlier* submission could then supersede that later,
+   * deliberate GM roll. Marked the moment a player's own roll first lands for
+   * a participant this Combat Turn - both the ordinary path (`diceIni <= 0`)
+   * and the supersede path - and read (never cleared mid-turn) by the
+   * `roll_submission` handler's supersede guard, so at most one player
+   * submission per participant per Combat Turn can ever count. Cleared at the
+   * same wholesale moments as `participantsAskedThisCombatTurn`: every Combat
+   * Turn boundary, End Combat, and `forgetParticipant()`.
+   */
+  private readonly participantsWithPlayerSubmittedRoll = new Set<string>();
   sharedLogEntries: SharedLogEntry[] = [];
   private pendingLogScroll = false;
   private flashedSharedLogIndex = -1;
@@ -944,7 +1081,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private observedLocalLogCount = 0;
   expandedDeckPanels = new Set<IParticipant>();
   expandedAstralPanels = new Set<IParticipant>();
-  /** Which linked NPC rows have their member list open (brief p. 379). */
+  /** Which linked NPC rows have their member list open (brief Core p. 379). */
   expandedRowPanels = new Set<IParticipant>();
   /**
    * Which participants show their E/R/I/D stats as editable inputs rather than
@@ -965,7 +1102,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * The Damage Value the GM is about to apply to each NPC in a row.
    *
-   * Needed because p. 379 settles a downed grunt's alive-or-dead from the DV of
+   * Needed because Core p. 379 settles a downed grunt's alive-or-dead from the DV of
    * the **final attack** compared against Body — so the tracker has to be told
    * the attack's real DV, not just "one more box". Purely transient view state
    * (the same class of thing as `expandedRowPanels`): it holds nothing that
@@ -980,10 +1117,37 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * itself since a standalone grunt has no `GruntMember` to key off. The
    * Condition Monitor widget's box-clicking can only ever record as many
    * boxes as are left on the track, which makes a killing blow bigger than
-   * the remaining boxes unrecordable for p. 379's alive-or-dead comparison.
+   * the remaining boxes unrecordable for Core p. 379's alive-or-dead comparison.
    */
   private readonly gruntDamageValues = new Map<IParticipant, number>();
   private readonly pendingVrModes = new Map<IParticipant, VRMode>();
+  /**
+   * The signed Initiative Dice delta this participant owes a roll for - a
+   * VR mode switch mid-pass, after already rolling this Combat Turn, that
+   * has not yet been resolved by the player's own roll. Positive is dice
+   * *gained* (added to the running Score once rolled); negative is dice
+   * *lost* (subtracted once rolled) - fix round 4, consistency follow-up:
+   * before this, a loss was always rolled and applied GM-side immediately,
+   * never deferred, so only gains ever appeared here. Mirrors
+   * `SharedParticipantState.pendingDeltaDice` (see that field's doc comment)
+   * onto the wire via `buildSharedParticipant()`.
+   *
+   * GM-local side map, same obligations as every other one keyed by
+   * `IParticipant` (ARCHITECTURE.md §8): set in the `configure_deck` jack-in
+   * branch when a mode switch's dice change is applied without a roll (both
+   * directions), cleared when the matching `roll_submission {isDelta: true}`
+   * lands, cleared in `forgetParticipant`, cleared at the top of
+   * `beginCombatTurn()` (a new turn's dice change is a fresh event, p.
+   * 159/160 - nothing carries a stale unrolled amount across a turn
+   * boundary), and cleared by `restoreFromSharedState()`'s bulk rebuild
+   * before being selectively repopulated from each participant's own
+   * `shared.pendingDeltaDice` - unlike `SharedParticipantState.pendingDeltaDice`
+   * itself, this GM-local copy is not restored from a GM tab's own rejoin
+   * (`gmState` carries no field for it, a known small gap: only a *player's*
+   * rejoin needs this to survive, and that already works because the room's
+   * last broadcast `SharedCombatState` is what a player pulls, not this map).
+   */
+  private readonly participantPendingDeltaDice = new Map<IParticipant, number>();
   private readonly participantIds = new Map<IParticipant, string>();
   /**
    * Who owns each participant, for whichever room `activeOwnershipRoom`
@@ -1082,7 +1246,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   private readonly participantStatblocks = new Map<IParticipant, { id: string; augmented: boolean }>();
   /**
-   * U7 (brief p. 381): which row a lieutenant beats on an Initiative tie with
+   * U7 (brief Core p. 381): which row a lieutenant beats on an Initiative tie with
    * his own team, keyed by `getParticipantId(row)` rather than an object
    * reference - object identity does not survive `restoreFromSharedState`,
    * which rebuilds every participant (see `initiativeTieBreakComparator`).
@@ -1158,7 +1322,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * These are rules-correct and stay: for any Attack or Sleaze action, "your OS
    * increases by the number of hits the target gets on its defense test"
-   * (p. 232), which this app never rolls — so the GM is reminded to apply it
+   * (Core p. 232), which this app never rolls — so the GM is reminded to apply it
    * once defense is resolved. Formerly named `icAlertMessages` and labelled
    * "IC Alert", which wrongly implied an OS-driven alert threshold; SR5 has no
    * Overwatch threshold below convergence at 40.
@@ -1315,7 +1479,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Attack/Sleaze actions in the current modal selection, which will owe
-   * Overwatch Score once defense is resolved (p. 232).
+   * Overwatch Score once defense is resolved (Core p. 232).
    *
    * Names only, no amounts: OS equals the defender's hits, which this app does
    * not roll. The former `delta` on each entry came from a per-action cost
@@ -1344,7 +1508,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   async ngOnInit() {
     this.observedLocalLogCount = this.logHandler.logbook.length;
-    // Convergence (OS 40, p. 232) is the only Overwatch event there is. The
+    // Convergence (OS 40, Core p. 232) is the only Overwatch event there is. The
     // former `ic-alert` branch here fired at OS 20 on a rule that does not
     // exist in SR5 — see `briefs/matrix-rules-verification.md` item 3b.
     this.osThresholdSub = this.osTracking.threshold$.subscribe(event => {
@@ -1404,7 +1568,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     else {
       this.combatManager.participants.sortByInitiative();
       this.combatManager.participants.items.sort((a, b) => this.initiativeTieBreakComparator(a, b));
-      // Defect D4 fix (validator round): the p. 381 lieutenant-beats-his-own-
+      // Defect D4 fix (validator round): the Core p. 381 lieutenant-beats-his-own-
       // tied-team rule is a post-sort adjustment, not part of the comparator
       // above - see `applyLieutenantPrecedence`'s doc comment.
       this.applyLieutenantPrecedence(this.combatManager.participants.items);
@@ -2721,6 +2885,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     );
     this.clearSharedLogDecodeAnimations();
     this.initiativePrepActive = false;
+    this.participantsAskedToRoll.clear();
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
     // Second choke point alongside End Combat: a GM who leaves the session
     // has finished with this table's scene even if they never pressed End
     // Combat, and a name left armed here would carry into the next session.
@@ -2868,7 +3036,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * The session went away without the GM asking for it (a deliberate close from
    * another tab). Reset the share state but keep the GM-local hidden
    * entries: the server never received them, so this list is the only copy and
-   * a rejoin merges them back in (brief p. 330).
+   * a rejoin merges them back in (brief Core p. 330).
    *
    * Note this is *not* the server-restart path, despite what this comment used
    * to claim: a restarting server never emits `session:closed`. Restarts are
@@ -2925,6 +3093,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sharedLogEntries = this.reseedLogOrder(this.getHiddenLogEntries());
     this.clearSharedLogDecodeAnimations();
     this.initiativePrepActive = false;
+    this.participantsAskedToRoll.clear();
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
     this.sessionSync.disconnect();
   }
 
@@ -3143,11 +3315,39 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       mp.firewall = Math.max(0, Number(payload["firewall"] || 0));
       mp.deviceRating = Math.max(0, Number(payload["deviceRating"] || 0));
       if (jackIn) {
-        // Lost dice (e.g. Hot Sim → Cold Sim) are rolled and applied GM-side.
-        // Gained dice are not: the player client submits them as a delta
-        // roll_submission {isDelta:true}, so rolling here would double-count.
-        this.applyVRMode(mp, mode, { rollGainedDice: false });
+        // Fix round 4 (consistency follow-up, player-initiative-prompt-spec.md
+        // follow-on brief): a mode-to-mode switch's dice change - gained OR
+        // lost - is deferred to the owning player identically in both
+        // directions. Before this, a loss (e.g. Hot Sim -> Cold Sim) was
+        // rolled and applied GM-side immediately, while a gain was always
+        // deferred; the player now rolls both, via a delta `roll_submission`,
+        // so this GM-side call must not roll either direction itself.
+        const result = this.applyVRMode(mp, mode, { rollGainedDice: false });
         mp.jackedIn = true; // force true even for AR (applyVRMode leaves it false)
+        // Item D (fix round 2) / consistency follow-up (fix round 4): a
+        // change applied without a roll leaves a *signed* delta owed -
+        // positive for a gain, negative for a loss - mirrored to the owning
+        // player via `SharedParticipantState.pendingDeltaDice`
+        // (`buildSharedParticipant()`). `result.delta` is already 0 whenever
+        // this participant has not yet made this Combat Turn's Initiative
+        // Test (the same `combatActive && alreadyRolled` gate
+        // `PlayerViewComponent.applyInitiativeRollLogic` uses to decide
+        // "delta prompt" vs. "nothing, the normal roll covers it") or the
+        // mode change did not actually change the dice count - see
+        // `changeParticipantDiceCount`'s `!rollGainedDice` branch - so no
+        // extra gate is needed here. In practice nothing is ever outstanding
+        // when this runs: guard A (fix round 5, `settleOutstandingDeltaDice()`
+        // at the top of `changeParticipantDiceCount`) settles any earlier
+        // unrolled note GM-side *before* this change is computed, so a second
+        // switch before the first delta is rolled does NOT net the two - the
+        // first is rolled and applied by the GM, then the second starts a
+        // fresh note. Opposite switches (e.g. Hot Sim -> Cold Sim -> Hot Sim)
+        // therefore wobble the Score rather than cancelling (backlogged, see
+        // docs/FEATURE-BACKLOG.md). Only a GM-side change can reach this: the
+        // player's own mode controls sit behind the non-dismissible delta
+        // modal until they roll. The add-to-existing below is kept as a
+        // defensive no-op, not as netting behaviour.
+        this.recordPendingDeltaDice(mp, result.delta);
       } else if (jackOut || create) {
         // Jack Out or initial deck creation: no VR mode, restore physical initiative.
         mp.vrMode = VRMode.None;
@@ -3157,14 +3357,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         const intuition = this.getParticipantIntuition(mp);
         mp.baseIni = reaction + intuition;
         if (jackOut) {
-          // Jack-out dice loss is always handled GM-side: roll the lost dice,
-          // subtract the total (brief F5 / criterion 8, p. 160). Restores the
-          // decker's own physical dice, not a hard-coded 1D6.
-          this.restorePhysicalDiceCount(mp);
+          // RESOLVED, `briefs/mid-turn-joiner-spec.md` ("jack-out now prompts
+          // the player", Xavier 2026-09-20) — reverses the F5/criterion-8
+          // decision this comment used to cite: a *player*-initiated jack out
+          // no longer rolls the lost dice GM-side. It defers through the same
+          // `rollGainedDice: false` path a VR-mode-down switch already uses
+          // (fix round 4, `briefs/player-initiative-prompt-spec.md`), so the
+          // player rolls the loss themselves via the non-dismissible delta
+          // modal. Restores the decker's own physical dice count, not a
+          // hard-coded 1D6, exactly as before — only who rolls the resulting
+          // delta has changed. `gmJackOut()` (the GM's own button) is
+          // untouched and still rolls immediately; see that method's doc
+          // comment.
+          const result = this.restorePhysicalDiceCount(mp, { rollGainedDice: false });
+          this.recordPendingDeltaDice(mp, result.delta);
         }
         // Initial deck creation deliberately leaves the dice count alone.
         // Creating a deck does not change how fast the character's body is:
-        // they are in AR, using their normal Initiative Dice (p. 229), which
+        // they are in AR, using their normal Initiative Dice (Core p. 229), which
         // is whatever the row already holds. Writing 1D6 here truncated an
         // augmented character the moment the GM handed them a cyberdeck.
       }
@@ -3281,26 +3491,126 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         return;
       }
       if (isDelta) {
-        // Mid-combat delta roll: add to existing diceIni rather than replacing it.
-        target.diceIni = Math.max(1, target.diceIni + roll);
-        const total = target.getCurrentInitiative();
+        // Fix round 5, guard B (`briefs/player-initiative-prompt-spec.md`):
+        // the sign - and whether anything is owed at all - is read from this
+        // GM tab's own authoritative bookkeeping, never trusted from the
+        // client payload. A pending amount of zero/absent means the note this
+        // modal was showing has already been resolved elsewhere (settled by
+        // guard A in `changeParticipantDiceCount`, or a chain of switches
+        // that netted back to the starting dice count) - the submission is
+        // stale and must be discarded outright, not defaulted to a gain.
+        const pendingDelta = this.participantPendingDeltaDice.get(target) ?? 0;
+        if (pendingDelta === 0) {
+          return;
+        }
         const rawValues = command.payload?.["diceValues"];
         const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
-        this.appendSharedLog(
-          target.name || "Player",
-          formatInitiativeDeltaLogText(diceValues, roll, total)
-        );
-        if (this.initiativePrepActive) {
-          this.updateInitiativePrepInfo();
+        if (pendingDelta < 0) {
+          // Lost dice: drive `Participant.changeDiceCount`'s own decrease
+          // branch - the same one a GM-side dice edit uses - fed the
+          // player's own rolled values instead of a GM-side random roll, so
+          // the subtraction math is never written twice (requirement 2).
+          // `changeParticipantDiceCount` logs the single Action Log line
+          // itself (requirement 3).
+          const diceCount = Math.abs(pendingDelta);
+          // Manual entry (the modal's typed-total field never sends discrete
+          // `diceValues`): synthesize a valid in-range split of the typed
+          // total rather than hand-writing the Score's floor/remainder math a
+          // second time - the engine still needs *some* per-die values to
+          // work from. `manualEntry` tells the logging step (fix round 5,
+          // Xavier's decision C) to word the Action Log line as a manual
+          // entry rather than listing these invented faces as though they
+          // were rolled.
+          const manualEntry = diceValues.length !== diceCount;
+          const values = manualEntry ? this.splitRollIntoDiceValues(roll, diceCount) : diceValues;
+          const targetDices = target.dices - diceCount;
+          this.changeParticipantDiceCount(target, targetDices, { rollValues: values, manualEntry });
+        } else {
+          // Gained dice (unchanged, fix round 2/3): the pool was already
+          // written when the mode switch happened; only the roll/Score
+          // move is owed, and it is a plain add.
+          target.diceIni = Math.max(1, target.diceIni + roll);
+          const total = target.getCurrentInitiative();
+          this.appendSharedLog(
+            target.name || "Player",
+            formatInitiativeDeltaLogText(diceValues, roll, total)
+          );
         }
+        // Item D: the owed delta is resolved by this one submission (the
+        // modal only ever sends one, whether typed or rolled) - clear it so
+        // `pendingDeltaDice` drops off the wire and the delta modal has
+        // nothing left to reopen for on the next broadcast or reconnect.
+        this.participantPendingDeltaDice.delete(target);
+        // Item E fix: was gated `if (this.initiativePrepActive)`, which is
+        // never true once combat has started - the mid-combat panel's
+        // status line went stale after exactly this roll. Cheap and
+        // harmless when neither panel is showing.
+        this.updateInitiativePrepInfo();
         this.sort();
         return;
       }
-      if (this.combatManager.started && target.diceIni > 0) {
-        // Initiative is rolled once per Combat Turn (p. 159/160). This
-        // participant already has a running Score, so a full Initiative Test
-        // submission is stale (e.g. a client that was showing a pre-restore
-        // "needs to roll" prompt) and must not be stacked on top of it.
+      if (target.diceIni > 0) {
+        const supersedeId = this.getParticipantId(target);
+        // Round 4 item 4: `participantsWithSupersedableGmRoll` alone only
+        // proves "the GM rolled for this player-owned participant this
+        // Combat Turn" - not reachable by an unasked client today (every
+        // real sender goes through the locked pop-up, which only opens for
+        // an asked character), but it is the guard that stops an unasked
+        // client overwriting a GM roll, so it is required here explicitly
+        // rather than left implicit. `participantsAskedThisCombatTurn` is a
+        // separate, unpruned record of "asked at some point this Combat
+        // Turn" - unlike `participantsAskedToRoll` (round 2 item A), it is
+        // NOT cleared the moment a roll lands, because by the time a GM roll
+        // exists to supersede, `pendingRoll` is already false and
+        // `participantsAskedToRoll` would already have pruned itself.
+        // Round 5 item 4: the second half of the supersede precondition -
+        // "whose player has not already submitted one this Combat Turn".
+        // Without this, a GM's deliberate later re-roll for the same
+        // participant (which re-arms `participantsWithSupersedableGmRoll`)
+        // could be overwritten by a duplicate or delayed resend of the
+        // player's *earlier* submission. See
+        // `participantsWithPlayerSubmittedRoll`'s own doc comment.
+        if (this.participantsWithSupersedableGmRoll.has(supersedeId)
+          && this.participantsAskedThisCombatTurn.has(supersedeId)
+          && !this.participantsWithPlayerSubmittedRoll.has(supersedeId)) {
+          // Item 5 (round 3): the player's own roll supersedes a GM row-
+          // button roll, exactly once - `participantsWithSupersedableGmRoll`
+          // is only ever set for a participant the GM rolled for this
+          // Combat Turn and cleared the instant it is consumed here (or at
+          // the next Combat Turn boundary), so a second submission finds
+          // nothing and falls through to the ordinary stale-ignore branch
+          // below.
+          this.participantsWithSupersedableGmRoll.delete(supersedeId);
+          this.participantsWithPlayerSubmittedRoll.add(supersedeId);
+          target.diceIni = this.clampInitiativeRoll(roll, target);
+          this.announceJoinIfPending(target);
+          const supersedeTotal = target.getCurrentInitiative();
+          const supersedeIntuition = this.getParticipantIntuition(target);
+          let supersedeLabel: string;
+          if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
+            supersedeLabel = `INT×2(${supersedeIntuition * 2})`;
+          } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+            supersedeLabel = `DP(${this.formatDataProcessing(this.asMatrix(target).dataProcessing)}) + INT(${supersedeIntuition})`;
+          } else {
+            supersedeLabel = `REA(${this.getParticipantReaction(target)}) + INT(${supersedeIntuition})`;
+          }
+          const supersedeRawValues = command.payload?.["diceValues"];
+          const supersedeDiceValues = Array.isArray(supersedeRawValues) ? (supersedeRawValues as unknown[]).map(Number) : [];
+          this.appendSharedLog(
+            target.name || "Player",
+            formatInitiativeRollSupersededLogText(supersedeLabel, supersedeDiceValues, supersedeTotal)
+          );
+          this.updateInitiativePrepInfo();
+          this.sort();
+          return;
+        }
+        // Initiative is rolled once per Combat Turn (Core p. 159/160). This
+        // participant already has a running Score with nothing left to
+        // supersede (the player's own roll already landed, or the note was
+        // never marked supersedable in the first place), so a further full
+        // Initiative Test submission is stale (e.g. a client that was
+        // showing a pre-restore "needs to roll" prompt, or a duplicate
+        // resend) and must not be stacked on top of it.
         LogHandler.log(
           this.currentBTTime,
           `${target.name} initiative roll ignored: already rolled this Combat Turn`
@@ -3308,6 +3618,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         return;
       }
       target.diceIni = this.clampInitiativeRoll(roll, target);
+      // Round 5 item 4: the ordinary (non-supersede) path a player's own
+      // roll lands through - marks the same "already submitted this Combat
+      // Turn" record the supersede branch above reads, so a later GM re-roll
+      // for this participant can never be overwritten by a stale resend of
+      // this submission.
+      this.participantsWithPlayerSubmittedRoll.add(this.getParticipantId(target));
       // Same choke point `rollAndLogInitiative` uses (RULINGS.md
       // 2026-08-30): a player rolling for a claimed GM-added NPC still owes
       // that NPC's own join line, not just the player-connect line.
@@ -3330,9 +3646,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
           ? formatInitiativeRollLogText(baseLabel, diceValues, total)
           : formatManualInitiativeRollLogText(baseLabel, target.diceIni, total)
       );
-      if (this.initiativePrepActive) {
-        this.updateInitiativePrepInfo();
-      }
+      // Item E fix: same as the delta-roll branch above - must not be
+      // gated behind `initiativePrepActive`, which is only ever true
+      // pre-combat.
+      this.updateInitiativePrepInfo();
       this.sort();
       return;
     }
@@ -3374,7 +3691,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const participantId = String(command.payload?.["participantId"] || "");
       const actionKey = String(command.payload?.["actionKey"] || "");
       const target = this.findPlayerParticipant(playerName, participantId);
-      if (!target || !actionKey) {
+      // Round 5 item 1: `canInterrupt` only greys the player's buttons - this
+      // handler is what actually spends the Initiative, so it must enforce
+      // the same test on receipt, the way `act`/`delay` already check status
+      // above. Without this, a stale or double-tapped phone could still
+      // spend Initiative from a participant who has not rolled this Combat
+      // Turn (`hasRolledThisTurn()`) - which, since R1
+      // (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's rulings,
+      // 2026-09-21"), now also covers every unseized participant, since a
+      // seizer must already have rolled.
+      if (!target || !actionKey || !this.canParticipantInterrupt(target)) {
         return;
       }
       const action = this.actionHandler.coreInterrupts.find(a => a.key === actionKey);
@@ -3399,7 +3725,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const rawValues = command.payload?.["values"];
       const values = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
       if (values.length > 0) {
-        // Same classification as a GM roll - hits, 1s, glitch (brief pp. 44-45).
+        // Same classification as a GM roll - hits, 1s, glitch (brief Core pp. 44-45).
         this.appendSharedLog(roller, formatDiceRollLogText(values), { glitch: classifyRoll(values).glitch });
         this.incomingDiceRoll = { roller, values };
       }
@@ -3434,6 +3760,83 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   private isClaimableOrOwnedOoc(p: IParticipant): boolean {
     return this.participantClaimable.get(p) === true || this.participantOwners.has(p);
+  }
+
+  /**
+   * Can `p` declare an Initiative-costing Interrupt Action right now? The
+   * single choke point for this fact (round 5 item 1,
+   * `briefs/mid-turn-joiner-spec.md`): `buildSharedParticipant()`'s
+   * `canInterrupt` field (what the player's buttons are greyed against) and
+   * the `interrupt` session-command handler (what actually spends the
+   * Initiative) must read the same test, the same way `act`/`delay` already
+   * check status on receipt - a stale or double-tapped phone must not be
+   * able to spend Initiative a GM-side re-check would have refused.
+   *
+   * A member of a linked NPC row can never take an Interrupt Action (brief
+   * "NPC Group Initiative" criterion 17 / Decision 3, a deliberate departure
+   * from Core p. 167) - so the row itself never offers one, however high its
+   * shared Score.
+   *
+   * **Table ruling, not a printed rule** (round 4 item 5 / round 5 item 9,
+   * round 5 rules hygiene). The core rulebook conditions an Interrupt Action
+   * on having "enough Initiative Score left ... to pay the price" (Core
+   * p. 167) - a magnitude test, not a statement about an unrolled attribute;
+   * the book is silent on that case. Xavier's ruling (round 4 item 5): an
+   * unrolled participant has not yet made this Combat Turn's Initiative
+   * Test, so there is no rolled Score to spend on an Initiative-costing
+   * Interrupt Action (same reasoning as round 3 item 2's "not given a turn
+   * until they roll"). The non-dismissible roll pop-up already blocks an
+   * *asked* player's screen, so the gap this closes is narrower: a mid-fight
+   * arrival with no request yet, whose screen is otherwise usable. Ordinary
+   * defence is unaffected - it is not modelled as a gated action at all
+   * (ARCHITECTURE.md §5).
+   *
+   * **No seize exemption from the skip above** (`briefs/seize-initiative-spec.md`,
+   * "RESOLVED - Xavier's rulings, 2026-09-21", R1 and R3). Round 5 item 9
+   * used to exempt a seized-but-unrolled participant (`p.edge`) from this
+   * skip too, matching `canParticipantActThisPass()`'s old round-4-item-6
+   * exemption for the acting gate. Xavier's ruling R1 ("you cannot seize
+   * initiative until you have rolled") makes an unrolled seizer impossible -
+   * `CombatManager.seizeInitiative()` refuses to set `p.edge` before
+   * `p.diceIni > 0` - so this test collapses to `hasRolledThisTurn(p)`, the
+   * same single exported predicate `canParticipantActThisPass()`,
+   * `isOver()` and `hasMoreIniPasses()` (`Combat/CombatManager.ts`) read,
+   * rather than a third hand-written copy of "rolled, or seized" now that
+   * seized implies rolled.
+   *
+   * **No Interrupt Actions before combat has started (2026-09-21 fix).**
+   * Neither this predicate nor the `interrupt` command handler used to check
+   * `combatManager.started`, so a participant who rolled during Initiative
+   * Prep - before the GM has clicked Begin Combat Turn - could already have
+   * `hasRolledThisTurn(p)` true and enough Initiative Score to spend on Full
+   * Defence or another Interrupt Action before the first Combat Turn Sequence
+   * has even begun (Core p. 158's Step 1 "Roll Initiative" precedes any
+   * Action Phase). Gated the same way `act`/`delay` already guard
+   * themselves: a participant's `status` is never `Active`/`Delaying` until
+   * `combatManager.started` is true (only `getNextActors()`/
+   * `advanceToNextActors()`, both reachable only after `startRound()`, ever
+   * set it), so this is the explicit equivalent of that same guard for a
+   * predicate that does not itself read `status`.
+   */
+  private canParticipantInterrupt(p: IParticipant): boolean {
+    return this.combatManager.started
+      && !p.ooc && !isNpcRow(p) && p.getCurrentInitiative() >= 1 && hasRolledThisTurn(p);
+  }
+
+  /**
+   * Template-facing wrapper for the canonical `hasRolledThisTurn()` predicate
+   * (round-6 defect 5, `briefs/seize-initiative-spec.md`). An Angular
+   * standalone component's template can only call methods on the component
+   * instance - a bare module-level function import is not reachable from
+   * `battle-tracker.component.html` - so this is the one place the Seize
+   * Initiative button's `@if` reads through, replacing a fourth hand-typed
+   * `p.diceIni > 0` copy that used to live directly in the template. Named
+   * distinctly from the imported `hasRolledThisTurn` (rather than shadowing
+   * it under the same name) so nothing in this file has to reason about which
+   * one a bare call inside a method body would resolve to.
+   */
+  participantHasRolledThisTurn(p: IParticipant): boolean {
+    return hasRolledThisTurn(p);
   }
 
   private syncSharedState() {
@@ -3523,6 +3926,57 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
+   * Mark `p` as asked to roll (item A). The one place both "Request Player
+   * Rolls" (batch) and the new per-row "ask this player" button write to
+   * `participantsAskedToRoll` - so there is exactly one way this set gains a
+   * member, matching the exactly-one way it is read/pruned
+   * (`isAskedToRoll()`). Also marks `participantsAskedThisCombatTurn` (round
+   * 4 item 4), which - unlike `participantsAskedToRoll` - is not pruned the
+   * moment a roll lands, so a later GM roll's supersede check still has "was
+   * this participant ever asked this Combat Turn" available to read.
+   */
+  private askParticipantToRoll(p: IParticipant): void {
+    const id = this.getParticipantId(p);
+    this.participantsAskedToRoll.add(id);
+    this.participantsAskedThisCombatTurn.add(id);
+  }
+
+  /**
+   * The single choke point for reading (and, on the way, pruning)
+   * "has the GM asked this participant to roll" (item A).
+   *
+   * `pendingRoll` is passed in rather than re-read from `p.diceIni` so this
+   * always agrees with whatever the caller already computed for the same
+   * wire entry (`buildSharedParticipant`'s own `pendingRoll` field) - never
+   * a second, potentially-inconsistent read of the same fact.
+   *
+   * Returns `false`, and evicts the id from the set, once "asked" no longer
+   * applies: the roll landed (`!pendingRoll`) or the participant went `ooc`.
+   * Because this runs on every `buildSharedParticipant()` call - which runs
+   * for every current participant on every `syncSharedState()` broadcast,
+   * itself reached by every roll-landing path in this file (the player's own
+   * `roll_submission`'s trailing `sort()`, `rollAndLogInitiative`'s callers,
+   * `onParticipantRolledTotalChanged`'s `syncSharedState()`,
+   * `rollOutstandingInitiative`'s trailing `sort()`) - "asked" clears itself
+   * on the very next broadcast after any of them, with no per-call-site
+   * patch required. Eviction (not just returning `false`) keeps the set from
+   * growing unboundedly over a long session; it is not itself load-bearing
+   * for correctness, since a re-added id with no matching wire entry can
+   * never be read again for a participant no longer in the roster.
+   */
+  private isAskedToRoll(p: IParticipant, pendingRoll: boolean): boolean {
+    const id = this.getParticipantId(p);
+    if (!this.participantsAskedToRoll.has(id)) {
+      return false;
+    }
+    if (p.ooc || !pendingRoll) {
+      this.participantsAskedToRoll.delete(id);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * One player-facing wire entry for `p`. Factored out of `getSharedParticipants()`
    * so `buildGmState()`'s `withheldParticipants` (brief "GM reconnect state
    * loss") can build the exact same shape for an out-of-action, non-claimable
@@ -3558,15 +4012,27 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       canDelay: !p.ooc && p.status === StatusEnum.Active,
       // A member of a linked NPC row can never take an Interrupt Action
       // (brief "NPC Group Initiative" criterion 17 / Decision 3, a
-      // deliberate departure from p. 167) - so the row itself never offers
+      // deliberate departure from Core p. 167) - so the row itself never offers
       // one, however high its shared Score.
-      canInterrupt: !p.ooc && !isNpcRow(p) && p.getCurrentInitiative() >= 1,
+      //
+      // Round 4 item 5 / round 5 item 9 (`briefs/mid-turn-joiner-spec.md`) -
+      // see `canParticipantInterrupt()`'s own doc comment for the full
+      // reasoning and the round-5 rules-hygiene note on why this is a table
+      // ruling, not a printed rule.
+      canInterrupt: this.canParticipantInterrupt(p),
       initiativeDice: p.dices,
       pendingRoll: p.diceIni <= 0,
       // Carried so a rejoining GM can reconstruct "already rolled" state
       // instead of re-offering the once-per-Combat-Turn Initiative Test
-      // (p. 159/160). See restoreFromSharedState().
+      // (Core p. 159/160). See restoreFromSharedState().
       rolledInitiativeTotal: p.diceIni,
+      // Item A's per-person "asked" signal. `isAskedToRoll()` is the single
+      // choke point that reads AND opportunistically prunes
+      // `participantsAskedToRoll` - see that method's doc comment for why
+      // this is where "asked" stops applying the moment a roll lands or the
+      // participant goes OOC, without a matching "clear" call at every
+      // roll-landing site.
+      askedToRoll: this.isAskedToRoll(p, p.diceIni <= 0) || undefined,
       edgeRating: this.getParticipantEdgeRating(p),
       reaction: this.getParticipantReaction(p),
       intuition: this.getParticipantIntuition(p)
@@ -3584,6 +4050,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       base.sleaze = p.sleaze;
       base.firewall = p.firewall;
       base.deviceRating = p.deviceRating;
+      // See `SharedParticipantState.pendingDeltaDice`'s doc comment - only
+      // ever set by the `configure_deck` jack-in branch, so only ever
+      // relevant on a `MatrixParticipant`. Only assigned when actually
+      // owed (matching every other optional field in this block), rather
+      // than unconditionally with `|| undefined`, so a participant with
+      // nothing outstanding keeps a wire entry with no trace of the key.
+      const pendingDelta = this.participantPendingDeltaDice.get(p);
+      if (pendingDelta) {
+        base.pendingDeltaDice = pendingDelta;
+      }
     }
 
     if (this.isAstral(p)) {
@@ -3600,7 +4076,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     }
 
     // A linked row carries state no other participant type has: its NPCs
-    // (each with its own Condition Monitor, criteria 3-4/7, p. 379) and the
+    // (each with its own Condition Monitor, criteria 3-4/7, Core p. 379) and the
     // shared wound accumulator (criterion 5 / Decision 1). All of it is on
     // the wire so a rejoining GM rebuilds the row as a row - see
     // buildRestoredParticipant.
@@ -3872,7 +4348,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * Append an entry to the GM's own log without sending it to the server.
    *
-   * Used for GM rolls the GM chose to keep private (brief p. 330) and for any
+   * Used for GM rolls the GM chose to keep private (brief Core p. 330) and for any
    * narration attached to one. The server broadcasts a log entry to the whole
    * room, so "GM sees it, players do not" can only be done by not sending it.
    */
@@ -3984,7 +4460,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * A glitch entry can carry GM narration. Only glitched rolls offer the box;
    * the consequence of a glitch is GM-adjudicated narrative with nothing to
-   * look up (brief p. 45), so this text is always typed by the GM and never
+   * look up (brief Core p. 45), so this text is always typed by the GM and never
    * generated.
    */
   canAnnotateGlitch(entry: SharedLogEntry): boolean {
@@ -4009,7 +4485,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * already saw stays public even while the session-hidden switch is lit, and a
    * narration about a hidden roll stays private even while GM rolls are
    * visible. The switch is on the other side of the screen, so the input says
-   * which of the two this one is (brief p. 330).
+   * which of the two this one is (brief Core p. 330).
    */
   getGlitchNoteVisibilityLabel(entry: SharedLogEntry): string {
     return entry.hiddenFromPlayers ? "stays private" : "will be visible to players";
@@ -4035,7 +4511,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Record the GM's narration for a glitch as its own entry pointing back at
    * the roll (`refId`). The log is append-only, so the original roll entry is
    * never rewritten - its hits and glitch label stand exactly as rolled
-   * (brief p. 45).
+   * (brief Core p. 45).
    *
    * The narration also carries `refSummary`: the parent roll's actor and its
    * hit/glitch summary, restated inline. The log is a flat list with no turn
@@ -4177,7 +4653,41 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
     // If the participant type needs to change (decker ↔ physical), discard and recreate.
     const typeMismatch = target !== undefined && isMatrix !== (target instanceof MatrixParticipant);
+    // Item 4 (round 3, `briefs/mid-turn-joiner-spec.md`): a type-mismatch
+    // re-registration discards `target` outright and builds a brand-new
+    // participant object below, which - being brand new - gets a brand-new
+    // id from `getParticipantId()` and is therefore never "asked" even if
+    // the old object was. Captured before the old id is dropped, so it can
+    // be carried onto the new object's own id once that exists (a few lines
+    // down) - same player, same still-live request, not a fresh ask.
+    let carryAskedToRoll = false;
+    // Round 4 item 4: `participantsAskedThisCombatTurn` (the "asked at some
+    // point this Combat Turn" record item 4's supersede precondition reads)
+    // is carried across the same discard-and-recreate for the same reason -
+    // same player, same live request, not a fresh ask under a fresh id.
+    let carryAskedThisCombatTurn = false;
+    // Round 5 item 5: Core p. 161 says the move to the top of the order
+    // "lasts for the entire Combat Turn (meaning multiple Initiative
+    // Passes)" - a same-player type-mismatch re-registration must not spend
+    // the Edge that bought that for nothing. Carried across the same
+    // discard-and-recreate as `carryAskedToRoll`/`carryAskedThisCombatTurn`
+    // above, for the identical reason: same player, same live Combat Turn,
+    // not a fresh participant.
+    let carrySeized = false;
     if (typeMismatch && target) {
+      const oldId = this.getParticipantId(target);
+      carryAskedToRoll = this.participantsAskedToRoll.has(oldId);
+      this.participantsAskedToRoll.delete(oldId);
+      carryAskedThisCombatTurn = this.participantsAskedThisCombatTurn.has(oldId);
+      this.participantsAskedThisCombatTurn.delete(oldId);
+      // Round 5 item 4: deliberately not carried, unlike the two sets above
+      // and the seize below - the new object still owes its own fresh
+      // Initiative Test for the new type (its dice count/attribute changed),
+      // so there is no "already submitted" fact from the old object that
+      // legitimately applies to it. Dropped here only so the old id's entry
+      // does not linger.
+      this.participantsWithPlayerSubmittedRoll.delete(oldId);
+      carrySeized = target.edge;
       this.participantIds.delete(target);
       this.participantOwners.delete(target);
       this.participantClaimable.delete(target);
@@ -4188,6 +4698,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.participantStatblocks.delete(target);
       this.participantLieutenantTeamRowId.delete(target);
       this.pendingJoinAnnouncement.delete(target);
+      // Fix round 3 (defect class: `participantPendingDeltaDice` keyed by
+      // object identity - see the promote/demote helpers' matching comments):
+      // this branch discards `target` outright, same as a promote/demote type
+      // swap, so any owed-but-unrolled VR-mode delta note on the old object
+      // must be dropped here too or it leaks forever (the map is never
+      // otherwise read for a participant no longer in `combatManager`).
+      this.participantPendingDeltaDice.delete(target);
+      // Item 5: same reasoning - a GM-rolled-but-not-yet-superseded note on
+      // the discarded object can never be superseded now that the object it
+      // was rolled for no longer exists.
+      this.participantsWithSupersedableGmRoll.delete(oldId);
       this.combatManager.removeParticipant(target);
       target = undefined;
     }
@@ -4200,6 +4721,36 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (!target) {
       target = isMatrix ? new MatrixParticipant() : new Participant();
       this.combatManager.addParticipant(target);
+      if (carryAskedToRoll) {
+        // Item 4: carry the still-live ask onto the new object's own id -
+        // same player, same request, not a fresh one. Also (re-)marks
+        // `participantsAskedThisCombatTurn` via `askParticipantToRoll()`.
+        this.askParticipantToRoll(target);
+      } else if (carryAskedThisCombatTurn) {
+        // Round 4 item 4: the old object's roll had already landed (so it
+        // no longer owed a roll and `participantsAskedToRoll` had already
+        // pruned itself), but it was still asked at some point this Combat
+        // Turn - carry that fact alone, without re-marking the brand-new,
+        // still-unrolled object as "still owed and asked" when nobody asked
+        // it anything yet.
+        this.participantsAskedThisCombatTurn.add(this.getParticipantId(target));
+      }
+      if (carrySeized) {
+        // Round 5 item 5: same still-live-fact carry as the ask records
+        // above, for the seize (`p.edge`) instead. Deliberately written
+        // directly rather than through `combatManager.seizeInitiative()`
+        // (which now refuses to seize an unrolled participant, R1 -
+        // `briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's rulings,
+        // 2026-09-21"): this is not a fresh Seize declaration, it is
+        // preserving a fact already true this Combat Turn onto the
+        // replacement object for the same player (Core p. 161, "lasts for
+        // the entire Combat Turn") - the same reasoning that lets this
+        // branch also skip a fresh roll for the new object (item 4, just
+        // above). A seized-but-not-yet-rolled-under-its-new-type object can
+        // therefore still occur here, narrowly, through this carry only -
+        // never through a new call to `btnEdge_Click`/`seizeInitiative()`.
+        target.edge = true;
+      }
     }
 
     target.name = characterName;
@@ -4269,7 +4820,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * different thing entirely - the player has activated a drug/spell and their
    * dice count changed. That is a mid-turn Initiative Dice change and must roll
    * the gained/lost dice and move the running Score like every other one
-   * (brief F5 / criteria 7-8, p. 160), so it goes through the same funnel
+   * (brief F5 / criteria 7-8, Core p. 160), so it goes through the same funnel
    * rather than being silently overwritten.
    */
   private applyRegisteredDiceCount(
@@ -4278,15 +4829,19 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     isExistingTarget: boolean
   ): void {
     const clamped = clampInitiativeDiceCount(initiativeDice);
+    // `hasRolledThisTurn(p)`, not a fourth hand-typed `p.diceIni > 0` (round-6
+    // defect 5, `briefs/seize-initiative-spec.md`) - the fact this asks is the
+    // same one everywhere else: has this participant completed this Combat
+    // Turn's Initiative Test yet.
     const isMidTurnChange = isExistingTarget
       && this.combatManager.started
-      && p.diceIni > 0
+      && hasRolledThisTurn(p)
       && clamped !== p.dices;
     if (isMidTurnChange) {
       this.changeParticipantDiceCount(p, clamped);
       return;
     }
-    // Setup path: the 5D6 cap still applies (brief criterion 9, pp. 52/288).
+    // Setup path: the 5D6 cap still applies (brief criterion 9, Core pp. 52/288).
     p.setDicesWithoutRoll(clamped);
   }
 
@@ -4298,7 +4853,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * `diceIni <= 0` - so "not pending" is known to mean "rolled", even though
    * the total itself is unrecoverable. In that case we restore the minimum
    * non-zero total so the participant is still correctly treated as having
-   * taken their once-per-Combat-Turn Initiative Test (p. 159/160); the running
+   * taken their once-per-Combat-Turn Initiative Test (Core p. 159/160); the running
    * Score is restored verbatim regardless, so only the displayed dice total is
    * approximate.
    */
@@ -4410,7 +4965,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const grunt = new DetachedGruntParticipant();
       // Both Condition Monitor inputs, set together, before any damage is
       // written (rehydration contract step 2) - sizes the single combined
-      // track from p. 379's formula exactly as the live class does.
+      // track from Core p. 379's formula exactly as the live class does.
       grunt.setGruntAttributes(
         Math.max(0, Number(gm.gruntBody ?? 0)),
         Math.max(0, Number(gm.gruntWillpower ?? 0))
@@ -4536,6 +5091,35 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantLieutenantTeamRowId.clear();
     this.pendingJoinAnnouncement.clear();
     this.lastKnownDamage.clear();
+    // Item A: restored, not reset - a GM tab reload must not silently
+    // un-ask every participant the previous tab had asked. Rebuilt directly
+    // from the wire ids rather than from object identity (unlike the maps
+    // cleared above, which get repopulated as each participant object is
+    // reconstructed below): `participantsAskedToRoll` is keyed by the same
+    // stable string id `state.participants[].id`/`gmState
+    // .withheldParticipants[].id` already carry, so there is no rebuild
+    // ordering to get right here.
+    this.participantsAskedToRoll.clear();
+    for (const shared of state.participants) {
+      if (shared.askedToRoll) {
+        this.participantsAskedToRoll.add(shared.id);
+      }
+    }
+    for (const shared of gmState?.withheldParticipants ?? []) {
+      if (shared.askedToRoll) {
+        this.participantsAskedToRoll.add(shared.id);
+      }
+    }
+    this.participantPendingDeltaDice.clear();
+    // Item 5: not carried on the wire (GM-only bookkeeping, unlike "asked"
+    // above) - a restored tab has no record of which still-outstanding
+    // rolls it made itself with the row dice button before the reload, so
+    // there is nothing safe to repopulate this from. A roll made before the
+    // reload simply becomes an ordinary already-rolled participant, no
+    // longer supersedable - reported, not solved.
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
 
     this.combatManager.participants.clear();
     this.combatManager.currentActors.clear();
@@ -4632,7 +5216,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       // (the Score is restored verbatim below). The 5D6 cap still applies.
       participant.setDicesWithoutRoll(Number(shared.initiativeDice || 1));
       // Reconstruct the already-rolled state. Initiative is rolled once per
-      // Combat Turn (p. 159/160), so a participant whose Score is already
+      // Combat Turn (Core p. 159/160), so a participant whose Score is already
       // running must not come back marked as still needing to roll - that is
       // what `pendingRoll` (getSharedParticipants) and the GM roll button both
       // key off. The running Score itself is restored verbatim further down,
@@ -4669,6 +5253,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         this.participantOwners.set(participant, shared.ownerName);
       }
       this.participantClaimable.set(participant, shared.claimable === true);
+      // Item D: restore the wire's copy so a GM tab reload does not drop an
+      // in-flight delta prompt any harder than every other restored field
+      // here already would - see `participantPendingDeltaDice`'s doc comment.
+      // Signed since fix round 4 (consistency follow-up): a negative value is
+      // dice *lost* by a mode switch, still owed to be rolled, restored the
+      // same as a positive (gained) one.
+      if (shared.pendingDeltaDice) {
+        this.participantPendingDeltaDice.set(participant, shared.pendingDeltaDice);
+      }
       this.participantEdgeRatings.set(participant, Math.max(0, Number(shared.edgeRating || 0)));
       this.participantReactions.set(participant, safeReaction > 0 ? safeReaction : Math.max(0, Number(participant.baseIni || 0)));
       this.participantIntuitions.set(participant, safeIntuition);
@@ -4685,7 +5278,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
       // The broadcast payload carries each participant's *current* running
       // Initiative Score, already reduced by every pass that has elapsed
-      // (brief pp. 159-160). Reconstruct it verbatim rather than re-deriving
+      // (brief Core pp. 159-160). Reconstruct it verbatim rather than re-deriving
       // it from the pass count, and tell addParticipant() not to apply the
       // late-entry decay on top (it would double-count).
       this.combatManager.addParticipant(participant, true);
@@ -4975,11 +5568,11 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Templates offered by the picker, filtered by what `pendingAddDraft.kind`
    * can legally become (defect D6, validator round). A Grunt Group's members
    * share **one** rolled Initiative Score (brief acceptance criterion 12,
-   * p. 379); a lieutenant template carries his **own** Score and must be a
-   * separate participant (criterion 16, p. 380/381). Offering a lieutenant
+   * Core p. 379); a lieutenant template carries his **own** Score and must be a
+   * separate participant (criterion 16, Core p. 380/381). Offering a lieutenant
    * template on a *row* draft used to build a row of two or three lieutenants
    * sharing a single Score - stacking several lieutenants side by side is
-   * explicitly licensed (p. 381), but sharing an Initiative Score between
+   * explicitly licensed (Core p. 381), but sharing an Initiative Score between
    * them is not what that licenses. A lieutenant template is therefore only
    * ever offered for `kind === "grunt"`, which always creates one standalone
    * participant with its own roll.
@@ -5058,7 +5651,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * row member (brief "Uniqueness scope"). Rows' own names come from the
    * `combatManager.participants.items` scan; their *members'* names are a
    * second, nested scan, because `nextRowMemberName` already treats member
-   * names as a namespace that must not collide (p. 379 attributes wounds and
+   * names as a namespace that must not collide (Core p. 379 attributes wounds and
    * deaths per NPC).
    */
   private takenCombatantNames(): Set<string> {
@@ -5285,7 +5878,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantTieBreakers.set(row, Math.random());
     // Queued, not written, until this row has its own rolled Initiative
     // Score (RULINGS.md 2026-08-30) - a brand-new row goes in unrolled
-    // (single shared Initiative Test, p. 379).
+    // (single shared Initiative Test, Core p. 379).
     this.queueJoinAnnouncement(row, (participant) => ({
       actor: participant.name || MERGED_GRUNT_ROW_NAME,
       text: ROW_FORMED_LOG_TEXT
@@ -5296,13 +5889,120 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return row;
   }
 
+  /**
+   * The GM's Seize Initiative control (Core p. 160, "Initiative and Edge";
+   * one point of Edge, Core p. 56). Routed through
+   * `combatManager.seizeInitiative()` rather than calling
+   * `sender.seizeInitiative()` directly, so the engine-side R1 backstop
+   * (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's rulings,
+   * 2026-09-21" - "you cannot seize initiative until you have rolled") is
+   * always in the path, not only the template's `@if` guard on this button
+   * (below, in `battle-tracker.component.html`) that hides it until
+   * `participantHasRolledThisTurn(p)`.
+   *
+   * **Round-6 defect 1 fix.** Seizing changes rank immediately (R2: it may be
+   * declared at any point after rolling, not only between passes), so the
+   * order must re-derive and broadcast immediately too - the same
+   * `sort()` every other order-changing GM action (`performAct`,
+   * `finishDelay`, `btnRollInitiative_Click`) already ends with. Before this
+   * fix the tap only set `sender.edge` and stopped: nothing on screen moved,
+   * players' phones kept the stale order, and the button disappearing (its
+   * own `@if` now reading `p.edge`) was the only visible sign anything
+   * happened - indistinguishable from a failed tap.
+   *
+   * **Does not hand the seizer a turn out from under whoever is mid-action.**
+   * `sort()` only re-derives `combatManager.participants`' display order via
+   * `sortByInitiative()`/the tie-break comparator; it never calls
+   * `getNextActors()` and never adds anyone to `currentActors` - the set that
+   * actually determines who may act right now. `enforceSingleCurrentActor()`
+   * (part of `sort()`) only ever *removes* entries from an already-multi-
+   * member `currentActors` (a tie that needs trimming to one); it cannot
+   * insert the freshly-seized participant into it. So a seize declared while
+   * someone else is mid-Action-Phase reorders the display and the seizer's
+   * own future priority without touching who is acting this instant - the
+   * seizer is picked up the moment that actor's Action Phase ends and
+   * `getNextActors()` next runs, exactly as before this fix.
+   *
+   * No-op reads (already seized, or `seizeInitiative()` refused for R1) log
+   * and broadcast nothing - there is no event to report.
+   *
+   * **Confirm step before seizing (Xavier, 2026-09-21).** Since R2, this
+   * button is on every rolled participant's row at all times, and a tap
+   * used to be instant and irreversible - it spends that player's one point
+   * of Edge (Core p. 56) with no way back until the Combat Turn ends. A
+   * validator flagged reaching for one row and tapping the row above by
+   * mistake. `btnEdge_Click()` itself stays synchronous and only ever
+   * opens the dialog via `confirmThenSeize()`, fire-and-forget (`void`) -
+   * the same fast-path/async split `btnNextPass_Click()` uses for
+   * `confirmThenAdvancePass()`, so this handler's own signature and
+   * synchronous callers are unaffected, matching the existing `btnAct_Click`/
+   * `btnDelay_Click` shape that `combat-boundary-logging.spec.ts` depends on
+   * staying synchronous. Cancelling the dialog leaves everything untouched:
+   * `confirmThenSeize()` returns before calling `seizeInitiative()` at all,
+   * so no Edge is spent, no flag is set, no log line is written, no re-sort
+   * runs, and nothing is broadcast. Xavier deliberately chose this confirm
+   * step over an undo/"un-seize" control, so none is added here.
+   */
   btnEdge_Click(sender: IParticipant) {
-    LogHandler.log(this.currentBTTime, sender.name + " Edge_Click");
-    sender.seizeInitiative();
+    if (sender.edge) {
+      return;
+    }
+    void this.confirmThenSeize(sender);
   }
 
+  /**
+   * The confirmed half of `btnEdge_Click()` (see its doc comment). Unlike
+   * `confirmThenAdvancePass()`'s Combat-Turn/pass staleness snapshot, the
+   * only thing that can make this confirmation stale is the same
+   * participant getting seized (or losing their roll) by another route
+   * while the dialog is open, which the `sender.edge`/`seizeInitiative()`
+   * no-op guards below already cover.
+   */
+  private async confirmThenSeize(sender: IParticipant): Promise<void> {
+    const name = sender.name || PLAYER_COMMAND_FALLBACK_ACTOR;
+    const confirmed = await this.confirmationDialog.confirm(
+      `Seize the Initiative for ${name}? This spends one point of Edge and cannot be undone until the Combat Turn ends.`,
+      "Seize the Initiative",
+      "Seize",
+      "Cancel"
+    );
+    if (!confirmed) {
+      return;
+    }
+    if (sender.edge) {
+      // Already seized by another route while the dialog was open - nothing
+      // left to do, same no-op shape as the pre-confirm guard above.
+      return;
+    }
+    this.combatManager.seizeInitiative(sender);
+    if (!sender.edge) {
+      // R1: `seizeInitiative()` refused - no rolled Initiative Score yet.
+      // The template hides this button for that case already; this is the
+      // same engine-side backstop every other R1 call site relies on.
+      return;
+    }
+    const actor = sender.name || PLAYER_COMMAND_FALLBACK_ACTOR;
+    this.appendParticipantEventLog(actor, SEIZE_LOG_TEXT);
+    this.sort();
+  }
+
+  /**
+   * Fix (validation round 2, `briefs/mid-turn-joiner-spec.md`, item A,
+   * confirmed validator failure 2): `rollAndLogInitiative()` on its own only
+   * writes the log line - it never broadcasts. Every OTHER path that lands a
+   * roll ends in `sort()`/`syncSharedState()` (the player's own
+   * `roll_submission`, `onParticipantRolledTotalChanged`,
+   * `rollOutstandingInitiative`'s trailing `sort()`), so this row button was
+   * the one gap: a player whose roll the GM made here kept seeing their own
+   * locked pop-up on screen, and a roll they then submitted themselves would
+   * have been silently discarded by the `roll_submission` "already rolled"
+   * guard. `sort()` also re-derives order for the new Score, exactly as the
+   * batch paths already do.
+   */
   btnRollInitiative_Click(sender: IParticipant) {
     this.rollAndLogInitiative(sender);
+    this.sort();
+    this.updateInitiativePrepInfo();
   }
 
   btnAct_Click(sender: IParticipant, actModalContent: TemplateRef<unknown>) {
@@ -5379,12 +6079,76 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return sel.free === null && sel.simple.length === 0 && sel.complex === null;
   }
 
-  submitActModal() {
+  /**
+   * Round 3 item 1 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation
+   * round 3"): the round-2 "item C" per-click confirm dialog on Act is
+   * removed - it only ever covered a GM button press, so the most common way
+   * a pass ends at this table (a player tapping Act on their own phone)
+   * never warned anyone, and it double-warned for the same person alongside
+   * the kept Next Pass/End Combat Turn confirmation. Replaced by a
+   * state-driven, non-blocking notice on the GM screen -
+   * `pendingPassEndRollNotice()` - that is driven by the order's own state
+   * rather than by this click, so it covers a player's own Act/Delay, a
+   * grunt row's last member coming due, and a spent NPC row dropped
+   * automatically by a damage/heal handler alike. This method is therefore
+   * plain and synchronous again, exactly as it was before item C introduced
+   * the async/sync split.
+   *
+   * **Round 4 item 2 fix.** Item 8 (round 3) only closed this hole for the
+   * removed confirm dialog - the GM's Act *declaration* modal itself can
+   * still be left open after the participant it targets has already acted
+   * through another path (their own `act` session command, or an automatic
+   * advance), and submitting it then double-acted them: a duplicate declared
+   * -action log line, and an extra advance if the order had already emptied.
+   * The player-side `act` command (`handleSessionCommand`) already refuses a
+   * participant that is not `Active`/`Delaying`; this mirrors that guard on
+   * the GM side.
+   */
+  /**
+   * The Act window's own "closed - here's why" toast (round 5 item 3): shown
+   * when `submitActModal()` refuses a stale window instead of returning with
+   * no feedback, which used to leave the window open and the GM pressing
+   * Submit again with nothing explaining why it did nothing. Same transient-
+   * toast shape as `mergeMessage` (`setMergeMessage()`'s own doc comment) -
+   * feedback on a tap that already happened, not tracker state.
+   */
+  actModalClosedReason = "";
+  private actModalClosedReasonDismissTimeout: number | null = null;
+
+  private setActModalClosedReason(text: string): void {
+    if (this.actModalClosedReasonDismissTimeout !== null) {
+      window.clearTimeout(this.actModalClosedReasonDismissTimeout);
+      this.actModalClosedReasonDismissTimeout = null;
+    }
+    this.actModalClosedReason = text;
+    if (!text) {
+      return;
+    }
+    this.actModalClosedReasonDismissTimeout = window.setTimeout(() => {
+      this.actModalClosedReasonDismissTimeout = null;
+      this.actModalClosedReason = "";
+    }, ACT_MODAL_CLOSED_REASON_DISMISS_MS);
+  }
+
+  submitActModal(): void {
     if (!this.actModalParticipant || !this.isDeclaredActionSelectionValid(this.actModalParticipant)) {
       return;
     }
     const actor = this.actModalParticipant;
+    if (actor.status !== StatusEnum.Active && actor.status !== StatusEnum.Delaying) {
+      // Round 5 item 3: the actor stopped being due to act while this window
+      // was open (their own phone's Act, or an automatic advance) - close
+      // the window and say why, rather than silently refusing and leaving
+      // the GM to press Submit into the same refusal again.
+      this.setActModalClosedReason(`${actor.name || "This participant"} has already acted this pass — Act window closed.`);
+      this.closeActModal();
+      return;
+    }
     const rowMember = this.actModalRowMember;
+    this.finishActModalSubmit(actor, rowMember);
+  }
+
+  private finishActModalSubmit(actor: IParticipant, rowMember: GruntMember | null): void {
     const illegalActions = this.actModalIllegalOsActions;
     // Decision 23: a row member's declared action marks and logs that NPC,
     // not the whole row - `performAct` would finish the row's Action Phase on
@@ -5452,11 +6216,11 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * An Initiative Score of 0 or below has none, so no Simple and no Complex
    * action can be declared from it; one Free Action per pass and ordinary
    * defence are both still available (brief "NPC Group Initiative" Decision 16,
-   * `RULINGS.md` 2026-08-07, p. 159-160). General mechanics: this applies to
+   * `RULINGS.md` 2026-08-07, Core p. 159-160). General mechanics: this applies to
    * PCs, ordinary NPCs, standalone grunts and rows identically.
    *
    * Interrupt Actions are a separate gate and already correct - they are
-   * refused by cost in `Participant.canUseAction()` (p. 167) and are not
+   * refused by cost in `Participant.canUseAction()` (Core p. 167) and are not
    * declared through this modal at all.
    *
    * Outside a started combat there is no running Score to gate on (the Score
@@ -5509,7 +6273,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Checked separately from `canUseDeclaredAction` so a selection made while
    * the participant still had a Score above 0 cannot be *submitted* after the
    * Score has dropped to 0 or below (Decision 16). A Free-Action-only selection
-   * is still legal down there (p. 160) and stays submittable.
+   * is still legal down there (Core p. 160) and stays submittable.
    */
   private hasActionPhaseSelection(sender: IParticipant): boolean {
     const selection = this.getDeclaredActionSelection(sender);
@@ -5674,7 +6438,18 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sort();
   }
 
-  btnDelay_Click(sender: IParticipant) {
+  /**
+   * Round 3 item 1: the round-2 "item C" per-click confirm dialog on Delay
+   * is removed for the same reason it is removed from `submitActModal()` -
+   * see that method's doc comment. The GM's own row Delay button and the
+   * player's own `delay` session command now call this identically; there
+   * is no longer a `skipPassEndWarning` distinction to make between them.
+   */
+  btnDelay_Click(sender: IParticipant): void {
+    this.finishDelay(sender);
+  }
+
+  private finishDelay(sender: IParticipant): void {
     LogHandler.log(this.currentBTTime, sender.name + " Delay_Click");
     sender.status = StatusEnum.Delaying;
     if (this.combatManager.currentActors.remove(sender)) {
@@ -5699,8 +6474,187 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.updateInitiativePrepInfo();
   }
 
+  /**
+   * D4 fix (validation round 1, `briefs/mid-turn-joiner-spec.md`; Xavier
+   * answer 5): the engine places a late joiner - or anyone else who has not
+   * rolled - by their *unrolled* running Score (the late-entry penalty is
+   * applied at `addParticipant()` time, before any roll), so advancing the
+   * order past them can cost them the Action Phase they were entitled to.
+   * `SCOPE.md`'s "Enforcing legality" rule is warn, never refuse: this
+   * names who is still owed a roll and lets the GM proceed on confirmation.
+   * Cancelling leaves the pass/turn exactly where it was, free to try again
+   * once the roll is in - never a hard block.
+   *
+   * This is the single explicit control that both advances to the next
+   * pass and ends the Combat Turn (the same button/handler, labelled either
+   * way per the template's `hasMoreIniPasses()` check) - so one guard here
+   * covers both halves of the brief's "Next / End Combat Turn" wording.
+   *
+   * Round 3 item 1 **keeps** this confirmation (a roll landing here can
+   * still earn another pass) and **removes** the round-2 "item C" reuse of
+   * it from `submitActModal()`/`btnDelay_Click()` - see those methods' own
+   * doc comments and `pendingPassEndRollNotice()` for the state-driven
+   * notice that replaces it there.
+   *
+   * Kept out of the common path: when nothing is outstanding (the ordinary
+   * case, and every existing regression test), this resolves synchronously
+   * with no `await`, so callers that do not await this method see its
+   * mutations applied immediately, exactly as before this fix.
+   */
+  private async confirmAdvanceWithOutstandingRolls(): Promise<boolean> {
+    const names = this.getOutstandingRollNames();
+    if (names.length === 0) {
+      return true;
+    }
+    return this.confirmationDialog.confirm(
+      `${names.join(", ")} still owe${names.length === 1 ? "s" : ""} an Initiative roll this Combat Turn. `
+      + "Advancing now uses their unrolled Score, which may cost them their turn.",
+      "Initiative Rolls Still Outstanding",
+      "Advance Anyway",
+      "Cancel"
+    );
+  }
+
+  /**
+   * Round 3 item 1's state-driven, non-blocking notice, replacing the
+   * round-2 "item C" per-click Act/Delay confirm dialogs (removed - see
+   * `submitActModal()`/`btnDelay_Click()`). Read live off the order's own
+   * state on every render rather than computed once at click time, so it
+   * covers every way a pass can end at this table without a discrete GM
+   * gesture to hang a dialog off: a player's own Act/Delay on their phone, a
+   * grunt row occupying the sole current-actor slot (the row is one
+   * participant object in `currentActors` regardless of its internal member
+   * count, so this predicate already covers it with no row-specific case),
+   * and a spent NPC row dropped out of `currentActors` automatically by
+   * `flagSpentNpcRows()` from a damage/heal handler. Never interrupts
+   * anything and never reaches a player's screen - GM-only, template-facing.
+   *
+   * `null` unless: a Combat Turn is running and the current pass has not
+   * already ended; there is exactly one current actor (a tie leaves more
+   * than one, and acting on just one of several tied actors does not empty
+   * `currentActors` on its own); nobody else can still be handed a turn this
+   * pass (so the current actor really is the last one able to act this
+   * pass); and at least one non-`ooc` participant still owes an Initiative
+   * roll. "Can still be handed a turn" reads through the single shared
+   * `canParticipantActThisPass()` predicate (`Combat/CombatManager.ts`) -
+   * the exact same test `CombatManager.getNextActors()` itself uses to pick
+   * the next actor - rather than re-deriving a second copy of it here.
+   *
+   * **Round 4 item 1 fix.** This used to re-derive its own "still waiting"
+   * test (`Waiting`, non-`ooc`, current initiative > 0) with no `diceIni`
+   * check, so an unrolled late joiner with any ordinary Initiative rating
+   * counted as "still waiting" here while `getNextActors()` (round 3 item 2)
+   * already refused them a turn - the notice returned `null` in exactly the
+   * case it exists to cover. Reading both from `canParticipantActThisPass()`
+   * makes that drift structurally impossible: there is only one predicate
+   * left to update.
+   */
+  pendingPassEndRollNotice(): string | null {
+    if (!this.combatManager.started || this.combatManager.passEnded) {
+      return null;
+    }
+    if (this.combatManager.currentActors.count !== 1) {
+      return null;
+    }
+    const actor = this.combatManager.currentActors.items[0];
+    const anyoneElseWaiting = this.combatManager.participants.items.some(p =>
+      p !== actor && canParticipantActThisPass(p)
+    );
+    if (anyoneElseWaiting) {
+      return null;
+    }
+    const names = this.getOutstandingRollNames();
+    if (names.length === 0) {
+      return null;
+    }
+    return `Last turn of this pass — ${names.join(", ")} still owe${names.length === 1 ? "s" : ""} an Initiative roll.`;
+  }
+
+  /**
+   * Round 4 item 7 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation
+   * round 4"): when `getNextActors()` empties `currentActors` because every
+   * remaining `Waiting`, non-`ooc` participant with a positive attribute
+   * still owes this Combat Turn's Initiative Test (the deadlock
+   * `CombatManager.getNextActors()`'s own doc comment reports rather than
+   * solves - both table rulings, not printed rules; see that method's doc
+   * comment and `canParticipantActThisPass()`'s), the pass ends with no
+   * Action Phase handed out and nothing on screen explained why.
+   * State-driven and GM-facing only, same shape as
+   * `pendingPassEndRollNotice()` above - recomputed live off the order's own
+   * state on every render, never sent to a player, and never blocks
+   * anything. Does **not** change the ruling itself: nobody still acts until
+   * they roll (or, since a seizer must already have rolled per R1
+   * `briefs/seize-initiative-spec.md`, this can no longer be worked around by
+   * seizing).
+   *
+   * **Round 5 item 2 fix.** This used to re-derive its own hand-written copy
+   * of "not `ooc`, `Waiting`, Score above 0, hasn't rolled" - the same fact
+   * `canParticipantActThisPass()` already computes, spelled out a third time
+   * by hand. Expressed now as that predicate's negation, over the same
+   * "would otherwise be in the running" participants (`!ooc && Waiting &&
+   * current initiative > 0`), so a future change to the roll rule only ever
+   * has one place to edit.
+   */
+  nobodyCanActRollNotice(): string | null {
+    if (!this.combatManager.started || this.combatManager.currentActors.count !== 0) {
+      return null;
+    }
+    const blocked = this.combatManager.participants.items.filter(p =>
+      !p.ooc
+      && p.status === StatusEnum.Waiting
+      && p.getCurrentInitiative() > 0
+      && !canParticipantActThisPass(p)
+    );
+    if (blocked.length === 0) {
+      return null;
+    }
+    const names = blocked.map(p => p.name || "Unnamed").join(", ");
+    return `Nobody can act this Initiative Pass — ${names} still owe${blocked.length === 1 ? "s" : ""} an Initiative roll.`;
+  }
+
   btnNextPass_Click() {
     LogHandler.log(this.currentBTTime, "NextPass_Click");
+    if (this.hasPendingInitiativeRolls()) {
+      void this.confirmThenAdvancePass();
+      return;
+    }
+    this.advancePass();
+  }
+
+  /**
+   * Item 8 (round 3): guard against the confirmed advance being applied
+   * twice, or applied stale. While this dialog is open, the participant
+   * currently due to act can independently act or delay via their own
+   * phone (`handleSessionCommand`'s `act`/`delay` branches), which can
+   * itself cascade into `advanceToNextActors()` -> `endInitiativePass()` ->
+   * `endCombatTurn()` - advancing the pass, or ending the Combat Turn
+   * outright - before the GM's "Advance Anyway" resolves. Applying
+   * `advancePass()` on top of that would double-advance (an extra -10, an
+   * extra duplicate "Start Initiative Pass" log line) or, worse, advance a
+   * Combat Turn that has already ended (`combatManager.started` already
+   * `false`), reading as "the order moves while combat reads as stopped".
+   * The identifying triple (`started`, `combatTurn`, `initiativePass`) is
+   * snapshotted before the dialog opens and compared after it resolves;
+   * any difference means the pass/turn already moved on independently, and
+   * this stale confirmation is dropped rather than re-applied.
+   */
+  private async confirmThenAdvancePass(): Promise<void> {
+    const startedBefore = this.combatManager.started;
+    const turnBefore = this.combatManager.combatTurn;
+    const passBefore = this.combatManager.initiativePass;
+    const proceed = await this.confirmAdvanceWithOutstandingRolls();
+    if (!proceed) {
+      return;
+    }
+    if (this.combatManager.started !== startedBefore
+      || this.combatManager.combatTurn !== turnBefore
+      || this.combatManager.initiativePass !== passBefore) {
+      return;
+    }
+    this.advancePass();
+  }
+
+  private advancePass(): void {
     this.combatManager.nextIniPass();
     // Decide, before `goToNextActors()` runs, whether the pass `nextIniPass()`
     // just started is real (gets its own "Start Initiative Pass" line) or the
@@ -5732,6 +6686,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       );
     }
     this.combatManager.goToNextActors();
+    // Item 3: the pass just moved on, so a roll-status line describing the
+    // pass that just ended (e.g. "All initiative rolls in.") is stale now -
+    // see clearStaleRollStatusText()'s own doc comment.
+    this.clearStaleRollStatusText();
     this.sort();
   }
 
@@ -5806,6 +6764,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       if (this.pendingJoinAnnouncement.has(sender)) {
         this.pendingJoinAnnouncement.set(clone, [ ...this.pendingJoinAnnouncement.get(sender)! ]);
       }
+      // Fix round 3 (defect class: `participantPendingDeltaDice` keyed by
+      // object identity): a source still owing an unrolled VR-mode delta
+      // (jacked in, gained dice not yet rolled) produces a clone that owes
+      // its own, independent one too - same reasoning as `pendingJoinAnnouncement`
+      // just above. Previously dropped, silently, on every duplicate.
+      if (this.participantPendingDeltaDice.has(sender)) {
+        this.participantPendingDeltaDice.set(clone, this.participantPendingDeltaDice.get(sender)!);
+      }
       const cloneId = this.getParticipantId(clone);
       this.lastKnownDamage.set(cloneId, {
         physical: Math.max(0, Number(clone.physicalDamage || 0)),
@@ -5832,6 +6798,19 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.declaredActionSelections.clear();
     this.combatManager.endCombat();
     this.initiativePrepActive = false;
+    // Item A: no request survives End Combat - a later new fight starts
+    // fresh and must not open the roll modal for anyone until the GM asks
+    // again. `participantPendingDeltaDice` is cleared wholesale too: a
+    // still-outstanding delta belonged to a fight that is now over.
+    this.participantsAskedToRoll.clear();
+    this.participantPendingDeltaDice.clear();
+    // Item 5: no GM-rolled-but-not-yet-superseded record survives End Combat
+    // either - it belonged to a fight that is now over.
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
+    // Item 3: End Combat makes any roll-status text stale.
+    this.clearStaleRollStatusText();
     // The scene is over: whoever the GM was rolling for may not exist next
     // fight, so the sticky attribution does not carry across the boundary.
     this.clearGmRollAttribution();
@@ -5921,7 +6900,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * The GM's own log pane shows *everything* the GM has, hidden entries
    * included - the visibility decision is about what players receive
-   * (brief p. 330), not about what the GM can see. Already held in the order
+   * (brief Core p. 330), not about what the GM can see. Already held in the order
    * the entries happened (see `insertSharedLogEntry`).
    */
   getSharedLogEntriesForGm(): SharedLogEntry[] {
@@ -6127,7 +7106,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * sibling is the Roll button, which is disabled once a total is present), so
    * it *is* allowed to move the running Initiative Score - but only by the
    * legitimate delta between the old and the new rolled total (brief F5 /
-   * criteria 7-8, p. 160). The value is therefore clamped to
+   * criteria 7-8, Core p. 160). The value is therefore clamped to
    * [0, dices x 6] *before* it is written through the Score-moving `diceIni`
    * setter; previously the raw typed value reached that setter through a
    * two-way `[(ngModel)]` binding and inflated the Score by the unclamped
@@ -6169,7 +7148,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * GM edit of an Initiative Dice count box (participant row *and* the Stats
    * tab - both bind one-way and call this). A thin wrapper over the single
    * dice-count funnel; the engine owns the 5D6 cap, the roll and the Score
-   * math (brief F5 / criteria 7-9, p. 160, pp. 52/288).
+   * math (brief F5 / criteria 7-9, Core p. 160, Core pp. 52/288).
    */
   onParticipantDiceCountChanged(p: IParticipant, value: number) {
     const result = this.changeParticipantDiceCount(p, value);
@@ -6182,21 +7161,58 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
+   * Record (or extend) a signed, unrolled Initiative Dice delta a participant
+   * owes a roll for, after a `changeParticipantDiceCount(..., { rollGainedDice:
+   * false })` call has deferred it to the owning player — a mid-pass VR mode
+   * switch (`configure_deck` jack-in branch) or a player-initiated jack out
+   * (`configure_deck` jack-out branch, `briefs/mid-turn-joiner-spec.md`,
+   * "jack-out now prompts the player"). Both callers hand this the same
+   * `result.delta` their `changeParticipantDiceCount`/`applyVRMode`/
+   * `restorePhysicalDiceCount` call returned; a `delta` of 0 (nothing to
+   * report — not yet rolled this Combat Turn, or no actual change) is a
+   * no-op, matching `changeParticipantDiceCount`'s own no-op cases.
+   *
+   * The "add to whatever is already owed" shape exists for the same reason
+   * `configure_deck`'s jack-in branch originally needed it (see that branch's
+   * comment): defensive, not netting behaviour — guard A
+   * (`settleOutstandingDeltaDice()`, called at the top of every
+   * `changeParticipantDiceCount` path that can reach here) already settles
+   * any earlier unrolled note GM-side before a new change is computed, so in
+   * practice `participantPendingDeltaDice` never already holds an entry for
+   * `p` when this runs.
+   */
+  private recordPendingDeltaDice(p: IParticipant, delta: number): void {
+    if (delta === 0) {
+      return;
+    }
+    const owed = (this.participantPendingDeltaDice.get(p) || 0) + delta;
+    if (owed !== 0) {
+      this.participantPendingDeltaDice.set(p, owed);
+    } else {
+      this.participantPendingDeltaDice.delete(p);
+    }
+  }
+
+  /**
    * Single component-side entry point for "this participant's Initiative Dice
    * count changed". Every GM/session path that changes a dice count goes
    * through here, so none of them can forget the roll-and-Score-delta step
-   * (brief F5 / criteria 7-8, p. 160).
+   * (brief F5 / criteria 7-8, Core p. 160).
    *
-   * Two things live here rather than in the engine because they are not rules:
+   * Three things live here rather than in the engine because they are not
+   * rules:
    *  - the `combatManager.started` gate (the engine has no CombatManager
    *    reference, and creating one would be an import cycle). Outside a running
    *    combat there is no running Score to move, so the count is just written.
    *  - `rollGainedDice: false`, the session-protocol case where the *player*
-   *    client rolls and submits the gained dice.
+   *    client rolls and submits the changed dice, gained or lost
+   *    (fix round 4, consistency follow-up: both directions defer alike).
+   *  - `rollValues`, the matching resolution call once that player roll
+   *    arrives.
    *
    * The engine (`Participant.changeDiceCount`) owns the cap, the roll and the
-   * Score arithmetic; this method only decides whether a roll is owed and logs
-   * the outcome.
+   * Score arithmetic; this method only decides whether a roll is owed (and by
+   * whom) and logs the outcome.
    */
   private changeParticipantDiceCount(
     p: IParticipant,
@@ -6204,12 +7220,75 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     options: DiceCountChangeOptions = {}
   ): DiceCountChangeResult {
     const clamped = clampInitiativeDiceCount(newDices);
+    if (options.rollValues) {
+      // Resolve a change already deferred to the player (see this method's
+      // doc comment): drive `Participant.changeDiceCount`'s own
+      // increase/decrease branch with the player's actual rolled values
+      // instead of a GM-side random roll, so the Score math is never
+      // written a second time for the same rules event. This call *is* the
+      // resolution of the outstanding note - it must not run the guard
+      // below on itself (that would erase the note before applying it).
+      const values = options.rollValues;
+      let i = 0;
+      const result = p.changeDiceCount(clamped, () => values[i++] ?? 0);
+      if (result.values.length > 0) {
+        // Fix round 5, Xavier's decision C: a synthesized manual-entry split
+        // still drives the engine above (`values`), but must not be printed
+        // as though those faces were actually rolled - log with the faces
+        // stripped so `formatInitiativeDeltaLogText` falls into its own
+        // existing "manual(±N)" wording instead (the same style
+        // `formatManualInitiativeRollLogText` already uses for a typed
+        // Initiative Test). The Score itself is unaffected; this only
+        // changes what the Action Log line says.
+        this.logInitiativeDiceDelta(p, options.manualEntry ? { ...result, values: [] } : result);
+      }
+      return result;
+    }
+    // Fix round 5, guard A (`briefs/player-initiative-prompt-spec.md`,
+    // Xavier's fix option A): every other dice-count- or VR-mode-changing
+    // path funnels through this method (see this method's doc comment and
+    // ARCHITECTURE.md §6's "single funnel" paragraph), so this is the one
+    // choke point where "is a delta already owed and unrolled?" can be
+    // checked before computing a *new* change. Without this, a second
+    // switch before the player ever rolls computes its own delta against a
+    // `dices` value that a still-outstanding *loss* has deliberately not
+    // yet written (fix round 4) - the corruption the review traced through
+    // a Hot Sim -> Cold Sim -> AR chain. Settling first means the new
+    // change is always computed from the participant's now-current, fully
+    // resolved dice count.
+    this.settleOutstandingDeltaDice(p);
     const rollGainedDice = options.rollGainedDice !== false;
-    if (!this.combatManager.started || (!rollGainedDice && clamped > p.dices)) {
+    if (!this.combatManager.started) {
       p.setDicesWithoutRoll(clamped);
       return NO_DICE_COUNT_CHANGE;
     }
-
+    if (!rollGainedDice) {
+      const previousCount = p.dices;
+      if (p.diceIni <= 0 || clamped === previousCount) {
+        // Not yet rolled this Combat Turn, or no actual change: the same
+        // no-op guard `Participant.changeDiceCount` itself uses - nothing to
+        // roll, no Score to move.
+        p.setDicesWithoutRoll(clamped);
+        return NO_DICE_COUNT_CHANGE;
+      }
+      const delta = clamped - previousCount;
+      if (delta > 0) {
+        // Gain: the pool updates now; the player's own delta roll (not this
+        // GM-side call) is what moves the Score (fix round 2/3).
+        p.setDicesWithoutRoll(clamped);
+      }
+      // Decrease (delta < 0): dices and diceIni are left untouched here, on
+      // purpose - this GM-side call never rolls the lost dice itself (fix
+      // round 4), so this function moves no part of the Score. (The
+      // Initiative Attribute half of a VR mode switch is a separate
+      // concern, set by the caller outside this funnel, and still moves
+      // immediately either way.) `dices`/`diceIni`/the dice-driven part of
+      // the Score all move together, atomically, only when the owning
+      // player's own delta roll resolves it through the `rollValues`
+      // branch above, the same way a gain already resolves via its own
+      // delta `roll_submission`.
+      return { values: [], delta };
+    }
     const result = p.changeDiceCount(clamped, () => this.rollInitiativeDie());
     if (result.values.length > 0) {
       this.logInitiativeDiceDelta(p, result);
@@ -6218,11 +7297,98 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
+   * Fix round 5, guard A (`briefs/player-initiative-prompt-spec.md`,
+   * Xavier's fix option A). Called only from the top of
+   * `changeParticipantDiceCount`'s non-`rollValues` path (see that method) -
+   * never for the `rollValues` call that resolves a note itself, or this
+   * would erase the note before applying the player's actual roll to it.
+   *
+   * Settles a participant's outstanding, unrolled VR-mode delta note (see
+   * `participantPendingDeltaDice`'s doc comment) immediately, GM-side, "the
+   * old way": rolled here rather than by the player, and applied through the
+   * same engine path (`Participant.changeDiceCount`) a GM-side dice edit
+   * uses, then logged as a GM-resolved delta. A no-op when nothing is owed.
+   *
+   * Manipulates the engine directly instead of recursing through
+   * `changeParticipantDiceCount` - this method *is* that function's guard,
+   * so calling back into it here would check itself.
+   */
+  private settleOutstandingDeltaDice(p: IParticipant): void {
+    const pending = this.participantPendingDeltaDice.get(p);
+    if (!pending) {
+      return;
+    }
+    const suffix = " (resolved by the GM before a further change)";
+    if (pending > 0) {
+      // Gain: `dices` already carries it (fix round 4 writes a gain
+      // immediately) - only the Score bump from the roll is still owed.
+      const values = Array.from({ length: pending }, () => this.rollInitiativeDie());
+      const rolled = values.reduce((sum, v) => sum + v, 0);
+      p.diceIni = Math.max(1, p.diceIni + rolled);
+      const total = p.getCurrentInitiative();
+      this.appendParticipantRollLog(p, formatInitiativeDeltaLogText(values, pending, total) + suffix);
+    } else {
+      // Loss: `dices` was deliberately left untouched (fix round 4) - resolve
+      // it the same way a GM-side dice edit would, rolling the lost dice
+      // through the engine's own decrease branch.
+      const diceCount = Math.abs(pending);
+      const targetDices = clampInitiativeDiceCount(p.dices - diceCount);
+      const result = p.changeDiceCount(targetDices, () => this.rollInitiativeDie());
+      if (result.values.length > 0) {
+        const total = p.getCurrentInitiative();
+        this.appendParticipantRollLog(
+          p,
+          formatInitiativeDeltaLogText(result.values, result.delta, total) + suffix
+        );
+      }
+    }
+    this.participantPendingDeltaDice.delete(p);
+    // Force the player's non-dismissible delta modal shut now, rather than
+    // waiting on whatever `syncSharedState()` the caller that triggered this
+    // settlement happens to run afterwards: the note it was showing no
+    // longer exists, so `pendingDeltaDice` must drop off the wire immediately.
+    this.syncSharedState();
+  }
+
+  /**
    * Single-die roller seam. Exists so the dice-count paths have one place to
    * stub in tests; the engine takes the roller as a parameter.
    */
   private rollInitiativeDie(): number {
     return rollInitiativeDie();
+  }
+
+  /**
+   * Split a manually-typed initiative delta total into `diceCount` face
+   * values in [1,6] that sum to `roll`, for the one sub-case where a player's
+   * *lost*-dice delta roll arrives with no discrete `diceValues` (the delta
+   * modal's manual-entry field only ever sends a total, never individual
+   * faces - same as the main roll modal's manual field). `Participant.
+   * changeDiceCount` requires a per-die roller; this synthesizes one instead
+   * of writing its floor/remainder Score math a second time (fix round 4,
+   * requirement 2 - no duplicated arithmetic).
+   *
+   * `roll` is already clamped to `[diceCount, diceCount * 6]` by the caller
+   * (the modal's own manual-entry bounds), which is exactly the range a sum
+   * of `diceCount` d6 can produce, so a greedy in-range split always exists:
+   * each die takes as many pips as it can while still leaving at least 1 for
+   * every remaining die.
+   *
+   * Deliberate trade-off, not a rules value: the resulting Action Log line
+   * shows this synthesized split rather than the "manual(-N)" wording a
+   * decrease with no discrete values would otherwise use (see
+   * `formatInitiativeDeltaLogText`) - reported rather than silently chosen.
+   */
+  private splitRollIntoDiceValues(roll: number, diceCount: number): number[] {
+    const values: number[] = [];
+    let remaining = roll;
+    for (let i = 0; i < diceCount; i++) {
+      const diceLeft = diceCount - i;
+      const face = Math.min(6, Math.max(1, remaining - (diceLeft - 1)));
+      values.push(face);
+      remaining -= face;
+    }
+    return values;
   }
 
   /**
@@ -6243,6 +7409,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private rollAndLogInitiative(p: IParticipant, presetHidden?: boolean): void {
     const values = Array.from({ length: p.dices }, () => Math.floor(Math.random() * 6) + 1);
     p.diceIni = this.clampInitiativeRoll(values.reduce((s, v) => s + v, 0), p);
+    // Item 5: this is the GM rolling on the player's behalf (row dice
+    // button / Force Roll Outstanding / Roll Remaining Non-Player - the
+    // shared choke point). Marked only for a player-owned participant, so
+    // the player's own submission can supersede it exactly once - see
+    // `participantsWithSupersedableGmRoll`'s own doc comment.
+    if (this.participantOwners.has(p)) {
+      this.participantsWithSupersedableGmRoll.add(this.getParticipantId(p));
+    }
     // The choke point (RULINGS.md 2026-08-30): fired before this roll's own
     // log line, so a still-owed join announcement reads ahead of the roll
     // that put this participant into the order.
@@ -6320,8 +7494,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * Only jacked into a VR mode uses Data Processing + Intuition (p. 101,
-   * p. 159, p. 231); AR uses physical Reaction + Intuition like anyone else,
+   * Only jacked into a VR mode uses Data Processing + Intuition (Core p. 101,
+   * Core p. 159, Core p. 231); AR uses physical Reaction + Intuition like anyone else,
    * so a Matrix participant currently in AR (or not jacked in at all) falls
    * through to the same branch a non-Matrix participant does - guarding on
    * `jackedIn`/`vrMode` here, not merely `isMatrix(p)`, is what makes that
@@ -6340,10 +7514,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // jack-out path resets it to `None`/`AR`, so the two can never disagree.
     if (this.isMatrix(p) && MatrixParticipant.isVRMode(p.vrMode)) {
       // Only the VR modes use the Matrix Initiative attribute (Data
-      // Processing + Intuition, pp. 229-230). **AR does not**: "When in AR,
-      // you use your normal Initiative and Initiative Dice" (p. 229), and the
+      // Processing + Intuition, Core pp. 229-230). **AR does not**: "When in AR,
+      // you use your normal Initiative and Initiative Dice" (Core p. 229), and the
       // Initiative Attribute Chart lists Matrix AR as Reaction + Intuition
-      // (p. 159). An AR decker therefore falls through to the ordinary
+      // (Core p. 159). An AR decker therefore falls through to the ordinary
       // Reaction + Intuition return at the bottom, so their row behaves
       // exactly like any other participant.
       if (p.dataProcessing <= DATA_PROCESSING_UNSET) {
@@ -6415,12 +7589,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * rolled, so it takes its own Initiative Test from the ordinary roll button
    * (or Initiative Prep) like any other new participant, with no special-cased
    * score. The only differences are the class (`DetachedGruntParticipant`, so it
-   * gets the single combined Condition Monitor of p. 379) and the Body /
+   * gets the single combined Condition Monitor of Core p. 379) and the Body /
    * Willpower defaults, which match `addNpcToRow`'s.
    *
    * Its Edge rating is seeded to 0 for the same reason a row's is: a grunt has
-   * no Edge attribute (p. 380), so ERIC falls through to Reaction, then
-   * Intuition, then the coin toss (Decision 5, p. 159).
+   * no Edge attribute (Core p. 380), so ERIC falls through to Reaction, then
+   * Intuition, then the coin toss (Decision 5, Core p. 159).
    */
   addGrunt(
     name?: string,
@@ -6467,7 +7641,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Default name for the next standalone grunt: `"Grunt <n>"`, one past the
    * highest number already in the encounter. Same reasoning as
    * `nextRowMemberName`: the combat log names the grunt whose wound or death it
-   * records (p. 379), and two combatants answering to one name make those lines
+   * records (Core p. 379), and two combatants answering to one name make those lines
    * unreadable.
    */
   private nextStandaloneGruntName(): string {
@@ -6647,7 +7821,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * Refused - with a message, never silently - if any of them has already
    * rolled Initiative for the current Combat Turn: a group acts on **one**
-   * shared Initiative Test (p. 379), and there is no defined answer to whose
+   * shared Initiative Test (Core p. 379), and there is no defined answer to whose
    * already-rolled score the new group would take. Nothing is changed on a
    * refusal, so the GM can untick the offender and merge the rest.
    *
@@ -6671,12 +7845,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // standalone grunt (brief G18/D3), so the merge selection can include one
     // imprinted from a lieutenant template - which the row picker already
     // refuses at instantiation time (defect D6), but the merge path never
-    // checked. A lieutenant has his own attributes (p. 380) and his own
-    // Initiative Test (p. 381) - verified against `rules/` 2026-08-30
+    // checked. A lieutenant has his own attributes (Core p. 380) and his own
+    // Initiative Test (Core p. 381) - verified against `rules/` 2026-08-30
     // (`rules/pages/p0382.txt` for "own attributes",
     // `rules/pages/p0383.txt` for "own Initiative Test"). Folding even one
     // of them into a row's single shared Score and shared
-    // Condition Monitor (p. 379) is the same violation the row picker's
+    // Condition Monitor (Core p. 379) is the same violation the row picker's
     // filter exists to prevent, reached from a different door.
     //
     // Item 6 fix (fix round 3): the previous guard only refused when the
@@ -6702,7 +7876,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const names = lieutenantsInSelection.map(g => g.name || "unnamed grunt").join(", ");
       const reason = `Cannot merge: ${names} ${lieutenantsInSelection.length === 1 ? "was" : "were"} `
         + "instantiated from a lieutenant statblock or linked as one. A lieutenant has his own "
-        + "attributes (p. 380) and his own Initiative Test (p. 381) and cannot share a group's "
+        + "attributes (Core p. 380) and his own Initiative Test (Core p. 381) and cannot share a group's "
         + `single Score - untick ${lieutenantsInSelection.length === 1 ? "it" : "them"}, or add `
         + `${lieutenantsInSelection.length === 1 ? "it" : "them"} individually instead.`;
       this.setMergeMessage(reason);
@@ -6727,7 +7901,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const first = selected[0];
     // The row is a brand-new participant, not a joiner: if it is created after
     // combat has begun it takes the ordinary late-entry penalty of -10 per
-    // elapsed pass (criterion 15, p. 160). Decision 7's exemption covers an NPC
+    // elapsed pass (criterion 15, Core p. 160). Decision 7's exemption covers an NPC
     // joining an *existing* row, which this is not.
     this.combatManager.addParticipant(row);
     this.participantClaimable.set(row, false);
@@ -6919,7 +8093,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   getNpcRowBadgeTooltip(row: NpcRowParticipant): string {
     const base = "Grunt Group: several NPCs on one shared Initiative Score, "
-      + "acting back-to-back in this slot (p. 379).";
+      + "acting back-to-back in this slot (Core p. 379).";
     if (!row.isWipedOut) {
       return base;
     }
@@ -6934,8 +8108,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Template guard: does this participant carry the grunt Condition Monitor
-   * shape - **one** combined Physical + Stun track, no overflow (p. 379, and
-   * p. 381 for lieutenants: "They possess a single Condition Monitor, like
+   * shape - **one** combined Physical + Stun track, no overflow (Core p. 379, and
+   * Core p. 381 for lieutenants: "They possess a single Condition Monitor, like
    * other grunts")? True for a `DetachedGruntParticipant`; false for a row,
    * which has no Condition Monitor of its own at all.
    */
@@ -6969,7 +8143,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * Record a standalone grunt's Body, and resize its Condition Monitor to match.
    *
-   * Body does two things on a grunt (p. 379): it is the number the final
+   * Body does two things on a grunt (Core p. 379): it is the number the final
    * attack's DV is compared against to settle alive-or-dead, **and** it is one
    * of the two inputs to the box count, `8 + ceil(max(Body, Willpower) / 2)`.
    * This used to record only the first, leaving a Body-9 grunt on the 10 boxes
@@ -6987,7 +8161,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * The other Condition Monitor input (p. 379). Editable for the same reason
+   * The other Condition Monitor input (Core p. 379). Editable for the same reason
    * Body is: "Add Grunt" seeds both at `DEFAULT_GRUNT_ATTRIBUTE`, and a grunt
    * whose Willpower is the higher of the two has no other way to get the box
    * count the formula gives it.
@@ -7001,7 +8175,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   //
   // The Condition Monitor widget's box-clicking can only ever record as many
   // boxes as are left on the track, so the largest recordable hit is exactly
-  // the boxes remaining - too small for p. 379's "DV of the final attack vs.
+  // the boxes remaining - too small for Core p. 379's "DV of the final attack vs.
   // Body" comparison whenever a killing blow outsizes the track. These mirror
   // the row panel's per-member DV controls (`getRowMemberDamageValue` and
   // friends), keyed by participant instead of by `GruntMember`.
@@ -7074,12 +8248,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Create an empty linked NPC row. It takes one slot in the initiative order
-   * and rolls one Initiative Test for everybody in it (criteria 1-2, p. 379).
+   * and rolls one Initiative Test for everybody in it (criteria 1-2, Core p. 379).
    *
    * Its Edge rating is seeded to 0 and left there: a grunt group has no Edge
    * attribute, so ERIC falls straight through to Reaction, then Intuition, then
-   * the coin toss (criterion 10 / Decision 5, p. 159, p. 380). That is the only
-   * tie-break behaviour this feature adds - the lieutenant/row tie (p. 381) is
+   * the coin toss (criterion 10 / Decision 5, Core p. 159, Core p. 380). That is the only
+   * tie-break behaviour this feature adds - the lieutenant/row tie (Core p. 381) is
    * manual (criterion 11 / Decision 6).
    */
   addNpcRow(selectNewRow = true): NpcRowParticipant {
@@ -7156,7 +8330,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * add -> "G 3" again). Two identically-named grunts is not a cosmetic problem
    * at the table - the combat log names the NPC whose wound moved the row's
    * shared score (Decision 1) and the alive/dead verdict is recorded per NPC
-   * (p. 379), and neither line can be read back if two NPCs answer to it.
+   * (Core p. 379), and neither line can be read back if two NPCs answer to it.
    * Custom names the GM typed are skipped by the pattern, so a final
    * collision check keeps the name unique against those too.
    *
@@ -7251,7 +8425,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Damage one NPC in a row.
    *
    * The boxes land on that NPC's own Condition Monitor only (criteria 3-4,
-   * p. 379); any Wound Modifier the hit crosses moves the row's *shared*
+   * Core p. 379); any Wound Modifier the hit crosses moves the row's *shared*
    * Initiative Score (criterion 5 / Decision 1). That second half is a house
    * rule, so it gets its own log line naming the NPC whose wound caused it -
    * otherwise a GM watching the whole row slow down at once has no way to tell
@@ -7287,7 +8461,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
         + `(${member.damage})`,
         `${member.name} took ${result.applied} ${damageType}`);
     } else if (member.outOfAction) {
-      // A tap on a grunt whose track is already full applies nothing (p. 379:
+      // A tap on a grunt whose track is already full applies nothing (Core p. 379:
       // grunts take no overflow) and must not rewrite the final-attack record.
       // Say so: a silent no-op looks like a broken button to a GM recording a
       // coup de grace, and "nothing happened" is itself the ruling.
@@ -7383,11 +8557,37 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * `endCombatTurn()`'s own mutations, so `turn` is still the turn that is
    * ending, not the incremented value.
    *
-   * Appends a log line and nothing else, for the same reason as
-   * `logInitiativePassEnded` above.
+   * Appends a log line and, since item A's redesign
+   * (`briefs/mid-turn-joiner-spec.md`), also clears every "asked" record
+   * unconditionally. A Combat Turn boundary is the one place
+   * `isAskedToRoll()`'s own "roll landed" read-time prune cannot be trusted
+   * to have already run for everyone: `endCombatTurn()`'s `softReset()`
+   * (running right after this hook fires) zeroes every `diceIni`, which
+   * would make a still-asked id read as newly pending again on the very
+   * next broadcast, not resolved - the opposite of what should happen at a
+   * turn boundary. Without this, a still-armed request would reopen every
+   * asked player's locked pop-up on the next unrelated broadcast (a wound,
+   * an edit, a reconnect) before the GM has asked for the new turn's rolls.
    */
   private logCombatTurnEnded(turn: number): void {
     this.appendSharedLog("GM", formatTurnEndLogText(turn));
+    this.participantsAskedToRoll.clear();
+    // Item 5: a GM roll from the turn that just ended must never be
+    // superseded by a stray late submission after the boundary - "never
+    // from a previous Combat Turn".
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
+    // Round 5 item 6 fix: `advancePass()` already clears the roll-status
+    // line for the ordinary "GM clicks Next Pass / End Combat Turn" route,
+    // but that is one specific *caller*, not the boundary itself - this hook
+    // fires on `onCombatTurnEnded`, which is the single place every Combat
+    // Turn ending is observable regardless of which call path reached
+    // `CombatManager.endCombatTurn()`. Clearing it here too means a future
+    // caller that ends a Combat Turn some other way can never reintroduce
+    // the "stale status line survives into the ended turn" defect by simply
+    // forgetting to call `clearStaleRollStatusText()` itself.
+    this.clearStaleRollStatusText();
   }
 
   // ── Per-NPC "has acted this pass" (brief Decisions 18 & 23) ──────────────
@@ -7436,7 +8636,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * "3/4 acted" for the row panel header - one glance tells the GM whether the
    * row still owes actions this pass. Counts only members that can still act:
-   * a downed NPC is skipped when the row comes up (criterion 6, p. 379) and
+   * a downed NPC is skipped when the row comes up (criterion 6, Core p. 379) and
    * would otherwise make the row look permanently unfinished.
    */
   getRowActedSummary(row: NpcRowParticipant): string {
@@ -7457,7 +8657,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Set the DV the next hit or heal on this NPC will apply. Clamped to at least
    * one box (a DV of 0 is neither an attack nor a heal) and to no more than a
    * full Condition Monitor's worth plus the row's own headroom. Either way the
-   * excess is discarded: a hit because grunts take no overflow damage (p. 379),
+   * excess is discarded: a hit because grunts take no overflow damage (Core p. 379),
    * a heal because it is clamped to the damage actually on the track.
    */
   setRowMemberDamageValue(member: GruntMember, value: number): void {
@@ -7470,8 +8670,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Template shorthands for the two damage buttons. Both types go on the same
-   * combined track (p. 379); the type *and the DV* are still recorded because
-   * together they decide alive-or-dead once the NPC drops (p. 379: Stun, or
+   * combined track (Core p. 379); the type *and the DV* are still recorded because
+   * together they decide alive-or-dead once the NPC drops (Core p. 379: Stun, or
    * Physical with DV less than Body, means alive; Physical with DV greater than
    * Body means dead). That is why these default to the GM-entered DV rather
    * than a fixed single box - with a fixed 1-box tap the recorded final DV
@@ -7552,13 +8752,13 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * Detach an NPC from its row onto its own initiative row (criterion 12).
    * Required for an augmented specialist or lieutenant acting on its own score
-   * (p. 379-381), for an NPC changing Initiative type (criterion 13), and for
+   * (Core p. 379-381), for an NPC changing Initiative type (criterion 13), and for
    * any NPC that needs an Interrupt Action, which row members cannot take
    * (criterion 17 / Decision 3, scenario S8).
    *
    * The detached NPC is a normal participant from here on: it has not rolled,
    * so the GM rolls its own Initiative Test, and `addParticipant` applies the
-   * ordinary late-entry penalty for elapsed passes (p. 160). Decision 7's "no
+   * ordinary late-entry penalty for elapsed passes (Core p. 160). Decision 7's "no
    * penalty" covers joining a row, not leaving one.
    *
    * **The default factory must stay a `DetachedGruntParticipant`.** This is the
@@ -7566,8 +8766,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * two arguments, so this default *is* what every Detach tap constructs.
    * Defaulting it to a bare `Participant` (as it briefly did) silently gave
    * every detached grunt the PC shape of two independent Condition Monitors —
-   * roughly double the boxes it had a moment earlier — contradicting p. 379 and
-   * p. 381 ("They possess a single Condition Monitor, like other grunts") and
+   * roughly double the boxes it had a moment earlier — contradicting Core p. 379 and
+   * Core p. 381 ("They possess a single Condition Monitor, like other grunts") and
    * bypassing the class written to satisfy them. `NpcRowParticipant.detachMember`
    * has the same default, but a parameter default in the caller shadows it.
    */
@@ -7704,6 +8904,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const id = this.participantIds.get(p);
     if (id) {
       this.forgetMapEntry(this.lastKnownDamage, id);
+      // Item A: a removed participant's "asked" record is keyed by this
+      // same string id (`participantsAskedToRoll`), not by `p` itself, so it
+      // has to be evicted explicitly here rather than via `forgetMapEntry`.
+      this.participantsAskedToRoll.delete(id);
+      // Item 5: same reasoning - keyed by the same string id, not by `p`.
+      this.participantsWithSupersedableGmRoll.delete(id);
+      // Round 4 item 4: same reasoning - keyed by the same string id.
+      this.participantsAskedThisCombatTurn.delete(id);
+      this.participantsWithPlayerSubmittedRoll.delete(id);
       // Item 9 fix (fix round 3): if `p` is a row, drop every OTHER
       // participant's dangling lieutenant/team-row link that pointed at it
       // (`participantLieutenantTeamRowId` is keyed by the *lieutenant*, not
@@ -7733,6 +8942,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetMapEntry(this.participantStatblocks, p);
     this.forgetMapEntry(this.participantLieutenantTeamRowId, p);
     this.forgetMapEntry(this.pendingJoinAnnouncement, p);
+    this.forgetMapEntry(this.participantPendingDeltaDice, p);
     this.forgetSetEntry(this.expandedRowPanels, p);
     this.forgetSetEntry(this.expandedDeckPanels, p);
     this.forgetSetEntry(this.expandedAstralPanels, p);
@@ -7858,15 +9068,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Enter or leave astral space. Both halves of the Initiative change are a
-   * delta on the running Score (brief "Astral projection mid-turn", p. 160):
+   * delta on the running Score (brief "Astral projection mid-turn", Core p. 160):
    *  - the attribute half (REA+INT <-> INT x 2) rides the `baseIni` setter;
    *  - the dice half is a *relative* +2/-2 on the Initiative Dice count
-   *    (Astral base 3D6 total vs Physical 1D6, printed p. 314,
+   *    (Astral base 3D6 total vs Physical 1D6, printed Core p. 314,
    *    `rules/pages/p0316.txt`; RULINGS 2026-08-30), pushed through the single
    *    dice-count funnel so the gained/lost dice are actually rolled and
    *    applied to the running Score - "gains the die (and the change in
    *    Initiative) for their Astral Initiative during that Combat Turn"
-   *    (p. 160, `rules/pages/p0162.txt` line 53). The book's own example is
+   *    (Core p. 160, `rules/pages/p0162.txt` line 53). The book's own example is
    *    singular because it predates the 3D6 astral-base ruling above;
    *    RULINGS.md 2026-08-30 supersedes the *count* only, not the mechanic -
    *    under that ruling a magician projecting mid-turn gains two dice, not
@@ -7878,9 +9088,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * The return trip subtracts the **realized** outbound gain
    * (`projectionDiceGain`), not the constant: a dice decrease "rolls the number
-   * of lost dice and subtracts the total" (brief F5 / criterion 8, p. 160), so
+   * of lost dice and subtracts the total" (brief F5 / criterion 8, Core p. 160), so
    * you only roll and subtract dice you actually lose. A magician already at
-   * the 5D6 cap (pp. 52/288) gains nothing on the way out - the cap absorbs it,
+   * the 5D6 cap (Core pp. 52/288) gains nothing on the way out - the cap absorbs it,
    * nothing is rolled, the Score does not move - and so must lose nothing on
    * the way back. The round trip nets to zero dice and zero Score.
    */
@@ -7932,7 +9142,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     const mode = this.getPendingVrMode(p);
     // Mid-combat jack in: the base stat delta is automatic via baseIni; the
     // dice half rolls only the gained/lost dice and applies the total to the
-    // running Score (brief F5 / criteria 7-8, p. 160). Outside a running
+    // running Score (brief F5 / criteria 7-8, Core p. 160). Outside a running
     // combat the funnel just writes the count.
     this.applyVRMode(mp, mode);
     mp.jackedIn = true; // force true even for AR so Phase 2 shows
@@ -7950,7 +9160,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Jack Out: clear VR mode, restore physical initiative, reboot the device
-   * you're using — reset OS to zero and erase this decker's marks (p. 242).
+   * you're using — reset OS to zero and erase this decker's marks (Core p. 242).
    *
    * Round-5 defect D-3: an earlier version of this method zeroed OS inline
    * (`this.osTracking.resetOS(mp)`) and never touched any mark record at
@@ -7974,7 +9184,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.pendingVrModes.set(p, VRMode.AR);
     // Mid-combat jack out — base stat delta automatic via baseIni; the dice
     // half rolls the lost dice and subtracts the total (brief F5 / criterion
-    // 8, p. 160). Outside a running combat the funnel just writes the count.
+    // 8, Core p. 160). Outside a running combat the funnel just writes the count.
     // Restores the decker's *own* physical dice, not a hard-coded 1D6.
     this.restorePhysicalDiceCount(mp);
     this.appendParticipantEventLog(p.name || "", PLAYER_COMMAND_LOG_TEXT.jackedOut);
@@ -8001,7 +9211,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Initiative already committed to Interrupt Actions stays committed
     // (and a persisting one such as Full Defense keeps holding). The
     // reduction happens at the time of the Interrupt Action and is not
-    // reversible by a type swap (brief F9, p. 167).
+    // reversible by a type swap (brief F9, Core p. 167).
     dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     // No hardcoded default (RULINGS 2026-08-30): the old `defaultDP = 6`
     // belonged to no character in the book and looked like a real rating.
@@ -8042,6 +9252,13 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // own doc comment), so the array can move across the swap unchanged.
     const pendingJoin = this.pendingJoinAnnouncement.get(p);
     if (pendingJoin) this.pendingJoinAnnouncement.set(mp, pendingJoin);
+    // Fix round 3 (defect class: `participantPendingDeltaDice` keyed by
+    // object identity): `p` is being discarded for a brand-new `mp` that has
+    // never jacked in (`vrMode = VRMode.None`, seeded above), so any owed
+    // delta note `p` happened to be carrying refers to a VR-mode context that
+    // no longer exists. Cleared, not carried - consistent with
+    // `promoteToAstralParticipant`/`demoteFromAstralParticipant` below.
+    this.participantPendingDeltaDice.delete(p);
     const damage = existingId ? this.lastKnownDamage.get(existingId) : undefined;
     if (damage && existingId) this.lastKnownDamage.set(existingId, damage);
     const das = this.declaredActionSelections.get(p);
@@ -8075,7 +9292,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.combatManager.removeParticipant(p);
     // In-place type swap: the new instance already carries the running
     // Initiative Score, so it must not take the late-entry decay again
-    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    // (brief F6, Core p. 160 - subtract 10 per elapsed pass once, not twice).
     this.combatManager.addParticipant(mp, true);
     return mp;
   }
@@ -8093,17 +9310,21 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Initiative already committed to Interrupt Actions stays committed
     // (and a persisting one such as Full Defense keeps holding). The
     // reduction happens at the time of the Interrupt Action and is not
-    // reversible by a type swap (brief F9, p. 167).
+    // reversible by a type swap (brief F9, Core p. 167).
     dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const reaction = this.participantReactions.get(mp) ?? 0;
     const intuition = this.participantIntuitions.get(mp) ?? 0;
     // Losing the deck's Initiative Dice mid-combat is a dice *decrease*: the
     // newly-rolled lost dice are subtracted from the running Score "along with
-    // any decrease to their Initiative Attribute" (p. 160). `baseIni` covers
+    // any decrease to their Initiative Attribute" (Core p. 160). `baseIni` covers
     // the attribute half automatically; the dice half goes through the same
     // funnel as gmJackOut().
     p.baseIni = reaction + intuition;
     this.changeParticipantDiceCount(p, PHYSICAL_INITIATIVE_DICE);
+    // A plain Participant cannot owe a VR-mode delta roll - losing the deck
+    // resolves the dice change immediately (the line above), same as any
+    // other jack-out.
+    this.participantPendingDeltaDice.delete(mp);
     const existingId = this.participantIds.get(mp);
     if (existingId) this.participantIds.set(p, existingId);
     const owner = this.participantOwners.get(mp);
@@ -8156,7 +9377,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.combatManager.removeParticipant(mp);
     // In-place type swap: the new instance already carries the running
     // Initiative Score, so it must not take the late-entry decay again
-    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    // (brief F6, Core p. 160 - subtract 10 per elapsed pass once, not twice).
     this.combatManager.addParticipant(p, true);
     return p;
   }
@@ -8174,7 +9395,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Initiative already committed to Interrupt Actions stays committed
     // (and a persisting one such as Full Defense keeps holding). The
     // reduction happens at the time of the Interrupt Action and is not
-    // reversible by a type swap (brief F9, p. 167).
+    // reversible by a type swap (brief F9, Core p. 167).
     dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const existingId = this.participantIds.get(p);
     if (existingId) this.participantIds.set(ap, existingId);
@@ -8216,12 +9437,30 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantStatblocks.delete(p);
     this.participantLieutenantTeamRowId.delete(p);
     this.pendingJoinAnnouncement.delete(p);
+    // Fix round 3 (defect class: `participantPendingDeltaDice` keyed by
+    // object identity - this promote helper was the one place in the four
+    // that never mentioned this map at all). An unrolled VR-mode delta owed
+    // by a jacked-in decker (`p` may be a `MatrixParticipant` here: nothing
+    // stops the GM enabling Astral on a currently-jacked-in participant) has
+    // no meaning once the character is an astral projector - there is no VR
+    // mode to roll the extra dice for. Cleared, not carried, and no
+    // Initiative Score correction is needed: the note only ever tracks a
+    // dice change *not yet* rolled, so nothing has been applied to the
+    // Score for it to undo (see this map's own doc comment;
+    // `changeParticipantDiceCount` with `rollGainedDice: false` either
+    // writes the raw count with `setDicesWithoutRoll` (a gain) or leaves
+    // dices/Score untouched entirely (a loss, fix round 4) - neither ever
+    // moves the Score itself). Left unhandled, the note is stranded on the
+    // discarded `p` and the player's client never sees `pendingDeltaDice`
+    // drop, per `briefs/player-initiative-prompt-spec.md` fix round 3 - the
+    // player-side fix is in `PlayerViewComponent.applyIncomingState()`.
+    this.participantPendingDeltaDice.delete(p);
     if (this.selectedActor === p) this.selectedActor = ap;
     if (this.actModalParticipant === p) this.actModalParticipant = ap;
     this.combatManager.removeParticipant(p);
     // In-place type swap: the new instance already carries the running
     // Initiative Score, so it must not take the late-entry decay again
-    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    // (brief F6, Core p. 160 - subtract 10 per elapsed pass once, not twice).
     this.combatManager.addParticipant(ap, true);
     return ap;
   }
@@ -8239,14 +9478,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Initiative already committed to Interrupt Actions stays committed
     // (and a persisting one such as Full Defense keeps holding). The
     // reduction happens at the time of the Interrupt Action and is not
-    // reversible by a type swap (brief F9, p. 167).
+    // reversible by a type swap (brief F9, Core p. 167).
     dst["_actionHistory"] = [ ...(src["_actionHistory"] as Action[]) ];
     const reaction = this.participantReactions.get(ap) ?? 0;
     const intuition = this.participantIntuitions.get(ap) ?? 0;
     // Dropping back to Physical initiative is a dice *decrease* exactly like
     // the Matrix jack-out twin (demoteToParticipant): `baseIni` covers the
     // attribute half, and the dice half must roll the lost dice and subtract
-    // the total (brief F5 / criterion 8, p. 160). This site previously
+    // the total (brief F5 / criterion 8, Core p. 160). This site previously
     // assigned the count directly and skipped the roll entirely.
     p.baseIni = reaction + intuition;
     this.changeParticipantDiceCount(p, PHYSICAL_INITIATIVE_DICE);
@@ -8290,13 +9529,19 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantStatblocks.delete(ap);
     this.participantLieutenantTeamRowId.delete(ap);
     this.pendingJoinAnnouncement.delete(ap);
+    // Defensive, for consistency with the other three promote/demote
+    // helpers (fix round 3): an `AstralParticipant` should never actually
+    // reach this map (only a live `MatrixParticipant` jack-in ever adds an
+    // entry, and `promoteToAstralParticipant` now clears it on the way in),
+    // but a stray entry here would be exactly the same silent-leak shape.
+    this.participantPendingDeltaDice.delete(ap);
     this.expandedAstralPanels.delete(ap);
     if (this.selectedActor === ap) this.selectedActor = p;
     if (this.actModalParticipant === ap) this.actModalParticipant = p;
     this.combatManager.removeParticipant(ap);
     // In-place type swap: the new instance already carries the running
     // Initiative Score, so it must not take the late-entry decay again
-    // (brief F6, p. 160 - subtract 10 per elapsed pass once, not twice).
+    // (brief F6, Core p. 160 - subtract 10 per elapsed pass once, not twice).
     this.combatManager.addParticipant(p, true);
     return p;
   }
@@ -8326,7 +9571,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * "Switch Mode" control. A mid-combat interface-mode switch is a dice change
    * like any other: `applyVRMode` routes it through the dice-count funnel, so
    * the gained/lost dice are rolled and applied to the running Score (brief
-   * F5 / criteria 7-8, p. 160). This handler previously changed the dice count
+   * F5 / criteria 7-8, Core p. 160). This handler previously changed the dice count
    * with no roll and no Score effect at all.
    *
    * Has no production caller (`briefs/action-log-readability-spec.md` item 3):
@@ -8389,7 +9634,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * Routed through `changeParticipantDiceCount` like every other dice change,
    * so a mid-combat restore rolls the regained dice and moves the running
-   * Score (p. 160), while a restore outside combat just writes the count.
+   * Score (Core p. 160), while a restore outside combat just writes the count.
    */
   private restorePhysicalDiceCount(
     mp: MatrixParticipant,
@@ -8429,8 +9674,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * U7 (brief p. 381): "if they get the same Initiative as their team, they
-   * always go first." A specific override of p. 159's generic ERIC ladder,
+   * U7 (brief Core p. 381): "if they get the same Initiative as their team, they
+   * always go first." A specific override of Core p. 159's generic ERIC ladder,
    * scoped to that one lieutenant against that one row - resolved lazily by
    * id via `participantLieutenantTeamRowId` rather than an object reference,
    * since object identity does not survive `restoreFromSharedState`.
@@ -8442,7 +9687,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * Record that `lieutenant` beats `row` on an Initiative tie without
-   * consulting ERIC (U7, p. 381). Never called automatically - a lieutenant is
+   * consulting ERIC (U7, Core p. 381). Never called automatically - a lieutenant is
    * never auto-linked to a group (brief acceptance criterion 16 / U6); the GM
    * opts a specific lieutenant into a specific row's tie-break explicitly.
    */
@@ -8493,9 +9738,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * (`battle-tracker.component.html`, the "Lieutenant of" dropdown) requires
    * `hasGruntConditionMonitor(selectedActor)`, deliberately (defect 10, fix
    * round 2 - "it previously accepted ANY non-row participant, including a
-   * player character, which p. 380-381's lieutenant rule has no meaning for
+   * player character, which Core p. 380-381's lieutenant rule has no meaning for
    * at all"). The comment is fixed to match that gate rather than the gate
-   * widened to match the old comment: p. 380-381's mechanic (a lieutenant
+   * widened to match the old comment: Core p. 380-381's mechanic (a lieutenant
    * sharing the single combined Condition Monitor shape and tie-break
    * precedence a grunt/row has) genuinely has no meaning for a PC or an
    * ordinary NPC, so a plain `Participant` from "Add Participant" correctly
@@ -8525,7 +9770,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * The plain ERIC ladder (p. 159): Edge, Reaction, Intuition, coin toss,
+   * The plain ERIC ladder (Core p. 159): Edge, Reaction, Intuition, coin toss,
    * then insertion order. **Does not** special-case a lieutenant against his
    * own team - that used to live here as a pairwise override
    * (`isLieutenantOf(p1, p2) ? -1 : isLieutenantOf(p2, p1) ? 1 : ...`), which
@@ -8538,7 +9783,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * "How the lieutenant tie-break would be represented" flagged this exact
    * risk as a known limitation).
    *
-   * The p. 381 "lieutenant beats his own tied team" rule is now applied
+   * The Core p. 381 "lieutenant beats his own tied team" rule is now applied
    * **after** this comparator has produced a totally ordered array - see
    * `applyLieutenantPrecedence`. That keeps this ladder itself transitive and
    * explicable on its own (any two participants' relative order here follows
@@ -8581,7 +9826,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * p. 381 / U7, applied as a **post-sort adjustment** rather than a pairwise
+   * Core p. 381 / U7, applied as a **post-sort adjustment** rather than a pairwise
    * comparator override (defect D4 fix, validator round - see
    * `initiativeTieBreakComparator`'s doc comment for why the override was
    * removed from there). Mutates `items` in place: for every lieutenant tied
@@ -8597,15 +9842,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * once both are found tied, which can also move him ahead of a third
    * combatant ERIC had placed between them - a **deliberate** leapfrog
    * ("if it's a fair leapfrog then it's fair," Xavier's ruling), not a
-   * comparator bug. The two rules genuinely cycle on a three-way tie (p. 381
-   * says the lieutenant always precedes his row; ERIC, p. 159, may place the
+   * comparator bug. The two rules genuinely cycle on a three-way tie (Core p. 381
+   * says the lieutenant always precedes his row; ERIC, Core p. 159, may place the
    * third party between them) and the book gives no answer; this is where
    * the cycle is broken, in the lieutenant's favour. Only the
    * lieutenant/row/third-party relationship is affected - the third party's
    * order relative to everyone *else* is untouched, and this is still a
    * total, deterministic order: each lieutenant is considered in his current
    * (ERIC-decided) position, so two lieutenants linked to the same tied row
-   * both end up somewhere ahead of it (p. 381 is satisfied for each), but not
+   * both end up somewhere ahead of it (Core p. 381 is satisfied for each), but not
    * necessarily adjacent to it or to each other. `[L1, X, L2, ROW]` stays
    * exactly `[L1, X, L2, ROW]`: both lieutenants already precede the row and
    * take the "already ahead" early-continue below, so `X` is never displaced
@@ -8636,7 +9881,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
       const lieutenantIndex = items.indexOf(lieutenant);
       if (lieutenantIndex < rowIndex) {
-        // Already somewhere ahead of his row - p. 381 only requires that he
+        // Already somewhere ahead of his row - Core p. 381 only requires that he
         // go first, not that he sit immediately adjacent. Splicing him up to
         // be adjacent anyway would demote him past whichever participants
         // ERIC legitimately placed between him and the row (defect 1, fix
@@ -8671,6 +9916,56 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return this.combatManager.participants.items.some(p => !p.ooc && p.diceIni <= 0);
   }
 
+  /**
+   * Template-facing predicate for the mid-combat "Pending Rolls" panel
+   * (briefs/mid-turn-joiner-spec.md, "Affected paths"). Deliberately its own
+   * method rather than overloading `initiativePrepActive`: that field's
+   * documented meaning is "the pre-combat prep panel shows," and it is
+   * cleared by `beginCombatTurn()`, `btnReset_Click()` and session teardown -
+   * none of which are the right trigger for this panel. `started` is checked
+   * again in the template's own `@if` alongside this call so the "Begin
+   * Combat Turn" button's own gate (the pre-combat card, `!combatManager.
+   * started`) and this one can never both be true at once.
+   *
+   * `hasPendingInitiativeRolls()` is unchanged and state-independent (spec
+   * "Verification against the code": it never referenced `started` and
+   * already correctly counts a late joiner, whose penalty is applied at
+   * `addParticipant()` time, not roll time) - this only adds the reachability
+   * gate on top of it.
+   */
+  hasOutstandingMidCombatRolls(): boolean {
+    return this.combatManager.started && this.hasPendingInitiativeRolls();
+  }
+
+  /**
+   * Item B: a per-row visual marker for a participant who still owes an
+   * Initiative roll mid-combat (a just-joined late entrant, most commonly) -
+   * a cue only, never an interruption, per the brief: it does not open
+   * anything, gate any button, or warn on its own. Same predicate as
+   * `getOutstandingRollNames()`/`getPendingOutstandingRollCount()`
+   * (`!p.ooc && p.diceIni <= 0`), scoped to `started` so it never marks a
+   * row before combat has begun (the pre-combat Initiative Prep panel
+   * already covers that case for everyone at once).
+   */
+  participantNeedsInitiativeRoll(p: IParticipant): boolean {
+    return this.combatManager.started && !p.ooc && p.diceIni <= 0;
+  }
+
+  /**
+   * Item 7 (round 3, `briefs/mid-turn-joiner-spec.md`): "who has been asked"
+   * on the participant's own row, unconditional on `combatManager.started`
+   * (unlike `participantNeedsInitiativeRoll()` above) - a player can be
+   * asked before Start Round is ever pressed, via the pre-combat Initiative
+   * Prep panel's own "Request Player Rolls" or the per-row ask button, and
+   * the row should say so at that point too. Template-facing wrapper over
+   * the private `isAskedToRoll()` choke point (`buildSharedParticipant()`
+   * reads the same one), so this can never disagree with what the wire
+   * actually carries.
+   */
+  participantAskedToRoll(p: IParticipant): boolean {
+    return this.isAskedToRoll(p, p.diceIni <= 0);
+  }
+
   getPendingOutstandingRollCount(): number {
     return this.combatManager.participants.items.filter(p => !p.ooc && p.diceIni <= 0).length;
   }
@@ -8687,10 +9982,98 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     ).length;
   }
 
+  /**
+   * D6(a) fix (validation round 1, `briefs/mid-turn-joiner-spec.md`): the
+   * mid-combat "Pending Rolls" panel names who is still owed a roll, rather
+   * than only showing a bare count. Same predicate as
+   * `getPendingOutstandingRollCount()` (`!p.ooc && p.diceIni <= 0`), so the
+   * two can never silently disagree on who counts as outstanding.
+   */
+  getOutstandingRollNames(): string[] {
+    return this.combatManager.participants.items
+      .filter(p => !p.ooc && p.diceIni <= 0)
+      .map(p => p.name || "Unnamed");
+  }
+
+  /**
+   * F fix (validation round 2 redesign): names of everyone the GM has
+   * actually asked to roll and who still owes one - replaces round-1's
+   * table-wide "request outstanding" boolean line
+   * (`areRollsRequested()`/D6(b)) with the per-person picture item A's
+   * redesign requires. Reads through the same `isAskedToRoll()` choke point
+   * `buildSharedParticipant()` uses, so this can never disagree with what
+   * actually went out on the wire.
+   */
+  getAskedRollNames(): string[] {
+    return this.combatManager.participants.items
+      .filter(p => this.isAskedToRoll(p, p.diceIni <= 0))
+      .map(p => p.name || "Unnamed");
+  }
+
+  /**
+   * Item A's new per-row control: visible only for a player-owned,
+   * non-`ooc` participant who still owes a roll, with a session open to
+   * send the ask over - the same shape of guard the row's own dice button
+   * and Interrupt affordances already use. Template-facing (the private
+   * `participantOwners` map cannot be read from the template directly).
+   */
+  canAskParticipantToRoll(p: IParticipant): boolean {
+    return !!this.shareRoomCode && this.participantOwners.has(p) && !p.ooc && p.diceIni <= 0;
+  }
+
+  /**
+   * Ask exactly one player to roll (item A's new per-row control). Marks
+   * only `p`, broadcasts, then sends the existing `request_rolls` command -
+   * every player's own `syncRollModal()` still reads its own primary
+   * character's `askedToRoll`, so broadcasting the same command to the whole
+   * room cannot open anyone else's modal (unlike the old table-wide switch,
+   * which was the exact bug this redesign fixes).
+   *
+   * Item 6 (round 3): the command payload now names `p`'s own id. This is
+   * only a *targeting* hint for the client-side re-chime nudge
+   * (`PlayerViewComponent`'s `request_rolls` handler skips its own "already
+   * open, re-chime" branch unless the id matches its primary character) -
+   * `syncRollModal()`'s own open/close predicate never reads it, and never
+   * did. Without this, a straggler whose own modal was already open from an
+   * earlier, unrelated ask got re-nudged every time the GM asked a
+   * *different* player, because `request_rolls` was, and still is, a
+   * room-wide broadcast (round-3 defect 8).
+   */
+  btnAskPlayerToRoll_Click(p: IParticipant): void {
+    if (!this.canAskParticipantToRoll(p)) {
+      return;
+    }
+    this.askParticipantToRoll(p);
+    this.syncSharedState();
+    this.sessionSync.sendCommand({
+      type: "request_rolls",
+      player: "GM",
+      payload: { participantId: this.getParticipantId(p) }
+    });
+    this.updateInitiativePrepInfo();
+  }
+
   requestPlayerRolls() {
     if (!this.shareRoomCode || this.getPendingPlayerRollCount() <= 0) {
       return;
     }
+    // Item A: marks every player-owned, non-`ooc` participant CURRENTLY
+    // owing a roll as asked. Anyone who arrives afterward is not asked until
+    // the GM presses a button again (orchestrator assumption, stated to
+    // Xavier) - this is a snapshot taken once, not a standing rule
+    // re-evaluated on every future broadcast.
+    for (const participant of this.combatManager.participants.items) {
+      if (!participant.ooc && participant.diceIni <= 0 && this.participantOwners.has(participant)) {
+        this.askParticipantToRoll(participant);
+      }
+    }
+    // Pushed *before* the command (item B, fix round 2, still true under the
+    // redesign): a player socket receives its own room's events in the order
+    // they were sent, so this guarantees the state broadcast carrying each
+    // asked participant's `askedToRoll: true` lands ahead of `request_rolls`
+    // itself - the modal's open predicate reads both, and must never see the
+    // command land ahead of the flag it depends on.
+    this.syncSharedState();
     this.sessionSync.sendCommand({
       type: "request_rolls",
       player: "GM",
@@ -8739,7 +10122,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // GM-run participant. A batch that rolls nothing (the GM tapping the button
     // to check status when nothing is outstanding) or that rolls only
     // player-claimed characters - who are never hidden - must leave the arming
-    // intact for the next real GM roll (brief p. 330).
+    // intact for the next real GM roll (brief Core p. 330).
     const rollsGmControlled = targets.some(p => this.isGmControlled(p));
     const hiddenForBatch = rollsGmControlled ? this.consumeGmRollVisibility() : false;
     // Batch marker, emitted before the rolls so `assignLogOrder` places it
@@ -8774,6 +10157,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.rollAndLogInitiative(participant, hiddenForBatch);
     }
     if (rolledPlayer && this.shareRoomCode) {
+      // Every player this batch included who owed a roll now has one - the
+      // trailing `sort()` below broadcasts that, and `isAskedToRoll()`'s own
+      // read-time prune (item A) already retires their "asked" record
+      // without needing a matching clear call here. `clear_roll_prompt` is
+      // still sent as an immediate nudge so any of their modals close on
+      // this tick rather than waiting for the round-trip broadcast.
       this.sessionSync.sendCommand({
         type: "clear_roll_prompt",
         player: "GM",
@@ -8799,6 +10188,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   private beginCombatTurn() {
     this.initiativePrepActive = false;
+    // Item 3: a fresh Combat Turn makes any roll-status text describing the
+    // turn that just ended stale.
+    this.clearStaleRollStatusText();
+    // Item A: a fresh Combat Turn zeroes every `diceIni` (`softReset()`),
+    // which makes `pendingRoll` true for everyone again before the GM has
+    // asked anyone to roll it. Clearing every "asked" record here is what
+    // stops a stale one from reading as newly-asked-again on its own.
+    this.participantsAskedToRoll.clear();
+    // Item 5: same reasoning as `logCombatTurnEnded()` - belt-and-braces for
+    // the very first Combat Turn (`combatTurn === 1`), which never fires
+    // `onCombatTurnEnded`.
+    this.participantsWithSupersedableGmRoll.clear();
+    this.participantsAskedThisCombatTurn.clear();
+    this.participantsWithPlayerSubmittedRoll.clear();
+    // A turn boundary is also where any still-outstanding delta roll from
+    // the turn that just ended stops mattering - `softReset()` is about to
+    // zero every `diceIni`, so a gain nobody rolled yet is moot.
+    this.participantPendingDeltaDice.clear();
     // Turn number and "is this a new combat" are captured before
     // `startRound()` runs, and all three start lines are emitted ahead of
     // that call — a deliberate departure from this file's usual "log after
@@ -8830,17 +10237,91 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sort();
   }
 
+  /**
+   * The roll-status line's own display slot (round 4 item 3), template-facing.
+   *
+   * Round 3 item 3 tried to protect `shareInfo`'s other messages by having
+   * `setRollStatusText()` only overwrite it when it was empty or already
+   * held this method's own last line - but nothing ever *clears* `shareInfo`
+   * for an unrelated session message ("Copied player link.", "Reconnected to
+   * session…", "Joined session…"), so the first time one of those landed,
+   * the roll-status line could never write to `shareInfo` again for the rest
+   * of the session; round 4 validation confirmed this as a real, breaking
+   * regression. A dedicated field removes the competition outright: the two
+   * kinds of message can no longer starve or clobber each other, because
+   * they no longer share a slot.
+   */
+  rollStatusText = "";
+
+  /**
+   * Item E fix (round 2, `briefs/mid-turn-joiner-spec.md`): this status line
+   * is shared between the pre-combat Initiative Prep card and the mid-combat
+   * Pending Rolls panel, and used to say "Begin Combat Turn" unconditionally
+   * once nothing was outstanding - a button that does not exist, and reads
+   * as broken, once `combatManager.started` is true. It now branches on
+   * `started` for that line.
+   *
+   * **No panel, no text.** Before Start Round is ever pressed
+   * (`initiativePrepActive` false and `combatManager.started` false - e.g. a
+   * GM taps the per-row "ask this player" button pre-combat), no roll panel
+   * exists on screen at all, so writing "Begin Combat Turn." here would read
+   * as a reference to a button that was nowhere on the page. Guarded by the
+   * early return below, which also blanks the slot - there is nothing
+   * current to show once the panel that would display it is gone.
+   *
+   * `panelVisible` stays `true` for the rest of a fight once combat has
+   * begun, on purpose - "All initiative rolls in." is meant to be read at
+   * the moment it is written (the mid-combat Pending Rolls panel's own
+   * buttons disappear in that same instant, once nothing is outstanding,
+   * but the confirmation line itself is meant to stay up until the next
+   * genuine boundary - see `clearStaleRollStatusText()`, called from
+   * `advancePass()`, `beginCombatTurn()`, End Combat, and (round 5 item 6)
+   * `logCombatTurnEnded()`).
+   */
   private updateInitiativePrepInfo() {
+    const panelVisible = this.initiativePrepActive || this.combatManager.started;
+    if (!panelVisible) {
+      this.rollStatusText = "";
+      return;
+    }
     const pendingPlayers = this.getPendingPlayerRollCount();
     const pendingNonPlayers = this.getPendingNonPlayerRollCount();
     const pendingTotal = pendingPlayers + pendingNonPlayers;
     if (pendingTotal === 0) {
-      this.shareInfo = "All initiative rolls ready. Begin Combat Turn.";
+      this.setRollStatusText(
+        this.combatManager.started
+          ? "All initiative rolls in."
+          : "All initiative rolls ready. Begin Combat Turn."
+      );
       return;
     }
     const playerPart = pendingPlayers > 0 ? `${pendingPlayers} player` : "0 player";
     const otherPart = pendingNonPlayers > 0 ? `${pendingNonPlayers} non-player` : "0 non-player";
-    this.shareInfo = `Waiting for initiative: ${playerPart}, ${otherPart}.`;
+    this.setRollStatusText(`Waiting for initiative: ${playerPart}, ${otherPart}.`);
+  }
+
+  /**
+   * The single place `updateInitiativePrepInfo()` writes the roll-status
+   * line (round 4 item 3 - its own `rollStatusText` slot, not `shareInfo`).
+   */
+  private setRollStatusText(text: string): void {
+    this.rollStatusText = text;
+  }
+
+  /**
+   * Item 3: called at the pass/turn boundaries (`advancePass()`,
+   * `beginCombatTurn()`, and End Combat) so a roll-status line this method
+   * itself wrote does not linger on screen once the situation it described
+   * has moved on - the "sticks for the rest of the fight" defect. Also
+   * called from `logCombatTurnEnded()` (round 5 item 6) - `advancePass()`
+   * already reaches it for the ordinary "GM clicks Next Pass / End Combat
+   * Turn" route, but `logCombatTurnEnded()` is the one place every Combat
+   * Turn ending is observable regardless of which call path reached
+   * `CombatManager.endCombatTurn()`, so a status line can never survive a
+   * Combat Turn boundary no matter what triggered it.
+   */
+  private clearStaleRollStatusText(): void {
+    this.rollStatusText = "";
   }
 
   isSharedLogEntryNew(index: number): boolean {
@@ -9006,7 +10487,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * *any* participant field edit (including unrelated ones such as the name
    * field), so it must never move the running Initiative Score as a side
    * effect - the Score only changes when dice are actually rolled (brief F5,
-   * p. 160).
+   * Core p. 160).
    *
    * Because the clamp is Score-neutral by design, it can leave the rolled-total
    * box showing a number that no longer reconciles with the running Score
@@ -9030,17 +10511,17 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * Log a Score-neutral rolled-total clamp when it leaves the displayed total
    * irreconcilable with the Initiative Score the GM can actually see, so the
    * gap is never silent. Purely a legibility signal - no Score math happens
-   * here (brief F5, p. 160).
+   * here (brief F5, Core p. 160).
    *
    * Both the guard and the message read `getCurrentInitiative()`, the
    * *effective* Score (running Score + Initiative committed to Interrupt
-   * Actions, brief F9, p. 167) - the same value the Ini column, the roll log
+   * Actions, brief F9, Core p. 167) - the same value the Ini column, the roll log
    * and the sort comparator use. Reading the raw `currentInitiativeScore`
    * backing field instead would name a number that appears nowhere on screen
    * for anyone holding Full Defense.
    *
    * The message states the two numbers and does not claim the clamp caused the
-   * gap: ordinary pass-boundary decay (-10, p. 160) opens the same gap on its
+   * gap: ordinary pass-boundary decay (-10, Core p. 160) opens the same gap on its
    * own, and this function cannot tell the two apart. It does still state the
    * mismatch outright - without that clause the line puts two numbers side by
    * side and leaves the GM to notice the gap for themselves, which is the
@@ -9048,7 +10529,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    *
    * It names the participant's Initiative Dice count, rolled total, Initiative
    * attribute and Score, so for a GM-run participant it is subject to the same
-   * visibility decision as the roll it describes (brief p. 330) - hence it goes
+   * visibility decision as the roll it describes (brief Core p. 330) - hence it goes
    * out through `appendParticipantRollLog` and not straight to the shared log.
    * The decision is *read* rather than consumed: this line is a consequence of
    * a dice-count change, not a roll of its own, so it must not spend the "hide

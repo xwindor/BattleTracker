@@ -37,13 +37,13 @@ export function escapeHtml(value: string): string {
 
 // ── Roll-result vocabulary ────────────────────────────────────────────────
 //
-// The labels below are the printed rules terms (brief p. 44-45). They are the
+// The labels below are the printed rules terms (brief Core p. 44-45). They are the
 // only vocabulary the log uses for a roll outcome; no synonyms.
 
-/** Printed term for "more than half the dice showed a 1" (brief p. 45). */
+/** Printed term for "more than half the dice showed a 1" (brief Core p. 45). */
 export const GLITCH_LABEL = "GLITCH";
 
-/** Printed term for a glitch that also produced no hits (brief p. 45). */
+/** Printed term for a glitch that also produced no hits (brief Core p. 45). */
 export const CRITICAL_GLITCH_LABEL = "CRITICAL GLITCH";
 
 /** Separator between the sub-facts of a single log line. Presentation only. */
@@ -73,12 +73,12 @@ export function getGlitchLabel(level: GlitchLevel): string {
  *
  * Carries the pool size and the number of 1s alongside the hits so a reader
  * can verify glitch status independently (glitch = more than half the dice
- * show a 1, brief p. 45; hits = dice showing 5 or 6, brief p. 44). Faces are
+ * show a 1, brief Core p. 45; hits = dice showing 5 or 6, brief Core p. 44). Faces are
  * shown high-to-low purely for legibility - same multiset, mirroring the way
  * the book itself prints a roll.
  *
  * A glitch never suppresses the hit count and the hit count never suppresses
- * the glitch: both are always printed (brief p. 45).
+ * the glitch: both are always printed (brief Core p. 45).
  */
 export function formatDiceRollLogText(values: readonly number[]): string {
   const outcome = classifyRoll(values);
@@ -120,11 +120,11 @@ export function formatLogEntryReference(actor: string, text: string): string {
 
 /**
  * Initiative Test line: Initiative attribute + the Initiative Dice actually
- * rolled = Initiative Score (brief p. 160). The faces are shown in brackets;
+ * rolled = Initiative Score (brief Core p. 160). The faces are shown in brackets;
  * their count already signifies how many Initiative Dice were rolled, so no
  * separate subtotal is printed. `total` is printed verbatim, including
  * negative Scores, which are never clamped to 0 (ARCHITECTURE.md §1; brief
- * p. 160).
+ * Core p. 160).
  */
 export function formatInitiativeRollLogText(baseLabel: string, values: readonly number[], total: number): string {
   return `initiative roll: ${baseLabel} + [${values.join(", ")}] = ${total}`;
@@ -136,9 +136,21 @@ export function formatManualInitiativeRollLogText(baseLabel: string, rolledTotal
 }
 
 /**
+ * Item 5 (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation round
+ * 3"): the player's own Initiative Test supersedes a roll the GM already
+ * made for them with the per-row dice button. Reuses
+ * `formatInitiativeRollLogText`'s own body so the numbers read identically
+ * to an ordinary roll line; only the prefix makes the supersession visible
+ * to the GM in the Action Log, per the brief's "write a log line".
+ */
+export function formatInitiativeRollSupersededLogText(baseLabel: string, values: readonly number[], total: number): string {
+  return `player's own roll supersedes the GM's earlier roll — ${formatInitiativeRollLogText(baseLabel, values, total)}`;
+}
+
+/**
  * Mid-Combat-Turn Initiative Score change (gained/lost Initiative Dice,
  * augmentation/drug/spell effects, wound modifiers): its own entry, showing
- * the dice rolled for the change and the resulting Score (brief p. 160).
+ * the dice rolled for the change and the resulting Score (brief Core p. 160).
  */
 export function formatInitiativeDeltaLogText(values: readonly number[], delta: number, total: number): string {
   const sign = delta >= 0 ? "+" : "-";
@@ -152,7 +164,7 @@ export function formatInitiativeDeltaLogText(values: readonly number[], delta: n
 /**
  * Linked NPC row: a member's wound moved the row's **shared** Initiative Score
  * (brief "NPC Group Initiative" acceptance criterion 5 / Decision 1, house rule
- * against p. 379 / p. 170; `RULINGS.md` 2026-08-01).
+ * against Core p. 379 / Core p. 170; `RULINGS.md` 2026-08-01).
  *
  * Scenario S3 requires the log to make it visible both that the group-wide
  * wound-debuff house rule fired and *which* NPC's wound triggered it, because
@@ -186,7 +198,7 @@ export function formatGroupWoundLogText(
 
 /**
  * Initiative Pass boundary. Every Initiative Pass subtracts 10 from every
- * Initiative Score (brief p. 160); the decay is named in the entry rather
+ * Initiative Score (brief Core p. 160); the decay is named in the entry rather
  * than left for the reader to infer from the Score column.
  */
 export function formatPassStartLogText(pass: number, decayPerPass: number): string {
@@ -245,7 +257,7 @@ export function getLogTextClass(text: string): string {
 /**
  * Highlight the glitch labels wherever they appear in an entry. Applied to
  * every branch of `formatLogText` so a glitch is never dropped by an earlier
- * pattern winning the match (brief p. 45: a glitch stands alongside whatever
+ * pattern winning the match (brief Core p. 45: a glitch stands alongside whatever
  * else the entry says).
  */
 function decorateGlitchLabels(formatted: string): string {

@@ -352,6 +352,11 @@ describe('GM reconnect state loss', () => {
       expect(stateJson).not.toContain('physicalDamage');
       expect(stateJson).not.toContain('stunDamage');
       expect(stateJson).not.toContain('gmState');
+      // The table-wide `rollsRequested` field this test used to assert on
+      // `SharedCombatState` was removed by `briefs/mid-turn-joiner-spec.md`'s
+      // redesign (item A): "the GM has asked for initiative rolls" is now a
+      // per-participant `askedToRoll` field on `SharedParticipantState`
+      // instead, so it does not appear in this top-level field list.
       expect(Object.keys(state).sort()).toEqual(
         ['currentInitiative', 'oocOwnership', 'oocParticipantCount', 'participants', 'passEnded', 'pass', 'round', 'started'].sort()
       );
@@ -911,7 +916,7 @@ describe('GM reconnect state loss', () => {
       component['participantReactions'].set(mage, 4);
       component['participantIntuitions'].set(mage, 5);
       mage.diceIni = 4; // pretend Initiative Test already rolled this turn
-      mage.setDicesWithoutRoll(3); // 3D6 total while projecting (p. 314)
+      mage.setDicesWithoutRoll(3); // 3D6 total while projecting (Core p. 314)
       mage.projectionDiceGain = 2;
       const scoreBeforeReconnect = mage.getCurrentInitiative();
 
@@ -996,12 +1001,23 @@ describe('GM reconnect state loss', () => {
       component['syncSharedState']();
       const { state } = lastBroadcast();
 
+      // `pendingDeltaDice` on each participant (fix round 2, item D,
+      // `briefs/player-initiative-prompt-spec.md`) is a deliberate later
+      // addition, not a drift regression of this brief's own no-drift AC.
+      // The table-wide `rollsRequested` field this test used to assert here
+      // was removed by `briefs/mid-turn-joiner-spec.md`'s redesign (item A) -
+      // see the other field-list assertion above for the replacement.
       expect(Object.keys(state).sort()).toEqual(
         ['currentInitiative', 'oocOwnership', 'oocParticipantCount', 'participants', 'passEnded', 'pass', 'round', 'started'].sort()
       );
       const knownParticipantFields = new Set([
         'id', 'name', 'order', 'active', 'initiativeScore', 'playerControlled', 'claimable',
         'ownerName', 'ooc', 'canAct', 'canDelay', 'canInterrupt', 'initiativeDice', 'pendingRoll',
+        'pendingDeltaDice',
+        // `askedToRoll` (briefs/mid-turn-joiner-spec.md, redesign item A) is a
+        // deliberate later per-participant addition, replacing the top-level
+        // `rollsRequested` field removed above - not a drift regression.
+        'askedToRoll',
         'rolledInitiativeTotal', 'edgeRating', 'reaction', 'intuition', 'isNpcRow', 'isDetachedGrunt',
         'rowMembers', 'rowWoundModifier', 'rowEverPopulated', 'isAstral', 'isAstralProjecting',
         'isMatrix', 'vrMode', 'overwatch', 'overwatchAlert', 'jackedIn', 'isVRCatatonic',

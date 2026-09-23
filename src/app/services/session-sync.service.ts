@@ -8,7 +8,7 @@ import { GlitchLevel } from "app/shared/roll-utils";
  *
  * Broadcast so a GM rejoining a shared session gets their rows back with their
  * NPCs, each with its own Condition Monitor (brief "NPC Group Initiative"
- * criteria 3-4, 7, p. 379) rather than as an empty plain participant. Rows are
+ * criteria 3-4, 7, Core p. 379) rather than as an empty plain participant. Rows are
  * GM-side bookkeeping: the player view renders participants, not row members,
  * so nothing here is surfaced to players today.
  */
@@ -16,9 +16,9 @@ export interface SharedGruntMemberState {
   name: string;
   body: number;
   willpower: number;
-  /** Boxes filled on the single combined Physical + Stun track (p. 379). */
+  /** Boxes filled on the single combined Physical + Stun track (Core p. 379). */
   damage: number;
-  /** 'physical' | 'stun' - the final attack's type, for alive/dead (p. 379). */
+  /** 'physical' | 'stun' - the final attack's type, for alive/dead (Core p. 379). */
   lastDamageType?: string | null;
   lastDamageValue?: number;
   // `hasActed` (GruntMember.hasActed, brief "GM reconnect state loss" D2,
@@ -64,9 +64,57 @@ export interface SharedParticipantState {
   initiativeDice?: number;
   pendingRoll?: boolean;
   /**
+   * Per-person "the GM has asked this specific character to roll Initiative"
+   * signal (`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation round 2:
+   * redesign", item A). Replaces the table-wide `SharedCombatState
+   * .rollsRequested` switch the earlier fix round introduced: that switch
+   * cleared the instant nobody was left owing a roll, which silently
+   * cancelled the request for the very player it was tracking if their
+   * connection dropped and they released/reclaimed the character (validator
+   * failure 1), and it had no way to say "I only asked THIS person," so one
+   * request could cover someone who joined afterward and was never asked
+   * (validator failure 3).
+   *
+   * `true` only while the GM has asked AND the roll is still outstanding -
+   * `BattleTrackerComponent.buildSharedParticipant()` derives this from its
+   * own `participantsAskedToRoll` id set gated on `!ooc && pendingRoll`, so
+   * it self-clears the moment this participant's roll lands by any route
+   * (their own `roll_submission`, the per-row GM dice button, a typed
+   * rolled-total, Force Roll Outstanding, Roll Remaining Non-Player) without
+   * needing a matching "clear" call at every one of those sites - see that
+   * method's doc comment for the single choke point. Ownership changes
+   * (a dropped connection, a release/reclaim) never touch the id set, so this
+   * field - and the player's pop-up it gates on the read side
+   * (`PlayerViewComponent.syncRollModal()`) - survives them exactly as the
+   * brief requires.
+   *
+   * Absent/false means either never asked, or asked-and-resolved.
+   */
+  askedToRoll?: boolean;
+  /**
+   * The signed Initiative Dice delta this participant owes a roll for (a VR
+   * mode switch mid-pass, after they already rolled this Combat Turn) but
+   * has not yet rolled and submitted (`briefs/player-initiative-prompt-spec.md`,
+   * fix round 2, item D). 0/absent means nothing outstanding. Positive is
+   * dice *gained* (added to the running Score once rolled); negative is dice
+   * *lost* (subtracted once rolled) - the negative case since fix round 4
+   * (consistency follow-up): before that, a loss was always rolled and
+   * applied GM-side immediately, so this field only ever carried a gain.
+   *
+   * Set GM-side the moment the change is applied without a roll
+   * (`changeParticipantDiceCount`'s `rollGainedDice: false` branch), and
+   * cleared the moment the matching `roll_submission {isDelta: true}` lands.
+   * Broadcast so a player who refreshes mid-delta-roll (the one thing the
+   * old, purely local `pendingDeltaDice` component field could never
+   * survive) can recover the "extra/lost dice" prompt from state instead of
+   * losing it for the rest of the fight - no new dice-count math, just this
+   * field riding the wire.
+   */
+  pendingDeltaDice?: number;
+  /**
    * Sum of the Initiative Dice already rolled this Combat Turn (`diceIni`).
    * Broadcast so a rejoining GM can tell "already rolled" from "still needs to
-   * roll": Initiative is rolled once per Combat Turn (p. 159/160), so a restore
+   * roll": Initiative is rolled once per Combat Turn (Core p. 159/160), so a restore
    * must not re-offer the roll to a participant who already has a running
    * Score. 0 / absent means the Initiative Test has not been taken.
    */
@@ -82,7 +130,7 @@ export interface SharedParticipantState {
   isNpcRow?: boolean;
   /**
    * True for a standalone / detached grunt - one grunt-shaped NPC on its own
-   * Initiative Score, with the single combined Condition Monitor of p. 379
+   * Initiative Score, with the single combined Condition Monitor of Core p. 379
    * (brief addendum Decisions 9 and 12).
    *
    * Presentation only: it exists so the player view can badge a lone grunt the
@@ -93,7 +141,7 @@ export interface SharedParticipantState {
    */
   isDetachedGrunt?: boolean;
   rowMembers?: SharedGruntMemberState[];
-  /** The row's shared wound accumulator (criterion 5 / Decision 1, p. 169). */
+  /** The row's shared wound accumulator (criterion 5 / Decision 1, Core p. 169). */
   rowWoundModifier?: number;
   /** Distinguishes an emptied row from one the GM has not filled in yet. */
   rowEverPopulated?: boolean;
@@ -106,7 +154,7 @@ export interface SharedParticipantState {
   isMatrix?: boolean;
   vrMode?: string;          // 'AR' | 'cold-sim' | 'hot-sim'
   overwatch?: number;
-  overwatchAlert?: string;  // 'none' | 'convergence' (SR5's only OS threshold is 40, p. 232)
+  overwatchAlert?: string;  // 'none' | 'convergence' (SR5's only OS threshold is 40, Core p. 232)
   jackedIn?: boolean;
   isVRCatatonic?: boolean;  // mirrors blocksPhysicalActions for the player view
   dataProcessing?: number;
@@ -225,7 +273,7 @@ export interface SharedCombatState {
   /**
    * Per-decker mark count on the current host icon itself, keyed by decker
    * name — the host icon's own marks, distinct from any `SharedMatrixTarget`
-   * inside it (p. 236). Consumed by
+   * inside it (Core p. 236). Consumed by
    * `MatrixPlayerViewComponent.hostMarksRecord`
    * (briefs/matrix-port-rules-correctness-spec.md appendix D). Purely
    * additive: no producer exists yet, so this key is never present on the
@@ -354,7 +402,7 @@ export interface SharedGmParticipantState {
   /** Was this template loaded with its augmented (bracketed) values (U4)? */
   statblockAugmented?: boolean;
   /**
-   * U7 (p. 381): the id (`getParticipantId`) of the row this lieutenant beats
+   * U7 (Core p. 381): the id (`getParticipantId`) of the row this lieutenant beats
    * on an Initiative tie with his own team, without consulting ERIC. GM-only -
    * a player has no use for it and it is presentation of the same class the
    * rest of this interface already withholds.
@@ -365,7 +413,7 @@ export interface SharedGmParticipantState {
    * `AstralParticipant.projectionDiceGain` (item 7, fix round 3): how many
    * Initiative Dice this participant actually gained on the way into astral
    * space (0-2 with the 2026-08-30 ruling's delta of 2, less if the 5D6 hard
-   * cap absorbed part of the gain, pp. 52/288). GM-only, restated here rather
+   * cap absorbed part of the gain, Core pp. 52/288). GM-only, restated here rather
    * than re-derived, for the same reason `baseIni`/`currentInitiativeScore`
    * are: it is a fact about *how this Score got here*, not something the
    * current state can reconstruct after the fact. Set only when
@@ -415,7 +463,7 @@ export interface SharedLogEntry {
   /**
    * Glitch status of the roll this entry records: more than half the dice
    * showed a 1, and `critical` when that roll also produced no hits
-   * (brief p. 45). Absent/`none` on entries that are not a roll.
+   * (brief Core p. 45). Absent/`none` on entries that are not a roll.
    */
   glitch?: GlitchLevel;
 
@@ -437,7 +485,7 @@ export interface SharedLogEntry {
   /**
    * True when the entry's text is GM-authored narrative typed at the table.
    * Glitch consequences are entirely the GM's invention; nothing here is ever
-   * generated from a table (brief p. 45).
+   * generated from a table (brief Core p. 45).
    */
   gmNote?: boolean;
 
@@ -445,7 +493,7 @@ export interface SharedLogEntry {
    * True when the gamemaster made this roll on behalf of a non-player
    * combatant: `actor` is that combatant's name, not the GM's. The gamemaster
    * governs the actions of the non-player characters and determines the
-   * results of their tests (brief p. 44), so the dice are the GM's but the
+   * results of their tests (brief Core p. 44), so the dice are the GM's but the
    * roll belongs to the named NPC. Presentation only - nothing about the
    * resolution differs from any other roll.
    */
@@ -453,7 +501,7 @@ export interface SharedLogEntry {
 
   /**
    * Set only on entries the GM kept off the wire. Whether GM rolls are visible
-   * to players is a table decision, not a rule (brief p. 330). An entry
+   * to players is a table decision, not a rule (brief Core p. 330). An entry
    * carrying this flag exists in the GM's local list only and was never sent
    * to the server, so players cannot receive one.
    */
@@ -732,7 +780,7 @@ export class SessionSyncService {
 
   appendLog(entry: SharedLogEntry) {
     if (!this.currentRoom) return;
-    // A hidden entry is GM-local by construction (brief p. 330 leaves roll
+    // A hidden entry is GM-local by construction (brief Core p. 330 leaves roll
     // visibility to the table). Refuse to put one on the wire even if a
     // caller passes it here by mistake - the server broadcasts to the whole
     // room, so there is no way to send it to the GM alone.

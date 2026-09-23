@@ -56,12 +56,12 @@ combat order.** The GM component's `sort()` branches on
 
 Either branch ends with `syncSharedState()`.
 
-**Lieutenant tie-break (p. 381 / `briefs/grunt-naming-and-statblocks-spec.md`
+**Lieutenant tie-break (Core p. 381 / `briefs/grunt-naming-and-statblocks-spec.md`
 U7).** `initiativeTieBreakComparator` implements the plain ERIC ladder only —
 Edge, Reaction, Intuition, coin toss, then insertion order — and is a totally
 ordered, transitive comparator on its own: any two participants' relative
 order follows from their own attributes alone, never from a third
-participant. The p. 381 rule "a lieutenant tied with his own team always goes
+participant. The Core p. 381 rule "a lieutenant tied with his own team always goes
 first" is deliberately **not** implemented as a branch inside that comparator.
 An earlier version did exactly that (`isLieutenantOf(p1, p2) ? -1 : ...`), and
 it was wrong: a pairwise override inside a comparator does not compose safely
@@ -301,7 +301,7 @@ and move the running Score, so it goes through one of exactly two methods:
 
 - `changeDiceCount(newDices, rollDie?)` — the mid-turn change. Clamps to
   `[MIN_INITIATIVE_DICE, MAX_INITIATIVE_DICE]` = `[1, 5]` (the 5D6 hard cap,
-  brief pp. 52/288); if the participant has not taken this turn's Initiative
+  brief Core pp. 52/288); if the participant has not taken this turn's Initiative
   Test (`diceIni <= 0`) or the count does not actually change, it just writes
   the count; otherwise it rolls `|delta|` dice via the injected `rollDie`,
   applies the *full* rolled total to the Score, and returns
@@ -333,7 +333,7 @@ cosmetic clamp can never turn into a silent Score change. Because the clamp is
 Score-neutral, it can leave the rolled-total box showing a number that no
 longer reconciles with the Score column (`initiativeAttribute + diceIni !==
 getCurrentInitiative()` — the *effective* Score, running Score plus Initiative
-committed to Interrupt Actions, brief F9 p. 167 — not the raw
+committed to Interrupt Actions, brief F9 Core p. 167 — not the raw
 `currentInitiativeScore` backing field, which can differ from what the GM
 actually sees whenever the participant holds Full Defense or another
 committed interrupt cost; e.g. after a large dice loss whose lost-dice roll
@@ -402,12 +402,48 @@ incrementing numeric suffix (`"Ganger 1"`, `"Ganger 2"`, …).
 
 ## 5. Actor progression through an initiative score
 
-`CombatManager.getNextActors()` scans all `Waiting`, non-OOC participants
-with positive current initiative, and picks the highest-initiative group —
-with edge participants unconditionally taking priority over non-edge ones
-regardless of score, and only ties within the same edge state grouped
-together into `currentActors`. It also sets `currentInitiative` to the highest
-effective initiative it saw.
+`CombatManager.getNextActors()` scans every participant and keeps those
+`canParticipantActThisPass(p)` (exported alongside `CombatManager`,
+`src/Combat/CombatManager.ts`) accepts, then picks the highest-initiative
+group among them — with edge participants unconditionally taking priority
+over non-edge ones regardless of score, and only ties within the same edge
+state grouped together into `currentActors`. It also sets `currentInitiative`
+to that winning group's own Score — **not** the highest effective initiative
+among every eligible participant (round-6 defect 2,
+`briefs/seize-initiative-spec.md`: an earlier version set it to the latter,
+so a seizer leading past a much higher-Score non-seizer displayed the
+non-seizer's Score next to the seizer's own card — a contradiction that R2
+makes routine rather than a corner case, since Seize can now be declared at
+any Score). `enforceSingleCurrentActor()` (§7/GM component) re-derives
+`currentInitiative` the same way — from whichever participant it actually
+keeps — when trimming a tie down to one.
+
+**Table ruling (`briefs/mid-turn-joiner-spec.md`, round 3 item 2, Xavier
+2026-09-19): a participant who has not yet made this Combat Turn's Initiative
+Test is never handed an Action Phase.** `canParticipantActThisPass(p)` is
+`Waiting`, non-`ooc`, current initiative above 0 — **and**
+`hasRolledThisTurn(p)` (has rolled this Combat Turn). Core p. 160 has a late
+entrant "roll for their Initiative Score as normal" before they can act;
+there is no rolled Score to act on until they do. **There is no seize
+exemption from this skip** — see the seize discussion below for why: as of
+Xavier's ruling R1 (2026-09-21), a fresh seize declaration cannot happen
+before rolling either, so an unrolled-but-seized participant is no longer a
+reachable state through the ordinary GM control. This is a **single, shared
+predicate**, not two independently re-derived tests:
+`BattleTrackerComponent.pendingPassEndRollNotice()` (the GM-facing "last turn
+of this pass, X still owes a roll" notice) reads the exact same function,
+after three straight fix rounds where the two had drifted apart (round 4 item
+1) because each re-derived its own copy of "is anyone else still able to act
+this pass".
+
+**Reported, not solved:** if every remaining eligible-by-every-other-measure
+participant still owes a roll (and none has seized), `getNextActors()` empties
+`currentActors` every time, cascading into `endInitiativePass()` with nobody
+having acted — `isOver()` does not consult `diceIni`, so an unrolled
+participant's bare attribute can keep a Combat Turn alive with no Action
+Phase ever granted, until a roll lands or every Score reaches 0.
+`BattleTrackerComponent.nobodyCanActRollNotice()` (round 4 item 7) surfaces
+this to the GM screen when it happens; no engine-level escape hatch exists.
 
 `goToNextActors()` wraps `advanceToNextActors()` behind the `advancingActors`
 re-entrancy flag. `advanceToNextActors()` runs `flagSpentNpcRows()` as its
@@ -420,8 +456,109 @@ next group, marks it `Active`, and — if nobody is left — calls
 empty. `Delay` (UI-driven, `btnDelay_Click`) sets `status = Delaying` and
 removes the actor from `currentActors` without marking them `Finished` —
 they don't reappear until the GM explicitly acts on them again.
-`seizeInitiative(p)` simply sets `p.edge = true`, which the edge-priority
-branch of `getNextActors()` and the tie-break comparator then act on.
+`CombatManager.seizeInitiative(p)` sets `p.edge = true` — but only once `p`
+has completed this Combat Turn's Initiative Test (`hasRolledThisTurn(p)`);
+otherwise it is a no-op. That gate is Xavier's table ruling R1
+(`briefs/seize-initiative-spec.md`, "RESOLVED — Xavier's rulings,
+2026-09-21" — "you cannot seize initiative until you have rolled"), **not**
+a printed rule: Core p. 160 never states it, only implies it ("regardless of
+your Initiative Score" and ordering several seizers "by their Initiative
+Scores" both presuppose a Score already exists). `BattleTrackerComponent`'s
+Seize Initiative button is hidden — not merely disabled — for the same
+reason, until `hasRolledThisTurn(p)` is true, read through the component's
+public `participantHasRolledThisTurn(p)` wrapper (a template can only call a
+method on the component instance, not a bare module-level function import,
+`battle-tracker.component.html`'s own comment on the button); `btnEdge_Click`
+routes through `combatManager.seizeInitiative()` rather than calling
+`p.seizeInitiative()` directly, so the engine-side gate is the actual
+backstop, not only the template condition. **This replaces the
+mid-turn-joiner-era exemption**: an earlier version of
+`canParticipantActThisPass()` (round 4 item 6) treated a seized-but-unrolled
+participant as eligible to act anyway, reading "regardless of your Initiative
+Score" as covering an *absent* Score, not just a low one. R1 makes that case
+unreachable through a fresh seize declaration instead, so the exemption was
+deleted rather than tuned — `hasRolledThisTurn(p)` (formerly
+`hasRolledOrSeized`) is now a single, plain "has this participant rolled"
+predicate reused by `canParticipantActThisPass()`, `isOver()`,
+`hasMoreIniPasses()`, `BattleTrackerComponent.canParticipantInterrupt()`, and
+`BattleTrackerComponent.applyRegisteredDiceCount()`'s mid-turn-dice-change
+check alike (round-6 defect 5 folded that last hand-typed `p.diceIni > 0`
+copy, and `Grunts/NpcRowParticipant.ts`'s identically-bodied
+`hasRolledInitiativeThisTurn`, into this same function too). The definition
+itself now lives in `Combat/Participants/Participant.ts`, not
+`Combat/CombatManager.ts` — `Grunts/NpcRowParticipant.ts` needs it as well,
+and `Grunts` can only depend on `Combat/Participants` without introducing an
+import cycle (`CombatManager.ts` already imports from
+`Grunts/NpcRowParticipant.ts`); `CombatManager.ts` re-exports it so every
+existing `"Combat"`-barrel import keeps working, and
+`Grunts/NpcRowParticipant.ts` re-exports it under its own original name,
+`hasRolledInitiativeThisTurn`, for its existing public API.
+
+`btnEdge_Click` also re-derives order and broadcasts immediately on a
+successful seize (round-6 defect 1) — the same `sort()` every other
+order-changing GM action already ends with (`performAct`, `finishDelay`,
+`btnRollInitiative_Click`) — and writes a shared-log line naming the
+character (round-6 defect 3, `"<Name> seizes the Initiative"`, through
+`appendParticipantEventLog`) rather than only a bare internal label. Before
+this fix the tap changed `p.edge` and stopped: the display didn't move,
+players' phones kept the stale order, and nothing was ever told to the
+shared log — the button disappearing (its own `@if` reading `p.edge`) was
+the only, easily-misread sign anything had happened. `sort()` only
+re-derives `participants`' display order; it never calls `getNextActors()`
+and never adds anyone to `currentActors`, so a seize declared while someone
+else is mid-Action-Phase cannot hand the seizer a turn out from under them —
+the seizer is picked up the next time `getNextActors()` runs, exactly as
+before this fix.
+
+**Xavier's ruling R2** (same spec): once rolled, Seize may be declared at any
+point for the rest of the Combat Turn, including outside the seizer's own
+Action Phase — Core anchors a Delayed Action to Step 3A of the Combat Turn
+Sequence (Core p. 161) but gives Seize no equivalent step, so the timing is
+undefined in print and this is Xavier's table ruling to fill that gap, not a
+reading of the book. This is a *timing* ruling only: Seize remains an Edge
+Effect costing one point of Edge (Core p. 56), never an Initiative-Score cost,
+never routed through `canUseAction()`, and never subject to the Interrupt
+Action restrictions of Core p. 167 (including the not-surprised condition) —
+it is declared *like* an Interrupt Action only in when it can happen, not in
+what it costs or how it's gated. The Seize Initiative button's own template
+condition used to also require `combatManager.passEnded &&
+p.getCurrentInitiative() > 10` (a pre-existing restriction this brief found
+already in the tree, unrelated to any printed rule or prior brief); that
+restriction is removed as part of R2, since it contradicted "any point after
+rolling".
+
+**Xavier's ruling R3** (same spec): a seizer's own Initiative Score decays and
+gates exactly like everyone else's — −10 every pass, no Simple/Complex action
+at 0 or below (`RULINGS.md` 2026-08-07) — seizing changes rank only, never the
+seizer's own Score or eligibility threshold. Nothing in `CombatManager` ever
+special-cased a seizer's own Score decay (`nextIniPass()` applies
+`INITIATIVE_PASS_DECAY` to every participant unconditionally), so R3 required
+no code change; it is recorded here because it is the reason the R1 gate is
+safe to add without also having to special-case a seizer's action economy.
+
+This flag is copied verbatim by `Participant.clone()` and by every in-place type
+swap (promote/demote, which carries `PARTICIPANT_BASE_BACKING_FIELDS`
+including `_edge`), so a seized participant who switches Matrix/astral mode
+mid-turn keeps it. `upsertPlayerParticipant()`'s type-mismatch
+re-registration path (decker ↔ non-decker) discards the old object outright
+and constructs a brand-new one — round 4's report was that `_edge` landed at
+that object's default `false`, so a player who seized the Initiative and then
+re-registered as a different character type lost the seize. **Fixed, round 5
+item 5** (`briefs/mid-turn-joiner-spec.md`): the old object's `edge` is read
+before it is discarded and applied to the new object once built, the same
+carry-by-value shape already used there for the "asked to roll" records
+(§8's side-map list) — Core p. 161 says the move to the top "lasts for the
+entire Combat Turn", so a same-player, same-Combat-Turn re-registration must
+not silently spend the Edge for nothing. This carry writes `target.edge = true`
+directly rather than through `combatManager.seizeInitiative()`, and is the one
+narrow exception to R1's "no fresh unrolled seizer" gate above: it is
+preserving a fact already true for the Combat Turn onto a replacement object,
+not declaring a new seize, so it deliberately does not require the *new*
+object to have rolled under its new type — the same reasoning that already
+lets this same branch skip a fresh roll for the new object (item 4, the
+"asked to roll" carry immediately above it in the source). A participant can
+therefore, narrowly, be seized-but-not-yet-rolled-under-its-new-type
+immediately after such a re-registration; not reachable any other way.
 
 ### Interrupt Actions
 
@@ -537,7 +674,7 @@ plus a UI-gating flag:
   plain non-nullable `number`, so "unset" is represented by the sentinel
   `DATA_PROCESSING_UNSET = 0` (`src/Matrix/MatrixParticipant.ts`) - a stored 0
   means *no value entered*, never a rated 0. The rules floor for a live persona
-  is 1 (Diffusion cannot reduce a Matrix attribute below it, printed p. 252),
+  is 1 (Diffusion cannot reduce a Matrix attribute below it, printed Core p. 252),
   so 0 is not a reachable rating and is safe as a sentinel. When Data
   Processing is unset, `applyJackInMode` derives **no** VR Initiative attribute
   (`baseIni` stays at the sentinel) and the GM's Data Processing box renders
@@ -550,7 +687,7 @@ plus a UI-gating flag:
   while actually jacked into a VR mode**. It previously applied it to any
   `MatrixParticipant` regardless of mode, so editing Reaction or Intuition on a
   participant sitting in AR silently recomputed from Data Processing. AR uses
-  physical Initiative and physical Initiative Dice (printed p. 231), so the
+  physical Initiative and physical Initiative Dice (printed Core p. 231), so the
   guard is on `jackedIn`/`vrMode`, not on the class.
 - `AstralParticipant` carries the same shape of state (`astralProjecting`,
   `blocksPhysicalActions`, `isAwakened`) but has **no `applyJackInMode`
@@ -568,13 +705,13 @@ plus a UI-gating flag:
   absolute so a magician already carrying bonus Initiative Dice (Increase
   Reflexes, wired reflexes, a drug) keeps them (`RULINGS.md` 2026-07-31,
   "Bonus Initiative Dice carry additively into astral space"). The way *out*
-  does **not** blindly negate the constant: the funnel's 5D6 cap (pp. 52/288)
+  does **not** blindly negate the constant: the funnel's 5D6 cap (Core pp. 52/288)
   can absorb the requested +2 into fewer dice or nothing (a magician already
   at 5D6 gains no die and the Score does not move), so `AstralParticipant`
   records what was actually realized in `projectionDiceGain` — carried by
   `clone()` — and the return trip requests `-projectionDiceGain`, not `-2`.
   This keeps a capped-out round trip (project, return) net-zero on both dice
-  count and Score, matching p. 160's rule for a dice decrease: that
+  count and Score, matching Core p. 160's rule for a dice decrease: that
   participant "immediately rolls the number of lost dice and subtracts the
   total from their Initiative Score (along with any decrease to their
   Initiative Attribute)" — i.e. you only roll and subtract dice you actually
@@ -585,10 +722,10 @@ plus a UI-gating flag:
   Ruling 1, RULINGS.md 2026-08-28 "IC Initiative Attribute = Host Data
   Processing + Host Rating", restored 2026-09-01 — a house rule, not a
   printed value; `baseIni` stays an ordinary editable field afterwards) and
-  `dices` to a flat 4 for every IC type, including Patrol (p. 247 states no
+  `dices` to a flat 4 for every IC type, including Patrol (Core p. 247 states no
   exception), both through the no-roll paths. An earlier version of this
   class set `baseIni = hostRating * 2` (that number is the IC attack dice
-  pool printed elsewhere on p. 247, an unrelated quantity) and gave
+  pool printed elsewhere on Core p. 247, an unrelated quantity) and gave
   Patrol only 2 dice, citing a "Table 4 / Table 24" that does not exist in
   print; corrected in `briefs/matrix-port-rules-correctness-spec.md`. Its
   `hostRating`/`hostDataProcessing` setters recompute `baseIni` **and**
@@ -607,20 +744,20 @@ plus a UI-gating flag:
   Matrix-only damage model from leaking meat-body semantics (round-4,
   Xavier's decision 4 and "missed interaction 4"):
   - `wm` always returns `0` — Matrix damage carries no dice-pool or
-    Initiative penalty below a completely full monitor (p. 228; `RULINGS.md`
+    Initiative penalty below a completely full monitor (Core p. 228; `RULINGS.md`
     restored 2026-09-02, "Matrix damage applies no penalty until the monitor
     is full"), so the base `Participant.wm` formula (which derives a wound
     modifier from `physicalDamage`/`physicalHealth`) must not run for IC.
   - `ooc` depends only on `physicalDamage >= physicalHealth` (the reused
     Matrix Condition Monitor slot) plus the shared `manualOoc` "bench this
     participant" flag — never on the inherited Stun fields. IC has "its own
-    Condition Monitor" (singular, p. 247) and no printed Stun track;
+    Condition Monitor" (singular, Core p. 247) and no printed Stun track;
     `stunHealth`/`stunDamage` stay declared (removing them would touch
     shared `Participant` plumbing) but are inert for IC (`RULINGS.md`
     2026-09-02, "IC has a Matrix Condition Monitor only; the inherited Stun
     track is dropped").
   - `overflowHealth` is pinned to `0` — Matrix damage has no overflow phase;
-    an IC's monitor filling crashes it outright (p. 247) rather than
+    an IC's monitor filling crashes it outright (Core p. 247) rather than
     starting an overflow track the way a meat Physical Condition Monitor
     does. The inherited `overflowHealth` (default 4, `Participant.ts`) is a
     meat-only concept with no IC reader today, but the override forces an
@@ -736,7 +873,7 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
   members left behind keep the row's score untouched). Its setter floors it at
   0 and floors it to a whole number, and it is carried across Combat Turn
   boundaries because `softReset()`/`resetInitiativeScore()` never touch it
-  (p. 159: wound modifiers may affect Initiative Score "on this and any
+  (Core p. 159: wound modifiers may affect Initiative Score "on this and any
   subsequent Combat Turns").
 - `ooc` = `super.ooc` (the manual flag only, since the row's own inherited
   damage tracks are unused and stay at zero) **OR `isWipedOut`**. A row has no
@@ -756,7 +893,7 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
   that keeps the grunt Condition Monitor shape after the detach: `wm` and `ooc`
   are overridden to work off `physicalDamage + stunDamage` against a single box
   count, and the final-attack record (`lastDamageType` / `lastDamageValue` /
-  `gruntBody`, plus `gruntWillpower` for re-sizing) travels with it so p. 379's
+  `gruntBody`, plus `gruntWillpower` for re-sizing) travels with it so Core p. 379's
   alive/dead comparison still resolves. A caller-supplied factory
   (`AstralParticipant` / `MatrixParticipant`, for an initiative-type change)
   gets the boxes and damage but PC-shaped two-track semantics — a known limit,
@@ -770,14 +907,14 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
   path it relied on stopped being workable once Undo was removed from the
   tracker).
   The final-attack `lastDamageType`/`lastDamageValue` record is untouched by a
-  heal, so p. 379's alive/dead read stays correct history. Same for a
+  heal, so Core p. 379's alive/dead read stays correct history. Same for a
   `DetachedGruntParticipant`, whose `ooc` was always live-derived.
 - `DetachedGruntParticipant` also carries its own `applyDamage(boxes, type)` /
   `healDamage(boxes)` (`RULINGS.md` 2026-08-13, "A killing blow's Damage Value
   can exceed the boxes left on the track"), mirroring `GruntMember`'s methods
   of the same name: the boxes actually **written** onto
   `physicalDamage`/`stunDamage` are capped at the track's remaining capacity
-  (no overflow, p. 379), but the DV **recorded** for the p. 379 alive/dead
+  (no overflow, Core p. 379), but the DV **recorded** for the Core p. 379 alive/dead
   comparison is the attack's full DV, uncapped. Before this, a standalone or
   detached grunt's Condition Monitor widget could only ever apply as many boxes
   as were left on the track — a killing blow bigger than the remaining boxes
@@ -793,7 +930,7 @@ Overrides that carry the rules (see `briefs/npc-group-initiative.md` and the
 
 **Alive or dead.** `resolveGruntFinalState(outOfAction, lastDamageType,
 lastDamageValue, body)` in `GruntMember.ts` is the single implementation of
-p. 379's post-combat call, shared by `GruntMember.finalState` and
+Core p. 379's post-combat call, shared by `GruntMember.finalState` and
 `DetachedGruntParticipant.finalState` so detaching cannot change the verdict.
 It returns a `GruntFinalState` of:
 
@@ -832,7 +969,7 @@ is the caller's job.
 
 The row comes back **unrolled** (`diceIni` 0) with the first selected grunt's
 `baseIni` and dice count — grunts are grouped precisely because they share one
-stat block (p. 378) — so the GM makes the one group Initiative Test for it. The
+stat block (Core p. 378) — so the GM makes the one group Initiative Test for it. The
 result type is `GruntMergeResult` (`{ ok, row, merged, refused, reason }`);
 `reason` is always populated, including on success.
 
@@ -973,7 +1110,7 @@ rating of `NPC_ROW_EDGE_RATING` (0), which is what makes the existing
 Intuition, then the coin toss (`RULINGS.md` 2026-08-01, "Grunt Edge: the book
 contradicts itself, Edge 0 stands") - **unless the row is tied with its own
 linked lieutenant**, in which case the lieutenant goes first regardless of
-Reaction/Intuition/coin toss (p. 381, `briefs/grunt-naming-and-statblocks-spec.md`
+Reaction/Intuition/coin toss (Core p. 381, `briefs/grunt-naming-and-statblocks-spec.md`
 U7). That override is **not** part of `initiativeTieBreakComparator` itself -
 see "Lieutenant tie-break" below for why, and for where it actually lives.
 Rows inherit every side-map obligation in
@@ -986,7 +1123,7 @@ on the wire, and `NpcRowParticipant` from an `isNpcRow` flag alongside them
 (see §7 for what a restore does and does not rebuild generally). The row
 payload on `SessionSyncService.SharedParticipantState` is `isNpcRow`,
 `rowMembers` (`SharedGruntMemberState[]` — name, Body, Willpower, filled boxes,
-and the final-attack type/DV p. 379 settles alive-or-dead from),
+and the final-attack type/DV Core p. 379 settles alive-or-dead from),
 `rowWoundModifier` (the shared accumulator, Decision 1) and `rowEverPopulated`.
 `NpcRowParticipant.toRowSnapshot()` / `restoreRowSnapshot()` and
 `GruntMember.toSnapshot()` / `GruntMember.fromSnapshot()` are the domain-side
@@ -1968,7 +2105,20 @@ separately and verbatim). This is what keeps `pendingRoll`
 participant looks unrolled and a second Initiative Test would stack on an
 already-decayed Score. Belt-and-braces, `handleSessionCommand`'s non-delta
 `roll_submission` branch refuses a full Initiative Test for a participant who
-already has `diceIni > 0` while combat is started (rolled once per Combat Turn).
+already has `diceIni > 0` (rolled once per Combat Turn) — this guard is
+**not** conditioned on `combatManager.started` (round 3 of
+`briefs/mid-turn-joiner-spec.md` removed that condition; a late joiner's
+Initiative Test can land after combat has already started, so gating the
+guard on `started` would have let a second submission after that point stack
+on top of the first). The one exception is the **superseding roll** (round 3
+item 5): the player's own roll replaces a GM row-button roll exactly once,
+gated on two per-participant records the GM component keeps —
+`participantsWithSupersedableGmRoll` ("the GM rolled for this player-owned
+participant and nobody has superseded it yet") **and**, since round 4 item 4,
+`participantsAskedThisCombatTurn` ("this participant was asked to roll at
+some point this Combat Turn") — both are required, not either alone, so an
+unasked/forged submission cannot overwrite a GM roll for a character nobody
+ever asked to roll for themselves.
 A GM reconnecting after a crash gets back whatever was last successfully
 broadcast; this tab's own transient panel/selection state is not part of that
 snapshot and is never sent to the server at all, so a page refresh loses it
@@ -2139,15 +2289,190 @@ through the same path.
   `participantEdgeRatings`, `participantReactions`, `participantIntuitions`,
   `participantTieBreakers`, `participantIds`, `lastKnownDamage`,
   `rowMemberDamageValues`, `participantStatblocks`,
-  `participantLieutenantTeamRowId`, the panel-expansion `Set`s, and
-  `pendingJoinAnnouncement`) has to be explicitly cleaned up any time a
-  participant is removed or type-swapped (see `btnDelete_Click`,
+  `participantLieutenantTeamRowId`, `participantPendingDeltaDice`, the
+  panel-expansion `Set`s,
+  `pendingJoinAnnouncement`, `participantsAskedToRoll`,
+  `participantsWithSupersedableGmRoll`, `participantsAskedThisCombatTurn`, and
+  `participantsWithPlayerSubmittedRoll`)
+  has to be explicitly cleaned up any
+  time a participant is removed or type-swapped (see `btnDelete_Click`,
   `forgetParticipant`, `upsertPlayerParticipant`'s type-mismatch branch). A new
   feature that adds another such map inherits this obligation with no compiler
   enforcement. `participantLieutenantTeamRowId` is the one exception to the
   usual four-place pattern (clear on restore / drop on forget / copy on
   duplicate / delete on type-mismatch) — it is deliberately **not** copied on
   duplicate (see "Lieutenant tie-break" above).
+
+  `participantsAskedToRoll` (`Set<string>`, `briefs/mid-turn-joiner-spec.md`
+  round-2 redesign item A) and `participantsWithSupersedableGmRoll`
+  (`Set<string>`, round-3 item 5) are the two side-map entries in this list
+  that are **not** `Map<IParticipant, …>` at all — they are keyed directly by
+  the stable participant id string (the same one `getParticipantId()` hands
+  out and `participantIds` maps *to*), not by object reference. This is
+  deliberate, not an inconsistency to fix: object identity does not survive
+  `restoreFromSharedState()` (every participant is reconstructed), but the id
+  string does, and a promote/demote type swap or `upsertPlayerParticipant`'s
+  type-mismatch branch already carries the same id onto the new object
+  without either set needing to know that happened. Both still follow the
+  same obligation as every entry above — drop on `forgetParticipant`, and
+  wholesale-clear at every point "asked"/"still supersedable" stops applying
+  table-wide (`beginCombatTurn()`, `logCombatTurnEnded()`, `btnReset_Click()`'s
+  End Combat, session leave/close) — see each set's own doc comment on the
+  GM component for the exhaustive list of clear sites. `participantsAskedToRoll`
+  is additionally **restored, not reset**, in `restoreFromSharedState()`
+  (rebuilt from `state.participants[].askedToRoll`, unlike every `Map`
+  above): a GM tab reload must not silently un-ask a player the previous tab
+  had asked. `participantsWithSupersedableGmRoll` is the opposite — it is
+  **not** carried on the wire at all (GM-only bookkeeping with no
+  player-facing meaning) and is simply cleared on restore, so a still-open
+  "supersedable" window before a reload is lost rather than guessed at.
+
+  `participantsAskedThisCombatTurn` (`Set<string>`, round 4 item 4) is a
+  third id-keyed set, added alongside the two above rather than folded into
+  either: it records "the GM asked this participant to roll at some point
+  this Combat Turn" and is deliberately not pruned the moment a roll lands,
+  the way `participantsAskedToRoll`'s own read (`isAskedToRoll()`) is. It
+  exists because the superseding-roll check (round 3 item 5) needs "was this
+  participant ever asked this turn" available after the GM has already
+  rolled for them - by which point `pendingRoll` is already false and
+  `participantsAskedToRoll` has already forgotten the ask. It follows
+  `participantsWithSupersedableGmRoll`'s clear/carry pattern exactly (same
+  clear sites, same carry across `upsertPlayerParticipant()`'s type-mismatch
+  re-registration), not `participantsAskedToRoll`'s - GM-only, not restored
+  on rejoin.
+
+  `participantsWithPlayerSubmittedRoll` (`Set<string>`, round 5 item 4) is a
+  fourth id-keyed set, finishing the supersede precondition round 3 item 5
+  started and round 4 item 4 half-finished: a player's own roll may supersede
+  a GM row-button roll only for a participant asked this Combat Turn **and**
+  whose player has not already submitted one this Combat Turn. Without the
+  second half, a GM's deliberate later re-roll for the same participant
+  re-arms `participantsWithSupersedableGmRoll`, and a duplicate or delayed
+  resend of the player's *earlier* submission could then overwrite that
+  later, deliberate GM roll. Marked the moment a player's own roll first
+  lands, on either path (ordinary or supersede); never cleared mid-turn, so
+  at most one player submission per participant can ever count as
+  superseding in a given Combat Turn. Cleared at the same wholesale moments
+  as `participantsAskedThisCombatTurn` (every Combat Turn boundary, End
+  Combat) and dropped per-id in `forgetParticipant()`. **Not** carried across
+  `upsertPlayerParticipant()`'s type-mismatch re-registration, unlike the
+  three sets above: the new object still owes its own fresh Initiative Test
+  for the new type, so there is no "already submitted" fact from the old
+  object that legitimately applies to it - the old id's entry is simply
+  dropped there.
+
+  **Seize (`p.edge`) across the same type-mismatch path (round 5 item 5).**
+  Not a side-map entry - `edge` is a field on the participant object itself,
+  carried by value rather than by a lookup - but it follows the identical
+  carry-across-discard-and-recreate shape as the sets above, for the same
+  reason: same player, same live Combat Turn, not a fresh participant. Before
+  this fix, `upsertPlayerParticipant()`'s type-mismatch branch discarded the
+  old object outright and built a brand-new one with `_edge` at its default
+  `false`, silently spending the Edge a player paid to seize the Initiative
+  the moment they re-registered as a different character type (round 4
+  validation reported this as a known gap; §5 above has the full history).
+  The fix reads `target.edge` before the old object is discarded and applies
+  it to the new object once built - see §5 above.
+
+  `participantPendingDeltaDice` (`Map<IParticipant, number>`, added by
+  `briefs/player-initiative-prompt-spec.md` fix round 2, completed in fix
+  round 3) holds the **signed** Initiative Dice delta a jacked-in decker owes
+  a roll for from a mid-pass VR mode switch *after* already making this
+  Combat Turn's Initiative Test, and has not yet rolled — positive is dice
+  *gained* (added to the Score once rolled), negative is dice *lost*
+  (subtracted once rolled). It follows the full four-place pattern,
+  **copied** on duplicate (the clone owes its own independent roll) and
+  **cleared** — never carried — by all four promote/demote type-swap
+  helpers: an unrolled VR-mode delta has no meaning once the participant is
+  no longer the jacked-in decker that gained or lost it. Clearing it needs no
+  Initiative Score correction in either direction, because the change was
+  applied with `setDicesWithoutRoll` for a gain (raw dice count only, Score
+  untouched) or left entirely unwritten for a loss (fix round 4 below) —
+  either way the player's own delta `roll_submission` is what moves the
+  Score, never this GM-side map. It is also mirrored to the owning player as
+  `SharedParticipantState.pendingDeltaDice`, so dropping it silently is
+  visible at the table rather than merely a leak: the player's delta prompt
+  is a non-dismissible modal, and before fix round 3
+  `promoteToAstralParticipant` stranded it — the client-side half of that
+  fix is the `isMatrix`-no-longer-true exception in
+  `PlayerViewComponent.applyIncomingState()`.
+
+  **Fix round 4 (consistency follow-up, same brief).** Before this round, a
+  mode-to-mode dice *decrease* (e.g. Hot Sim → Cold Sim, or VR → AR while
+  still jacked in) was rolled and applied immediately, GM-side, by
+  `changeParticipantDiceCount`'s ordinary roll branch — asymmetric with a
+  gain, which always deferred to the player. Xavier's decision: the player
+  rolls a mode-switch loss too, the same way they already roll a gain.
+  `changeParticipantDiceCount`'s `rollGainedDice: false` branch (still the
+  `configure_deck` jack-in branch's only caller of that option) now defers
+  *both* directions: a gain still writes the new, larger `dices` count
+  immediately via `setDicesWithoutRoll` and leaves the Score for the
+  player's own roll (unchanged); a loss instead leaves `dices` and `diceIni`
+  entirely untouched until the player's own delta roll resolves it. This
+  covers only the *dice* half of the switch — the Initiative Attribute half
+  (`baseIni` = DP+INT while in VR, REA+INT in AR, applied by
+  `MatrixParticipant.applyJackInMode`/`applyVRMode` outside this funnel)
+  still moves immediately and always has, unaffected by this fix — so
+  between the mode switch and the player's roll, the GM sees the Score
+  reflect the new attribute already but not yet the new (smaller) dice
+  pool: too high for the new, slower mode, not unchanged outright, and the
+  initiative order can briefly be wrong until the player rolls — the
+  accepted cost of deferring the subtraction to them. A new
+  `rollValues?: number[]` option resolves a deferred change of either sign:
+  it feeds the player's own rolled die faces into `Participant.
+  changeDiceCount` in place of a GM-side random roll, so the increase/
+  decrease Score math (the display floor and its remainder-as-a-separate-
+  delta handling, `MIN_DISPLAYED_DICE_TOTAL`) is written in exactly one
+  place and never duplicated for the player-driven case. The `roll_submission
+  {isDelta: true}` handler reads this GM tab's own `participantPendingDeltaDice`
+  entry (never the client payload) to decide the sign; a manual-entry
+  submission for a loss (no discrete `diceValues`, only a typed total) has
+  no real per-die faces to feed that roller, so the handler synthesizes an
+  in-range six-sided split that sums to the typed total and still feeds that
+  to the engine — the Score math is unaffected. **Fix round 5 (Xavier's
+  decision C)** changed only what the Action Log line says about it: it used
+  to print the synthesized split as though those faces had actually been
+  rolled; a `manualEntry` flag on `DiceCountChangeOptions` now tells the
+  logging step to strip the (still Score-driving) synthesized values before
+  formatting, so `formatInitiativeDeltaLogText` falls into its own existing
+  "manual(±N)" branch instead — the same wording style
+  `formatManualInitiativeRollLogText` already uses for a typed Initiative
+  Test, not a new format.
+
+  **Fix round 5 (guard, `briefs/player-initiative-prompt-spec.md`, Xavier's
+  fix option A) — closes what fix round 4 left open.** A gain writes `dices`
+  immediately; a loss does not (see above) - so a *second* mode switch before
+  the first delta was ever rolled used to compute its own delta against a
+  `dices` value a still-outstanding loss had deliberately left stale (a
+  reviewer-traced defect: a Hot Sim -> Cold Sim -> AR chain corrupted the
+  owed amount). `changeParticipantDiceCount` now guards itself: before
+  computing any new change (every other path - `changeParticipantDiceCount`
+  is the one funnel - see "Session sync" above), it first checks whether the
+  target participant already has an outstanding, unrolled note in
+  `participantPendingDeltaDice`, and if so **settles it immediately, GM-side,
+  the old way** - rolled here rather than by the player, applied through the
+  same engine path (`Participant.changeDiceCount`) a GM-side dice edit uses,
+  logged as a GM-resolved delta (`private settleOutstandingDeltaDice`) - and
+  clears the note (dropping `pendingDeltaDice` off the wire, force-closing
+  the player's non-dismissible delta modal) before computing the new change
+  against the now-current, fully resolved `dices`. This covers every
+  dice-count- or VR-mode-changing path: a further player-driven
+  `configure_deck` mode switch, the GM's own `gmJackIn`, a direct GM
+  dice-count edit (`onParticipantDiceCountChanged`), and jack-out/deck
+  removal (which already resolved immediately, and now also retire any
+  outstanding note rather than leaving it stranded). The guard does not run
+  for the `rollValues` resolution call itself (that call *is* the
+  settlement of the very note in question; running the guard on it would
+  erase the note before applying the player's own roll to it).
+
+  A companion guard sits in the `roll_submission {isDelta:true}` handler: the
+  sign - and whether anything is owed at all - is read from
+  `participantPendingDeltaDice`, never trusted from the client payload. A
+  submission arriving when the tracked pending amount is zero or absent
+  (because the guard above already settled it, or a chain of switches netted
+  back to the starting dice count while the player's modal was still open) is
+  discarded outright - no Score change, no log line - rather than defaulting
+  to a gain.
 
   `pendingJoinAnnouncement` is `Map<IParticipant, JoinAnnouncementResolver[]>`
   as of the "grunt naming and statblocks" fix round 3 (RULINGS.md 2026-08-30,
@@ -2250,7 +2575,7 @@ and `matrix-port-rules-correctness.spec.ts`.)
 feature's promoted scenario tests, pulled out of the general specs so each
 brief reads as a standalone regression suite:
 
-- `src/scenarios/running-initiative-score.spec.ts` (S1-S3, p. 160/167/191,
+- `src/scenarios/running-initiative-score.spec.ts` (S1-S3, Core p. 160/167/191,
   plus the recompute-from-base divergence test)
 - `src/scenarios/npc-group-initiative.spec.ts` (S1-S8)
 - `src/scenarios/action-log-attribution.spec.ts`

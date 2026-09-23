@@ -67,6 +67,37 @@
           </div>
         </div>
       </div>
+      <!-- Item 1 (round 3): a state-driven, non-blocking notice - never a
+           dialog, never sent to a player - replacing the round-2 per-click
+           Act/Delay confirm dialogs. True whenever the participant now due
+           to act is the last one able to act this Initiative Pass and
+           someone still owes an Initiative roll; recomputed on every render
+           from the order's own state, so it also covers a player's own
+           Act/Delay, a grunt row's last member, and a spent NPC row dropped
+           automatically. -->
+      @if(pendingPassEndRollNotice(); as passEndNotice) {
+      <div class="small text-warning mt-1" data-testid="pass-end-roll-notice">{{ passEndNotice }}</div>
+      }
+      <!-- Round 4 item 7: nobody can be handed a turn this pass because
+           everyone remaining still owes an Initiative roll (round 3 item 2's
+           ruling); the pass would otherwise end silently with no Action
+           Phase handed out and nothing on screen explaining why. GM-only,
+           state-driven, same as the notice above - never sent to a player. -->
+      @if(nobodyCanActRollNotice(); as nobodyCanActNotice) {
+      <div class="small text-danger mt-1" data-testid="nobody-can-act-notice">{{ nobodyCanActNotice }}</div>
+      }
+      <!-- Round 4 item 3: the roll-status line's own slot, separate from the
+           session banner (`shareInfo`) above - see `rollStatusText`'s own
+           doc comment for why the two used to compete for the same one. -->
+      @if(rollStatusText) {
+      <div class="small text-info mt-1" data-testid="roll-status-line">{{ rollStatusText }}</div>
+      }
+      <!-- Round 5 item 3: the Act window closes itself, rather than staying
+           open and silently refusing Submit, when the participant it targets
+           stops being due to act while it is open. -->
+      @if(actModalClosedReason) {
+      <div class="small text-warning mt-1" data-testid="act-modal-closed-reason">{{ actModalClosedReason }}</div>
+      }
       @if(!combatManager.started && initiativePrepActive) {
       <div class="card mt-2 mb-2">
         <div class="card-header">Initiative Prep</div>
@@ -74,6 +105,15 @@
           <div class="small mb-2">
             Pending rolls: {{ getPendingOutstandingRollCount() }}
             (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
+          </div>
+          <!-- Item 7 (round 3): who has actually been asked, in the
+               pre-combat panel too - previously only shown mid-combat. -->
+          <div class="small mb-2" data-testid="prep-asked-roll-names">
+            @if(getAskedRollNames().length > 0) {
+            Asked and still outstanding: {{ getAskedRollNames().join(', ') }}
+            } @else {
+            Nobody currently owed a roll has been asked yet.
+            }
           </div>
           <div class="btn-group" role="group">
             <button type="button" class="btn btn-outline-primary" (click)="btnRequestPlayerRolls_Click()"
@@ -91,6 +131,62 @@
             <button type="button" class="btn btn-success" (click)="btnBeginCombatTurn_Click()"
               [disabled]="getPendingOutstandingRollCount() > 0">
               Begin Combat Turn
+            </button>
+          </div>
+        </div>
+      </div>
+      }
+      <!-- Mid-combat "Pending Rolls" panel (briefs/mid-turn-joiner-spec.md). A
+           sibling of the pre-combat Initiative Prep card above, not a reuse of
+           it: this one is gated on `combatManager.started` being true, and
+           deliberately has no "Begin Combat Turn" button, which must never
+           render once a Combat Turn is already running. It exists so a GM can
+           ask a late joiner (a new "+ Participant"/"+ Grunt Group"/etc. row,
+           or a brand-new player who registers mid-fight) to roll Initiative
+           through the same locked roll pop-up used before combat starts,
+           instead of only being able to type a Score onto their card or use
+           the per-row dice button. -->
+      @if(combatManager.started && hasOutstandingMidCombatRolls()) {
+      <div class="card mt-2 mb-2" data-testid="mid-combat-pending-rolls-panel">
+        <div class="card-header">Pending Rolls</div>
+        <div class="card-body py-2">
+          <div class="small mb-2">
+            Pending rolls: {{ getPendingOutstandingRollCount() }}
+            (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
+          </div>
+          <!-- D6(a) - name everyone still owed a roll, not just a count. -->
+          <div class="small mb-2" data-testid="mid-combat-pending-roll-names">
+            Still owed a roll: {{ getOutstandingRollNames().join(', ') }}
+          </div>
+          <!-- F fix (validation round 2 redesign): replaces round-1's
+               table-wide "request outstanding" boolean line with the
+               per-person picture item A's redesign requires - who has
+               actually been asked, not just whether anyone anywhere has. -->
+          <div class="small mb-2" data-testid="mid-combat-asked-roll-names">
+            @if(getAskedRollNames().length > 0) {
+            Asked and still outstanding: {{ getAskedRollNames().join(', ') }}
+            } @else {
+            Nobody currently owed a roll has been asked yet.
+            }
+          </div>
+          <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-primary" data-testid="mid-combat-request-player-rolls-btn"
+              (click)="btnRequestPlayerRolls_Click()"
+              [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">
+              Request Player Rolls
+            </button>
+            <!-- D6(c) - mid-combat only, this stays enabled even while a player
+                 still owes a roll (unlike the pre-combat panel above, which is
+                 unchanged). -->
+            <button type="button" class="btn btn-outline-secondary" data-testid="mid-combat-roll-remaining-nonplayer-btn"
+              (click)="btnRollRemainingNonPlayer_Click()"
+              [disabled]="getPendingNonPlayerRollCount() <= 0">
+              Roll Remaining Non-Player
+            </button>
+            <button type="button" class="btn btn-outline-warning" data-testid="mid-combat-force-roll-outstanding-btn"
+              (click)="btnForceRollOutstanding_Click()"
+              [disabled]="getPendingOutstandingRollCount() <= 0">
+              Force Roll Outstanding
             </button>
           </div>
         </div>
@@ -129,7 +225,7 @@
          a wide desktop permanently. -->
     <div class="col-12" [class.col-lg-9]="selectedActor !== null && selectedActor !== undefined">
       <!-- Overwatch reminders. OS rises by the DEFENDER's hits on any Attack
-           or Sleaze action (p. 232), which this app does not roll - so the GM
+           or Sleaze action (Core p. 232), which this app does not roll - so the GM
            is reminded to apply it. Not an alert threshold: SR5 has no
            Overwatch threshold below convergence at 40. -->
       @for (msg of osReminders; track $index) {
@@ -231,11 +327,11 @@
             @else {
               @if (hasGruntConditionMonitor(p) && getLieutenantTeamRow(p); as team) {
               <span class="participant-badge participant-badge-lieutenant" data-testid="badge-lieutenant"
-                [attr.title]="'Lieutenant of ' + team.name + ' - beats his own team on an Initiative tie (p. 381)'">LIEUTENANT</span>
+                [attr.title]="'Lieutenant of ' + team.name + ' - beats his own team on an Initiative tie (Core p. 381)'">LIEUTENANT</span>
               }
               @else if (hasGruntConditionMonitor(p)) {
               <span class="participant-badge participant-badge-grunt" data-testid="badge-grunt"
-                title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (p. 379)">GRUNT</span>
+                title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (Core p. 379)">GRUNT</span>
               }
             }
           </div>
@@ -330,7 +426,7 @@
                    box above): the typed value must be clamped *before* it reaches
                    the Score-moving `diceIni` setter, otherwise an out-of-range
                    entry moves the running Initiative Score by the unclamped
-                   amount (p. 160 - the Score only moves by the rolled delta). -->
+                   amount (Core p. 160 - the Score only moves by the rolled delta). -->
               <input class="form-control inpDiceIni text-center gm-dice-input" name="diceIni" type="number"
                 (keydown)="inpDiceIni_KeyDown($event)" (focus)="inp_Focus($event)"
                 [ngModel]="p.diceIni" (ngModelChange)="onParticipantRolledTotalChanged(p, $event)"
@@ -343,6 +439,56 @@
                 </button>
               </div>
             </div>
+            <!-- QA fix round 3 (Xavier hands-on test): the ask button and the
+                 two roll-status markers used to live inside/next to the
+                 rolled-total input-group, all on one line in a column pinned
+                 to 5rem wide at desktop widths - they squeezed against the
+                 input and each other. Moved to their own row directly under
+                 the input-group (same column, so the ask button stays
+                 visually grouped with the dice button per Xavier's note), and
+                 the two markers collapsed into one slot: "Asked to roll"
+                 (`participantAskedToRoll`) can only be true while the roll is
+                 still pending (`isAskedToRoll` requires `pendingRoll`), so
+                 whenever it is true "Needs Initiative roll" would always also
+                 be true and add nothing - showing both stacked was pure
+                 repetition of the same fact. Asked takes priority; the plain
+                 "needs a roll, nobody has asked yet" state falls back to the
+                 other badge. Compact badges, not sentences, so the row's
+                 height stays roughly constant either way. -->
+            @if(canAskParticipantToRoll(p) || participantNeedsInitiativeRoll(p) || participantAskedToRoll(p)) {
+            <div class="gm-roll-status-row" data-testid="roll-status-row">
+              <!-- Item A's new per-row control: asks only THIS player to
+                   roll, unlike "Request Player Rolls" (every currently
+                   pending player at once). Visible only where it can
+                   actually do something. -->
+              @if(canAskParticipantToRoll(p)) {
+              <button type="button" class="btn btn-outline-info p-0 gm-ask-roll-btn"
+                data-testid="ask-player-to-roll-btn"
+                (click)="btnAskPlayerToRoll_Click(p)"
+                data-toggle="tooltip" data-placement="bottom" title="Ask this player to roll">
+                <i class="fas fa-comment-dots"></i>
+              </button>
+              }
+              <!-- Item 7 (round 3): "who has been asked", on the row itself -
+                   pre-combat or mid-combat alike. Takes priority over the
+                   plain "needs a roll" badge below (see comment above). -->
+              @if(participantAskedToRoll(p)) {
+              <span class="badge gm-roll-badge gm-roll-badge-asked" data-testid="asked-to-roll-indicator"
+                title="Asked to roll">
+                <i class="fas fa-comment-dots" aria-hidden="true"></i> Asked
+              </span>
+              }
+              <!-- Item B: a visual marker only - never an interruption - for
+                   anyone still owing an Initiative roll mid-combat who has
+                   not been asked yet. -->
+              @if(!participantAskedToRoll(p) && participantNeedsInitiativeRoll(p)) {
+              <span class="badge gm-roll-badge gm-roll-badge-needed" data-testid="needs-initiative-roll-indicator"
+                title="Needs Initiative roll">
+                <i class="fas fa-dice" aria-hidden="true"></i> Needs roll
+              </span>
+              }
+            </div>
+            }
           </div>
           <!-- Was a Bootstrap `.btn-group`: a connected, single-line button
                bar. Up to four buttons appear here depending on combat state
@@ -353,10 +499,29 @@
                present. `.gm-action-buttons` (below) wraps instead. `role`
                kept for the same grouping semantics. -->
           <div class="col-12 col-md-5 gm-col-actions gm-action-buttons" role="group">
-            @if (!p.edge
-            && (!combatManager.started || (combatManager.passEnded && p.getCurrentInitiative() > 10)))
+            <!-- Seize the Initiative (Core p. 160, "Initiative and Edge";
+                 one point of Edge, Core p. 56). Table ruling R1
+                 (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's
+                 rulings, 2026-09-21" - "you cannot seize initiative until
+                 you have rolled"): the control is unavailable, not merely
+                 warned against, until this participant has completed this
+                 Combat Turn's Initiative Test (`participantHasRolledThisTurn(p)`,
+                 reading the single canonical `hasRolledThisTurn()` predicate -
+                 round-6 defect 5). Table ruling
+                 R2 (same spec): once rolled, Seize may be declared at any
+                 point for the rest of the Combat Turn - not only between
+                 passes and not only above some Score threshold, unlike this
+                 control's condition before 2026-09-21 - because Seize is an
+                 Edge Effect with no procedural anchor (Core has one for a
+                 Delayed Action, Step 3A, Core p. 161, but none for Seize), never
+                 an Interrupt Action (Core p. 167) gated on remaining Score.
+                 `!p.edge` alone still hides it once already seized: only one
+                 Edge point per test/action (Core p. 56), and Seize cannot be
+                 re-purchased mid-turn. -->
+            @if (!p.edge && participantHasRolledThisTurn(p))
             {
-            <button type="button" class="btn btn-primary" (click)="btnEdge_Click(p)">
+            <button type="button" class="btn btn-primary" data-testid="seize-initiative-btn"
+              (click)="btnEdge_Click(p)">
               Seize Initiative
             </button>
             }
@@ -384,13 +549,13 @@
             }
             <!-- The dropdown stays visible at any Initiative Score, including 0
                  or below: a character down there can still defend/dodge and
-                 still has a Free Action per pass (brief criterion 5, p. 160).
+                 still has a Free Action per pass (brief criterion 5, Core p. 160).
                  Affordability is gated per action by canUseAction() below,
                  which refuses any interrupt costing more Score than is left
-                 (brief F9, p. 167). -->
+                 (brief F9, Core p. 167). -->
             <!-- Members of a linked NPC row cannot take Interrupt Actions at all
                  (brief "NPC Group Initiative" criterion 17 / Decision 3, a
-                 deliberate departure from p. 167): there is no coherent way for
+                 deliberate departure from Core p. 167): there is no coherent way for
                  one member to pay a cost out of a score the whole row shares.
                  The dropdown is simply hidden - no explanatory label, which was
                  overflowing into the next column. -->
@@ -404,7 +569,7 @@
                      Interrupts onto two lines at every width below 1920px. A
                      shield reads for the group because the interrupts that get
                      used at the table are the defensive ones (Full Defense,
-                     Dodge, Block, Parry, p. 167); the full word stays in the
+                     Dodge, Block, Parry, Core p. 167); the full word stays in the
                      tooltip and in the screen-reader label, and the dropdown
                      itself is headed "Core" / "Optional" once open.
                      The `<span class="caret">` that used to sit here was a
@@ -529,7 +694,7 @@
               }
               <!-- A row is a group, not a character: it cannot project or jack
                    in. An NPC in the row that changes Initiative type must be
-                   detached onto its own row first (criterion 13, pp. 159-160)
+                   detached onto its own row first (criterion 13, Core pp. 159-160)
                    - the Detach control in the Group panel below. -->
               @if (!isNpcRow(p)) {
               <button type="button" class="btn gm-trailing-icon"
@@ -629,13 +794,13 @@
           }
         </div>
         <!-- Linked NPC row panel: the group's NPCs, each with its own Condition
-             Monitor (brief criteria 3-4, 7, p. 379). There is deliberately no
+             Monitor (brief criteria 3-4, 7, Core p. 379). There is deliberately no
              group-wide Condition Monitor and no shared damage anywhere here
              (criterion 18). -->
         @if (isNpcRow(p) && isRowPanelExpanded(p)) {
         <div class="row npc-row-panel py-2 px-3 mb-1" attr.id="npcRow{{i}}">
           <div class="col">
-            <!-- The old "One Initiative Test for the whole row (p. 379); shared
+            <!-- The old "One Initiative Test for the whole row (Core p. 379); shared
                  score N" line lived here and was removed (brief Decision 19):
                  the shared score is already in the row's own header one line
                  up, and the row badge already says it is a group. -->
@@ -673,7 +838,7 @@
                    still have a live Action Phase); the "un-mark" direction is
                    never gated, so a mis-tap can always be corrected. Hidden
                    for a downed NPC, which is skipped when the row comes up
-                   anyway (p. 379). -->
+                   anyway (Core p. 379). -->
               @if (!m.outOfAction) {
               <button type="button" class="btn btn-sm npc-row-acted"
                 [class.btn-primary]="isRowMemberActed(m)"
@@ -753,12 +918,12 @@
                 <i class="fas fa-shuffle"></i>
               </button>
               <!-- One combined Physical+Stun track, 8 + ceil(max(B,W)/2) boxes,
-                   no overflow (criterion 7, p. 379). -->
+                   no overflow (criterion 7, Core p. 379). -->
               <span class="npc-row-cm" title="Condition Monitor: 8 + ceil(max(Body, Willpower) / 2), Physical and Stun on one track">
                 CM {{ m.damage }}/{{ m.conditionMonitorBoxes }}
               </span>
-              <span class="npc-row-wm" title="This NPC's own wound modifier (p. 169)">WM -{{ m.wm }}</span>
-              <!-- Damage Value, not just "one more box": p. 379 decides a
+              <span class="npc-row-wm" title="This NPC's own wound modifier (Core p. 169)">WM -{{ m.wm }}</span>
+              <!-- Damage Value, not just "one more box": Core p. 379 decides a
                    downed grunt's alive-or-dead from the DV of the final attack
                    against his Body, so the DV of the hit has to be enterable.
                    Three buttons share this one DV: P and S apply it as
@@ -766,7 +931,7 @@
                    all three behave exactly like the old +1/-1 taps. -->
               <div class="input-group input-group-sm npc-row-damage gm-inline-input-group">
                 <span class="input-group-text gm-stat-chip"
-                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379). The heal button takes back this same number of boxes.">DV</span>
+                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (Core p. 379). The heal button takes back this same number of boxes.">DV</span>
                 <input class="form-control text-center gm-stat-input npc-row-dv" type="number" [min]="1"
                   [ngModel]="getRowMemberDamageValue(m)"
                   (ngModelChange)="setRowMemberDamageValue(m, $event)">
@@ -778,7 +943,7 @@
                   title="Apply that DV as Stun damage">S</button>
                 <button type="button" class="btn btn-sm btn-outline-success npc-row-heal"
                   (click)="healRowMember(asNpcRow(p), m)"
-                  title="Take that many boxes off. Healing a downed NPC below a full Condition Monitor puts it back in the fight (p. 379).">H</button>
+                  title="Take that many boxes off. Healing a downed NPC below a full Condition Monitor puts it back in the fight (Core p. 379).">H</button>
               </div>
               <button type="button" class="btn btn-sm btn-outline-secondary npc-row-detach"
                 (click)="detachRowMember(asNpcRow(p), m)"
@@ -791,7 +956,7 @@
               </button>
               @if (m.outOfAction) {
               <span class="npc-row-down-badge"
-                title="Condition Monitor full — out of action for the rest of the fight (p. 379). Alive/dead is decided by the final attack (p. 379).">
+                title="Condition Monitor full — out of action for the rest of the fight (Core p. 379). Alive/dead is decided by the final attack (Core p. 379).">
                 out of action — {{ m.finalState }}
               </span>
               }
@@ -946,7 +1111,7 @@
           </button>
           <!-- One Initiative Test, one slot in the order, several NPCs acting
                back-to-back (brief "NPC Group Initiative" criteria 1-2,
-               p. 379). -->
+               Core p. 379). -->
           <button type="button" class="btn btn-outline-primary ms-1" data-testid="add-npc-row-btn"
             (click)="btnAddNpcRow_Click()"
             title="Add a linked NPC row (grunt group): one shared Initiative Score, one slot in the order">
@@ -954,10 +1119,10 @@
           </button>
           <!-- One grunt-shaped NPC in its own initiative slot, rolling its own
                Initiative Test (brief addendum Decision 9). Same single combined
-               Physical+Stun Condition Monitor as a detached grunt (p. 379). -->
+               Physical+Stun Condition Monitor as a detached grunt (Core p. 379). -->
           <button type="button" class="btn btn-outline-primary ms-1" data-testid="add-grunt-btn"
             (click)="btnAddGrunt_Click()"
-            title="Add a single grunt on its own Initiative Score: one combined Condition Monitor, no overflow (p. 379)">
+            title="Add a single grunt on its own Initiative Score: one combined Condition Monitor, no overflow (Core p. 379)">
             <i class="fa fa-user-ninja"></i> Add Grunt
           </button>
         </div>
@@ -1017,7 +1182,7 @@
               }
               @if (entry.npc) {
               <span class="log-badge log-badge-npc" data-testid="log-badge-npc"
-                    ngbTooltip="You rolled these dice on behalf of this non-player combatant (p. 44).">NPC</span>
+                    ngbTooltip="You rolled these dice on behalf of this non-player combatant (Core p. 44).">NPC</span>
               }
               @if (entry.gmNote) {
               <span class="log-badge log-badge-note">GM narration</span>
@@ -1105,7 +1270,7 @@
                   [class.btn-outline-secondary]="gmRollsVisibleToPlayers"
                   [class.btn-warning]="!gmRollsVisibleToPlayers"
                   (click)="toggleGmRollVisibility()"
-                  ngbTooltip="Whether your dice are visible to the players is a table agreement, not a rule (p. 330). Default: visible.">
+                  ngbTooltip="Whether your dice are visible to the players is a table agreement, not a rule (Core p. 330). Default: visible.">
             {{ gmRollsVisibleToPlayers ? "GM rolls: visible to players" : "GM rolls: hidden (session)" }}
           </button>
           @if (gmRollsVisibleToPlayers) {
@@ -1151,7 +1316,7 @@
           <nav ngbNav #nav="ngbNav" class="nav-tabs">
             <!-- A linked NPC row has no Condition Monitor of its own: the row
                  is a shared Initiative Score, the Condition Monitors belong to
-                 its NPCs one each (criteria 3-4 / 18, p. 379) and are edited in
+                 its NPCs one each (criteria 3-4 / 18, Core p. 379) and are edited in
                  the row's own member panel. Rendering the PC two-track display
                  here showed a phantom 10/10 + 10/10 that, when tapped, benched
                  the entire row. -->
@@ -1163,7 +1328,7 @@
                 @if (hasGruntConditionMonitor(selectedActor)) {
                 <!-- A detached grunt is still a grunt: ONE combined Physical +
                      Stun track of 8 + ceil(max(Body, Willpower)/2) boxes, no
-                     overflow (p. 379; p. 381 "They possess a single Condition
+                     overflow (Core p. 379; Core p. 381 "They possess a single Condition
                      Monitor, like other grunts"). Two independent bars would
                      show it as roughly twice as healthy as it is. -->
                 <div class="row">
@@ -1180,14 +1345,14 @@
                          20, `RULINGS.md` 2026-08-13): the box-clicking widget
                          above can only ever record as many boxes as are left
                          on the track, so a killing blow bigger than the
-                         remaining boxes could never be recorded for p. 379's
+                         remaining boxes could never be recorded for Core p. 379's
                          "DV of the final attack vs. Body" comparison. Same
                          controls as the row panel's per-member DV
                          (`npc-row-damage`): P and S apply the DV as damage,
                          H (heal) takes that many boxes back off. -->
                     <div class="input-group input-group-sm mt-2 grunt-damage gm-inline-input-group">
                       <span class="input-group-text gm-stat-chip"
-                        title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (p. 379). The heal button takes back this same number of boxes.">DV</span>
+                        title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (Core p. 379). The heal button takes back this same number of boxes.">DV</span>
                       <input class="form-control text-center gm-stat-input grunt-dv" type="number" [min]="1"
                         [ngModel]="getGruntDamageValue(selectedActor)"
                         (ngModelChange)="setGruntDamageValue(selectedActor, $event)">
@@ -1199,24 +1364,24 @@
                         title="Apply that DV as Stun damage">S</button>
                       <button type="button" class="btn btn-sm btn-outline-success grunt-heal"
                         (click)="healGrunt(asGrunt(selectedActor))"
-                        title="Take that many boxes off. Healing a downed grunt below a full Condition Monitor puts it back in the fight (p. 379).">H</button>
+                        title="Take that many boxes off. Healing a downed grunt below a full Condition Monitor puts it back in the fight (Core p. 379).">H</button>
                     </div>
                     <!-- Body and Willpower are kept per grunt because they are
                          the two inputs to the track above,
-                         8 + ceil(max(Body, Willpower)/2) (p. 379) — editing
-                         either resizes it immediately — and because p. 379
+                         8 + ceil(max(Body, Willpower)/2) (Core p. 379) — editing
+                         either resizes it immediately — and because Core p. 379
                          settles a downed grunt's alive-or-dead from the final
                          attack's DV against his Body. A grunt created with
                          "Add Grunt" has no other place to record them (a row
                          member has the row panel). -->
                     <div class="input-group input-group-sm mt-2 grunt-body-group gm-inline-input-group">
                       <span class="input-group-text gm-stat-chip"
-                        title="Body — sizes the Condition Monitor with Willpower, and the final attack's DV is compared against it to settle alive or dead (p. 379)">B</span>
+                        title="Body — sizes the Condition Monitor with Willpower, and the final attack's DV is compared against it to settle alive or dead (Core p. 379)">B</span>
                       <input type="number" class="form-control text-center gm-stat-input grunt-body-input"
                         [min]="0" [ngModel]="asGrunt(selectedActor).gruntBody"
                         (ngModelChange)="onGruntBodyChanged(asGrunt(selectedActor), $event)">
                       <span class="input-group-text gm-stat-chip"
-                        title="Willpower — the other input to 8 + ceil(max(Body, Willpower)/2) (p. 379)">W</span>
+                        title="Willpower — the other input to 8 + ceil(max(Body, Willpower)/2) (Core p. 379)">W</span>
                       <input type="number" class="form-control text-center gm-stat-input grunt-willpower-input"
                         [min]="0" [ngModel]="asGrunt(selectedActor).gruntWillpower"
                         (ngModelChange)="onGruntWillpowerChanged(asGrunt(selectedActor), $event)">
@@ -1260,12 +1425,12 @@
                      Defect 10 (fix round 2): also restricted to a grunt-
                      shaped standalone participant (`hasGruntConditionMonitor`)
                      - it previously accepted ANY non-row participant,
-                     including a player character, which p. 380-381's
+                     including a player character, which Core p. 380-381's
                      lieutenant rule has no meaning for at all. -->
                 @if (!isNpcRow(selectedActor) && hasGruntConditionMonitor(selectedActor) && existingNpcRows().length > 0) {
                 <div class="row align-items-center mb-2">
                   <div class="col-7">
-                    <span title="A lieutenant tied with his own team's Score always goes first (p. 381)">Lieutenant of</span>
+                    <span title="A lieutenant tied with his own team's Score always goes first (Core p. 381)">Lieutenant of</span>
                   </div>
                   <div class="col-5">
                     <select class="form-select form-select-sm" data-testid="lieutenant-team-row-select"
@@ -1287,7 +1452,7 @@
                          the new count onto the participant *before* the
                          handler ran, so the handler would compare the new
                          value against itself, see no change, and skip the
-                         roll-and-Score-delta entirely (brief F5, p. 160). -->
+                         roll-and-Score-delta entirely (brief F5, Core p. 160). -->
                     <input type="number" class="form-control form-control-sm gm-stats-dice-count-input"
                       [min]="1" [max]="5" step="1"
                       [ngModel]="selectedActor.dices"
@@ -1373,7 +1538,7 @@
       </div>
       <!-- Simple and Complex are also shut outright at Initiative Score 0 or
            below: no live Action Phase down there (brief "NPC Group Initiative"
-           Decision 16, p. 159-160). The Free chip above stays open - one Free
+           Decision 16, Core p. 159-160). The Free chip above stays open - one Free
            Action per pass survives, and defending is not gated at all. -->
       <div class="economy-chip"
         [class.economy-blocked]="getComplexUsageText(actModalParticipant) === '1/1'
@@ -1617,7 +1782,7 @@
     @if (pendingAddDraft.kind === 'grunt' && selectedDraftStatblock()?.kind === 'lieutenant' && existingNpcRows().length > 0) {
     <div class="mb-2">
       <label class="form-label" for="addDraftLieutenantRow">
-        Beats this row on an Initiative tie (p. 381) - optional
+        Beats this row on an Initiative tie (Core p. 381) - optional
       </label>
       <select id="addDraftLieutenantRow" class="form-select" data-testid="add-draft-lieutenant-row"
         [(ngModel)]="pendingAddDraft.lieutenantTeamRow">

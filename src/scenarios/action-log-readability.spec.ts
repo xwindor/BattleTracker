@@ -182,6 +182,18 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('AC9 - a GM Act submission is attributed to the character', () => {
     it('produces exactly one shared entry, actor = the character, none of the old shapes', () => {
       const sarah = addCombatant('Sarah');
+      // Round 4 item 2 (`briefs/mid-turn-joiner-spec.md`): `submitActModal()`
+      // now refuses a participant who is not `Active`/`Delaying` - the Act
+      // modal is only ever opened for whoever is actually due to act, so
+      // give Sarah that status explicitly rather than relying on the
+      // (irrelevant to this AC) default. Round 5 item 10: a participant with
+      // no roll at all no longer holds the Combat Turn open on their bare
+      // attribute, so also give Sarah a token roll - otherwise this
+      // hand-set Active status (never reached through the real engine,
+      // which only grants it via a rolled/seized participant) makes
+      // `isOver()` see nobody eligible and spuriously end the Combat Turn.
+      sarah.status = StatusEnum.Active;
+      sarah.diceIni = 1;
       sent.length = 0;
       component.actModalParticipant = sarah;
       component['declaredActionSelections'].set(sarah, {
@@ -206,6 +218,11 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     function ownedActiveCombatant(name: string): Participant {
       const p = addCombatant(name);
       p.status = StatusEnum.Active;
+      // Round 5 item 10: give a token roll too - see the AC9 test's comment
+      // on `sarah` above for why an Active status alone (never reached
+      // through the real engine without one) can spuriously end the Combat
+      // Turn now that `isOver()` requires a rolled/seized participant.
+      p.diceIni = 1;
       component['participantOwners'].set(p, PLAYER_TOKEN);
       return p;
     }
@@ -267,6 +284,11 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('D1 (round 2) - the socket is down while a session is still open', () => {
     it('performAct writes a local fallback line when the connection is lost', () => {
       const sarah = addCombatant('Sarah');
+      // Round 4 item 2: `submitActModal()` now requires Active/Delaying.
+      // Round 5 item 10: also give a token roll - see the AC9 test's
+      // comment for why.
+      sarah.status = StatusEnum.Active;
+      sarah.diceIni = 1;
       component.shareConnectionLost = true;
       sent.length = 0;
       LogHandler.logbook.length = 0;
@@ -344,6 +366,12 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('AC13 - a row member declared action is attributed to the row, names the NPC', () => {
     it('produces one entry: actor = row, text = "<member> <sentence>"', () => {
       const row = gmRow('Gangers');
+      // Round 5 item 10: give the row a token roll - see the AC9 test's
+      // comment on `sarah` above for why an unrolled participant (here, a
+      // row with nobody else in the encounter) can spuriously end the
+      // Combat Turn as soon as its Act empties `currentActors`, now that
+      // `isOver()` requires a rolled/seized participant.
+      row.diceIni = 1;
       const g1 = component.addNpcToRow(row, 'G 1');
       sent.length = 0;
 
@@ -717,16 +745,25 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('AC29 - no pl- token and no literal "GM" actor for a participant-attributed event', () => {
     it('holds across a GM Act, a GM interrupt and a player Act', () => {
       const sarah = addCombatant('Sarah');
+      // Round 4 item 2: `submitActModal()` now requires Active/Delaying.
+      // Round 5 item 10: also give a token roll - see the AC9 test's
+      // comment for why (an Active status alone, hand-set rather than
+      // reached through the real engine, can spuriously end the Combat
+      // Turn now that `isOver()` requires a rolled/seized participant).
+      sarah.status = StatusEnum.Active;
+      sarah.diceIni = 1;
       component.actModalParticipant = sarah;
       component['declaredActionSelections'].set(sarah, { free: 'Drop Prone', simple: [], complex: null });
       component.submitActModal();
 
       const ganger2 = addCombatant('Ganger 2');
       ganger2.baseIni = 15;
+      ganger2.diceIni = 1;
       component.btnAction_Click(ganger2, FULL_DEFENSE);
 
       const wombat = addCombatant('Wombat');
       wombat.status = StatusEnum.Active;
+      wombat.diceIni = 1;
       component['participantOwners'].set(wombat, PLAYER_TOKEN);
       command('act', PLAYER_TOKEN, { participantId: component['getParticipantId'](wombat) });
 
@@ -787,6 +824,11 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       const row = gmRow('Gangers');
       const g1 = component.addNpcToRow(row, 'G 1');
       const g2 = component.addNpcToRow(row, 'G 2'); // a second member still owes an action
+      // Item 2 (`briefs/mid-turn-joiner-spec.md`, round 3 table ruling):
+      // an unrolled participant is never handed a turn - the row must make
+      // its one shared Initiative Test before `goToNextActors()` can pick
+      // it up.
+      row.diceIni = 5;
       CombatManager.started = true;
       CombatManager.passEnded = false;
       CombatManager.goToNextActors();
@@ -843,7 +885,7 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       expect(shared.some(t => /^G 2 took 10 Physical/.test(t))).withContext('damage line').toBeTrue();
       expect(shared).toContain('G 2 is out of action');
       // The GM's own fuller local text (brief section D: not on the wire,
-      // pre-existing and out of scope to change) carries the p. 379 verdict.
+      // pre-existing and out of scope to change) carries the Core p. 379 verdict.
       const local = LogHandler.logbook.slice(localBefore).map(e => e.text);
       expect(local.some(t => /G 2 is out of action \(dead\)/.test(t))).withContext('GM final-state text').toBeTrue();
       const wound = component.sharedLogEntries.find(e => /group wound from G 2/.test(e.text));

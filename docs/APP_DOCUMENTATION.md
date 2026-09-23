@@ -247,11 +247,93 @@ Prep actions:
 - `Force Roll Outstanding` (confirmation required)
 - `Begin Combat Turn` (enabled only when no pending rolls)
 
+### Pending Rolls panel (mid-combat)
+
+A sibling panel appears once a Combat Turn is running and someone still owes
+an Initiative roll (`briefs/mid-turn-joiner-spec.md`) — a late joiner (a new
+"+ Participant"/grunt/row, or a brand-new player registering mid-fight), most
+commonly. Same buttons as the pre-combat panel (`Request Player Rolls`,
+`Roll Remaining Non-Player`, `Force Roll Outstanding`) reusing the identical
+handlers, but never `Begin Combat Turn`, which does not exist once a turn is
+already running. It names everyone still owed a roll, separately names who
+has actually been asked, and (mid-combat only) `Roll Remaining Non-Player`
+stays enabled even while a player is still owed one. See "Per-person 'asked'"
+above for what "asked" means and how it survives a dropped connection.
+
+**GM-only notices about who still owes a roll**
+(`briefs/mid-turn-joiner-spec.md`, round 4). Two live, state-driven lines on
+the GM screen only — never sent to a player, never a dialog, never blocking:
+
+- `pendingPassEndRollNotice()`: whenever the participant now due to act is
+  the last one able to act this Initiative Pass and someone still owes a
+  roll, names who. Covers a player's own Act/Delay, a grunt row's last
+  member, and a spent NPC row dropped automatically — not just a GM button
+  press. (Table ruling below is what makes "able to act" exclude an unrolled
+  participant in the first place.)
+- `nobodyCanActRollNotice()`: when nobody at all can be given a turn this
+  pass because everyone remaining still owes a roll, says so plainly instead
+  of the pass just ending with no explanation.
+
+**Table rulings, not printed rules: an unrolled participant is never given a
+turn, and does not hold the Combat Turn open either.** The core rulebook is
+silent on a combatant who is in the fight without a rolled Initiative Score
+at all — these are Xavier's table rulings (`briefs/mid-turn-joiner-spec.md`,
+round 3 item 2 and round 5 item 10), not something the book states. A
+participant who has not made this Combat Turn's Initiative Test
+(`diceIni <= 0`) is skipped when choosing who acts next. The same unrolled
+participant's bare attribute also cannot keep the Combat Turn alive on its
+own (round 5 item 10) — once nobody remaining is both above 0 *and* rolled,
+the Combat Turn ends, the same as if everyone's Score had reached 0. This can
+still leave a Combat Turn's *pass* "stuck" for a moment — nobody granted a
+turn this pass while an unrolled participant sits above 0 next to someone who
+has rolled — which the `nobodyCanActRollNotice()` line above surfaces rather
+than silently doing nothing.
+
+**Seizing the Initiative can no longer be used to get around either of the
+above.** Between 2026-09-19 and 2026-09-21 an unrolled participant who had
+seized the Initiative (`p.edge`) was exempt from both skips (round 4 item 6,
+round 5 item 10), reading Core p. 160's "regardless of your Initiative Score"
+as covering an *absent* Score, not just a low one. Xavier's table ruling R1
+(`briefs/seize-initiative-spec.md`, "RESOLVED — Xavier's rulings,
+2026-09-21" — "you cannot seize initiative until you have rolled") closes
+that case instead: the Seize Initiative button is hidden, not merely
+disabled, until the participant has rolled, and the engine-side
+`CombatManager.seizeInitiative()` refuses to set `p.edge` on an unrolled
+participant even if some other caller reaches it directly. An unrolled seizer
+is therefore no longer reachable through a fresh Seize declaration, and both
+exemptions above were removed rather than tuned. Xavier's ruling R3 (same
+spec) confirms a seizer's own Score decays and gates exactly like anyone
+else's — seizing changes rank (who goes first) only, never the seizer's own
+Score or eligibility threshold. See `ARCHITECTURE.md` §5 for the full detail,
+including R2 (Seize may be declared at any point after rolling, not only
+between passes) and the one narrow, documented exception (a same-player
+type-mismatch re-registration carrying an already-seized character's flag
+onto its replacement object, which is preserving prior state rather than
+declaring a new seize).
+
 ### Act/Delay/Interrupt
 
-- `Act` opens modal action planner.
+- `Act` opens modal action planner. The GM's Act declaration window refuses a
+  stale submission if the participant has already acted through another path
+  (their own Act on their phone, or an automatic advance) while the window
+  was open — the same guard the player's own `act` command already applies —
+  and now closes itself with a short reason (e.g. "Hero has already acted
+  this pass — Act window closed.") instead of silently staying open for the
+  GM to press Submit into the same refusal again.
 - `Delay` sets status delaying and advances when needed.
 - `Interrupts` use `ActionHandler.coreInterrupts` from `InterruptTable`.
+  Gated on having rolled this Combat Turn's Initiative Test
+  (`hasRolledThisTurn(p)`, `diceIni > 0`) — the seize exemption this gate
+  used to share with the acting gate above (round 5 item 9) was removed
+  2026-09-21 along with the acting gate's own exemption (R1,
+  `briefs/seize-initiative-spec.md`): a seizer must already have rolled, so
+  an "unrolled seizer" case no longer exists for this gate to exempt.
+  Enforced both on the player's buttons (`canInterrupt`) and, on receipt, by
+  the GM tab's `interrupt` session-command handler itself (round 5 item 1) —
+  the same "checked where the handler actually spends the Initiative, not
+  only in the UI" pattern `act`/`delay` already use — so a stale or
+  double-tapped phone cannot spend Initiative from an unrolled participant.
+  Ordinary defence is unaffected; it is never modelled as a gated action.
 
 Interrupts currently:
 
@@ -357,8 +439,222 @@ Players cannot see:
 
 ### Roll prompts
 
-GM `request_rolls` command shows player roll prompt.
-GM `clear_roll_prompt` command hides prompt (for example after force-roll).
+(`briefs/player-initiative-prompt-spec.md`, fix round 2)
+
+The initiative roll prompt is a modal dialog, not an inline banner. It embeds
+the same dice-roller widget used elsewhere on the player page (one press
+rolls and submits, no copying a number across) plus a manual-entry field for
+a table rolling physical dice; both converge on the same `roll_submission`
+command. The dice-roller's own count field is locked to the actor's
+Initiative Dice (or, for the delta modal below, the number of extra dice
+owed) while it is inside this modal — it cannot be changed by typing,
+spinner arrows, or the mouse wheel.
+
+**One rule, one place.** Every trigger that can open or close either modal —
+`request_rolls`, `clear_roll_prompt`, `combat_ended`, an incoming state
+update (covers join, reconnect, refresh, and every ordinary broadcast),
+and the session closing — funnels through a single predicate in
+`PlayerViewComponent` (`syncRollModal()` for the main prompt,
+`syncDeltaRollModal()` for the delta one). Nothing in the component opens or
+closes either modal any other way, so there is exactly one place that
+decides "should this be showing right now."
+
+The main modal's rule: the player has a primary character, that character
+still owes a roll (`pendingRoll`), it is not out of action (`ooc`), **and
+the GM has specifically asked THIS character** (see "per-person asked" below
+— this replaces an earlier, table-wide `rollsRequested` switch).
+
+**Deliberately not gated on `started`.** An earlier version of this
+predicate also required combat to be running, which made the modal
+impossible to open at the one moment it is actually requested: the GM asks
+for rolls during initiative *prep*, and `btnStartRound_Click()` defers
+`beginCombatTurn()` — the only place that sets `combatManager.started` —
+until every roll is in. The per-character "asked" record (below) is what
+bounds the prompt instead, and `beginCombatTurn()` clears every such record
+exactly when the turn begins. The
+`started → not-started` transition in `applyIncomingState()` carries a
+`turnJustEnded` guard so a turn ending cannot be undone by the same update
+re-opening the prompt off a request the ended turn left outstanding.
+
+**Not dismissible.** There is no close button, and clicking the backdrop or
+pressing Escape does nothing. The player cannot get past it without
+resolving the roll one way or another (Xavier's ruling, 2026-09-15). It
+closes only when:
+
+- the player submits a roll (auto via the embedded roller, or manual entry);
+- the GM resolves it for the player — entering a value directly, the per-row
+  dice button, or "Force Roll Outstanding" — which reaches the player as an
+  incoming state update reporting the character no longer owes a roll (the
+  per-row GM dice button also broadcasts immediately for this purpose, not
+  only on the next unrelated state push);
+- the GM sends `clear_roll_prompt`;
+- the GM sends `combat_ended`, or the Combat Turn otherwise ends
+  (started → not-started);
+- the GM marks the character out of combat ("Leave Combat");
+- the character stops being this player's primary character — released,
+  removed from the encounter, or ownership reassigned so a different
+  character becomes primary;
+- the session closes.
+
+**Opens on:**
+
+- `request_rolls` from the GM, for a continuously connected player whose
+  primary character actually qualifies under the rule above — an
+  already-rolled player, an `ooc` player, or a player with no character at
+  all never sees it, even though the command is broadcast to the whole room;
+- reconnecting, refreshing, or joining late while the app's own record shows
+  the character still owes a roll, combat is running, **and the GM has
+  specifically asked this character this Combat Turn** — the GM does not need
+  to click "Request Player Rolls" again for a player who drops off and comes
+  back, and — the point of the per-person redesign below — a phone sleeping,
+  a dropped connection, or a release-then-reclaim of the character does not
+  cancel the ask either. This is re-checked on every incoming state update,
+  so it is reconnect-safe; opening/closing is a no-op if the modal already
+  matches what the state calls for, so an unrelated broadcast (the GM
+  reordering the list, damage changing, etc.) never re-triggers the chime.
+
+**Straggler re-nudge, targeted.** A player who already has the modal open and
+gets a *repeat* `request_rolls` naming their own character (or an untargeted
+batch "Request Player Rolls") does not get a second modal — opening is a
+no-op once it is already showing — but does get a fresh nudge/chime, so the
+repeat click is not silently swallowed for someone still sitting on the
+prompt. The per-row "ask this player" control (below) names its one target in
+the command payload, so asking a *different* player never re-nudges this
+one's already-open pop-up — see "per-person asked" below.
+
+**Per-person "asked" — the GM must ask first, per character**
+(`briefs/mid-turn-joiner-spec.md`, "RESOLVED - validation round 2: redesign",
+item A; round 3 tidied the remaining edges). This replaced an earlier,
+table-wide `SharedCombatState.rollsRequested` switch that could not
+distinguish "this specific player was asked" from "someone, somewhere, still
+owes a roll" — which meant a release-then-reclaim of the last pending
+character silently cancelled the request, and one ask could reopen the modal
+for a player who had never been asked at all. The fix is a per-participant
+record, `SharedParticipantState.askedToRoll`, carried on each character's own
+wire entry:
+
+- Set by the GM's **"Request Player Rolls"** button (pre-combat Initiative
+  Prep panel, and the mid-combat Pending Rolls panel - see §3) for every
+  player-owned, non-`ooc` character *currently* owing a roll — a snapshot
+  taken once, not a standing rule; anyone who joins afterward is not asked
+  until the GM presses a button again.
+- Set by the new **per-row "ask this player" button**, next to a
+  player-owned participant's own dice button, for that one character only.
+  Its `request_rolls` command names the target's id in the payload
+  specifically so a straggler's already-open pop-up for a *different*
+  character is never re-chimed by it.
+- Cleared the moment that character's roll lands, by any route (their own
+  submission, the per-row GM dice button, a typed value, Force Roll
+  Outstanding, Roll Remaining Non-Player); when the GM clears the prompt;
+  when the character goes `ooc`; when it is removed; at the Combat Turn
+  boundary; and at End Combat.
+- **Survives** a dropped connection, a release, and a re-claim — the record
+  is keyed by the character's own stable id, not by who currently owns it, so
+  none of those events touch it.
+- **Carried across** a same-player re-registration that swaps character type
+  (e.g. decker ↔ non-decker), which discards the old participant object and
+  builds a brand-new one: the ask moves onto the new object's own id rather
+  than being lost.
+
+Both panels show who is currently owed a roll and, separately, who has
+actually been asked — two different lists, since "owed" and "asked" are not
+the same fact. The row itself also shows a small "Asked to roll" marker.
+
+On the row, "Asked to roll" and the plain "Needs Initiative roll" marker
+never appear stacked together (QA fix round 3, Xavier hands-on test):
+"Asked to roll" can only show while the roll is still owed, so it already
+carries the "needs a roll" fact and takes priority — the plain marker only
+appears for someone who still owes a roll and has *not* been asked. The
+per-row ask button sits directly under the rolled-total input and its dice
+button, in the same compact row as whichever one marker is showing, so the
+column stays a fixed width instead of squeezing three controls plus a
+sentence onto one line.
+
+**A GM roll can be superseded by the player's own, once.** If the GM already
+rolled for a character with the per-row dice button and that player's own
+roll then arrives — pre-combat or mid-combat — the player's roll replaces the
+GM's, and an Action Log line says so. This is deliberately narrow: it only
+fires for a character the GM rolled for this Combat Turn whose player has not
+already submitted their own roll, and only once — a second submission after
+that is an ordinary stale resubmission and is ignored, exactly as before. A
+roll from a previous Combat Turn can never be superseded onto a later one.
+
+**A late/unrolled participant never gets a turn until they roll, and does not
+hold the Combat Turn open either** (round-3 and round-5 table rulings,
+2026-09-19, pending their own `RULINGS.md` entries — the core rulebook is
+silent on a combatant with no rolled Initiative Score at all, so neither of
+these is something the book states): the engine skips any `Waiting`
+participant with no rolled Initiative Score this Combat Turn when choosing
+who acts next, even if their bare (pre-roll) Initiative attribute is high
+enough that it would otherwise have won the comparison. They re-enter the
+ordinary highest-Score comparison the instant their roll lands. The same
+unrolled bare attribute also cannot keep the Combat Turn open by itself
+(round 5): once nobody remaining is both above 0 and rolled, the Combat Turn
+ends, same as everyone reaching 0. If every remaining participant *within a
+pass* still owes a roll, nobody acts and the pass ends on its own with no
+Action Phase handed out — reported as a known, accepted consequence of the
+ruling, not something the app works around.
+
+**Seizing the Initiative cannot be used to skip the roll requirement above.**
+Between 2026-09-19 and 2026-09-21 an unrolled, seized participant (`p.edge`)
+was exempt from both the acting gate and the Initiative-costing interrupt
+gate here — reading Core p. 160's "regardless of your Initiative Score" as
+covering an *absent* Score, not just a low one. Xavier's table ruling R1
+(`briefs/seize-initiative-spec.md`, "RESOLVED — Xavier's rulings,
+2026-09-21" — "you cannot seize initiative until you have rolled") closes
+that gap instead: the Seize Initiative button is hidden, not merely
+disabled, until the participant has rolled, and the engine itself refuses to
+seize an unrolled participant even if some other caller tries. See
+`ARCHITECTURE.md` §5 for the full detail, including R2 (Seize may be
+declared at any point after rolling) and R3 (a seizer's own Score decays and
+gates exactly like anyone else's — seizing changes rank only).
+
+**The GM screen shows a non-blocking notice**, never a confirm dialog, when
+the participant now due to act is the last one able to act in the current
+Initiative Pass and someone still owes a roll — naming who. It is read live
+from the order's own state on every render, so it covers a player's own
+Act/Delay, a grunt row occupying the sole current-actor slot, and a spent NPC
+row dropped automatically by a damage/heal handler alike, with no click
+required to trigger it and nothing sent to any player. The GM's own Act and
+Delay controls no longer show a confirm dialog at all (an earlier build did,
+briefly, and it double-warned for the same person alongside the confirmation
+below). The confirmation on **Next Initiative Pass / End Combat Turn** is
+unchanged: clicking it while anyone still owes a roll still asks "Advance
+Anyway?", naming who, and never blocks outright.
+
+**No stacking.** The main modal and the delta modal never show at the same
+time for the same player. If one is already open, the other one's own turn
+is deferred rather than opening on top of it, and it opens for real the
+moment the first one closes.
+
+**Delta modal.** A second, smaller modal follows the same pattern for the
+extra dice a player rolls after switching into a faster VR mode mid-pass —
+own dice count and limits (the extra dice only, not the full roll), same
+non-dismissible behaviour, same close conditions. It is recoverable from
+state (`SharedParticipantState.pendingDeltaDice`, set GM-side the moment a
+dice-count gain is applied without a roll, cleared the moment the matching
+delta `roll_submission` lands) as well as from the live VR-mode-change
+event, so a player who refreshes mid-delta-roll gets the prompt back
+instead of losing it for the rest of the fight.
+
+It also closes when the character stops being a jacked-in decker at all —
+the GM enabling Astral on them, or any other promote/demote type swap —
+because the extra dice it is asking about belong to a VR mode that no longer
+exists (fix round 3). The GM-side half is that every participant-replacing
+path clears or carries the owed-delta note (`ARCHITECTURE.md` §8); the
+player-side half is that an incoming state update reporting the character is
+no longer a Matrix character forces the count to zero and the modal shut,
+which is the one exception to the rule that a stale wire `0` never closes a
+delta prompt that is already open.
+
+**Echo.** A roll made inside either modal also plays out on the ordinary
+dice-roller widget lower on the player page, the same way every other
+initiative roll always has — no second submission, just the same values
+handed to that widget for its own animation.
+
+Only the player's first/primary character is ever prompted this way; a
+second or third character owned by the same player still has to be rolled
+for by the GM (unchanged, tracked as backlog).
 
 ## 5. Shared State + Command Protocol
 

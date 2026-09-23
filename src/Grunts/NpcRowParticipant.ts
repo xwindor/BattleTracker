@@ -2,7 +2,8 @@
 // in CombatManager, which imports this module, and that would be a cycle.
 import {
   Participant,
-  PARTICIPANT_BASE_BACKING_FIELDS
+  PARTICIPANT_BASE_BACKING_FIELDS,
+  hasRolledThisTurn
 } from "Combat/Participants/Participant";
 import { IParticipant } from "Combat/Participants/IParticipant";
 import { Action } from "Interfaces/Action";
@@ -16,20 +17,20 @@ import { DetachedGruntParticipant, hasGruntConditionMonitor } from "./DetachedGr
  *
  * "The GM may streamline Initiative in combat by making a single Initiative
  * Test for the entire group of grunts, and the result of that test applies to
- * all the grunts" (brief acceptance criterion 1, p. 379). The row is modelled
+ * all the grunts" (brief acceptance criterion 1, Core p. 379). The row is modelled
  * as **one participant** in `CombatManager.participants` rather than as a
  * bracket over several participants, because that is what makes the rest of
  * the engine correct for free (ARCHITECTURE.md §1-§5):
  *
- *  - it occupies a single position in the derived order (criterion 2, p. 159);
- *  - the pass boundary subtracts 10 from it exactly once (criterion 8, p. 159);
+ *  - it occupies a single position in the derived order (criterion 2, Core p. 159);
+ *  - the pass boundary subtracts 10 from it exactly once (criterion 8, Core p. 159);
  *  - `getNextActors()` picks it up once and its members act back-to-back
  *    inside that one slot (criterion 2);
  *  - the tie-break comparator sees one entry, whose Edge rating is 0
  *    (criterion 10 / Decision 5).
  *
  * What it adds on top of `Participant` is the per-NPC half of the rules: each
- * `GruntMember` carries its own Condition Monitor (criteria 3-4, 7, p. 379),
+ * `GruntMember` carries its own Condition Monitor (criteria 3-4, 7, Core p. 379),
  * and the *house rule* that any member's wound penalty lands on the row's
  * shared Initiative Score (criterion 5 / Decision 1) — see `wm` below.
  *
@@ -119,7 +120,7 @@ export class NpcRowParticipant extends Participant {
     super();
     this._members = [];
     // A row has no Condition Monitor of its own (criterion 18); grunts also
-    // take no overflow damage (p. 379). Both tracks are left unused, and
+    // take no overflow damage (Core p. 379). Both tracks are left unused, and
     // overflow is zeroed so nothing can read a PC-shaped value off a row.
     this.overflowHealth = GRUNT_OVERFLOW_BOXES;
   }
@@ -132,7 +133,7 @@ export class NpcRowParticipant extends Participant {
   /**
    * The members that still act when the row comes up. A member whose Condition
    * Monitor is full is out of action for the rest of the fight and is skipped,
-   * while the rest of the row carries on (criterion 6, p. 379).
+   * while the rest of the row carries on (criterion 6, Core p. 379).
    */
   get activeMembers(): readonly GruntMember[] {
     return this._members.filter(m => !m.outOfAction);
@@ -184,12 +185,12 @@ export class NpcRowParticipant extends Participant {
    * **The house rule (criterion 5 / Decision 1).**
    *
    * "When any NPC in the row takes a wound (crosses a Wound Modifier threshold,
-   * p. 169), that wound's Initiative penalty applies to the row's shared
+   * Core p. 169), that wound's Initiative penalty applies to the row's shared
    * Initiative Score." The trigger is a **damage event**, so the row's Wound
    * Modifier is an accumulator moved only by `applyDamageToMember` and
    * `healMember`; `Participant`'s `initiativeAttribute = baseIni - wm` feeds the
    * running Initiative Score and `syncInitiativeAttribute()` applies the change
-   * as a signed delta the moment the injury happens (p. 160, p. 169).
+   * as a signed delta the moment the injury happens (Core p. 160, Core p. 169).
    *
    * It is emphatically **not** a sum over the current roster. Nothing in the
    * brief authorises a membership change to move the shared score, and both
@@ -201,10 +202,10 @@ export class NpcRowParticipant extends Participant {
    * untouched".
    *
    * This is a deliberate departure from RAW and is recorded in `RULINGS.md`
-   * (2026-08-01): p. 379 / p. 170 would instead drop *only the wounded grunt*
+   * (2026-08-01): Core p. 379 / Core p. 170 would instead drop *only the wounded grunt*
    * to a lower Initiative Score, splitting him off the group. The wounded
    * member's own dice pools still take his own wound modifier as normal
-   * (p. 170) — that is `GruntMember.wm`, untouched by this.
+   * (Core p. 170) — that is `GruntMember.wm`, untouched by this.
    *
    * Members that are already out of action keep counting: their wounds hit the
    * shared score when they were taken and are not refunded by them dropping.
@@ -241,7 +242,7 @@ export class NpcRowParticipant extends Participant {
    * Clear every member's "has acted this pass" marker (brief Decision 18).
    *
    * Called at each Initiative Pass boundary, where everybody still above 0
-   * acts again (p. 159), and at the Combat Turn boundary via `softReset()`.
+   * acts again (Core p. 159), and at the Combat Turn boundary via `softReset()`.
    */
   resetMemberActed(): void {
     for (const member of this._members) {
@@ -253,7 +254,7 @@ export class NpcRowParticipant extends Participant {
    * Combat Turn boundary. The row's own Participant state resets as usual; its
    * NPCs' per-pass Act markers reset with it (Decision 18). Damage and the
    * shared wound accumulator deliberately survive, exactly as a participant's
-   * damage does (ARCHITECTURE.md §2, and p. 159 for wound modifiers carrying
+   * damage does (ARCHITECTURE.md §2, and Core p. 159 for wound modifiers carrying
    * into later Combat Turns).
    */
   override softReset(revive = false): void {
@@ -263,10 +264,10 @@ export class NpcRowParticipant extends Participant {
 
   /**
    * Interrupt Actions are refused for a row outright (criterion 17 /
-   * Decision 3, a deliberate departure from p. 167): there is no coherent way
+   * Decision 3, a deliberate departure from Core p. 167): there is no coherent way
    * for one member to pay an Interrupt cost out of a score the whole row
    * shares. An NPC that needs to interrupt must be detached first
-   * (`detachMember`, criterion 12), after which ordinary p. 167 rules apply to
+   * (`detachMember`, criterion 12), after which ordinary Core p. 167 rules apply to
    * it individually.
    */
   override canUseAction(_action: Action): boolean {
@@ -279,7 +280,7 @@ export class NpcRowParticipant extends Participant {
    * Joining an *existing* row mid-combat inherits the row's current shared
    * Initiative Score directly — no separate late-entry Initiative Test and no
    * -10-per-elapsed-pass penalty (criterion 15 / Decision 7, departs from
-   * p. 160 by design). That falls out of the model: the score lives on the row,
+   * Core p. 160 by design). That falls out of the model: the score lives on the row,
    * so a new member is on it the moment it is added.
    *
    * Score-neutral, including for an NPC who arrives **already wounded**: the
@@ -316,7 +317,7 @@ export class NpcRowParticipant extends Participant {
    *
    * Two things happen, and they are deliberately different in scope:
    *  1. the boxes land on **that member's** Condition Monitor only, never on
-   *     any other member's (criteria 3-4, p. 379);
+   *     any other member's (criteria 3-4, Core p. 379);
    *  2. any Wound Modifier the hit crosses moves the **row's shared**
    *     Initiative Score (criterion 5 / Decision 1) — every member of the row
    *     is now slower, together.
@@ -386,28 +387,28 @@ export class NpcRowParticipant extends Participant {
 
   /**
    * Detach an NPC from the row onto its own initiative row (criterion 12,
-   * p. 379 for augmented specialists, pp. 380-381 for lieutenants). This is
+   * Core p. 379 for augmented specialists, Core pp. 380-381 for lieutenants). This is
    * also the required path for:
    *  - an NPC that needs an Interrupt Action (criterion 17 / Decision 3), and
    *  - an NPC changing Initiative type — astral projection or any Matrix mode
    *    — which cannot stay on a physical row's shared score (criterion 13,
-   *    pp. 159-160).
+   *    Core pp. 159-160).
    *
    * The returned participant has **not** taken an Initiative Test: `diceIni` is
    * 0, so the GM (or the caller) rolls its own Initiative Test for it, and
    * `CombatManager.addParticipant()` applies the ordinary late-entry penalty of
-   * -10 per elapsed pass (p. 160). Decision 7's "no late-entry penalty" applies
+   * -10 per elapsed pass (Core p. 160). Decision 7's "no late-entry penalty" applies
    * only to an NPC *joining* an existing row, not to one leaving it.
    *
    * **A detached grunt is still a grunt**: detaching changes which Initiative
    * Score it is on, nothing else. Its Condition Monitor keeps the grunt shape —
    * one combined Physical + Stun track of the same box count, holding the same
    * filled boxes, with the same wound modifier, the same out-of-action
-   * threshold and no overflow (p. 379, restated for lieutenants on p. 381:
+   * threshold and no overflow (Core p. 379, restated for lieutenants on Core p. 381:
    * "They possess a single Condition Monitor, like other grunts"). That is what
    * `DetachedGruntParticipant` is for; the default factory hands one back.
    * The final-attack record travels too, so alive-or-dead can still be settled
-   * per p. 379 after the detach.
+   * per Core p. 379 after the detach.
    *
    * Score-neutral for the row: the wounds this member's damage already cost the
    * row stay paid (see `wm`; scenario S4 — the remaining gangers keep the row's
@@ -436,8 +437,8 @@ export class NpcRowParticipant extends Participant {
     if (hasGruntConditionMonitor(detached)) {
       // Both Condition Monitor inputs travel, set together and **before** the
       // damage: a grunt-shaped participant re-derives its track from Body and
-      // Willpower (p. 379), so handing over only Body would resize the track
-      // against a Willpower of 0. Body is also what p. 379's "type and DV of the
+      // Willpower (Core p. 379), so handing over only Body would resize the track
+      // against a Willpower of 0. Body is also what Core p. 379's "type and DV of the
       // final attack vs. Body" comparison needs, before or after going down.
       detached.setGruntAttributes(member.body, member.willpower);
     }
@@ -513,7 +514,7 @@ export class NpcRowParticipant extends Participant {
     }
     // Mirrors Participant.clone(): no action history on the copy, so any
     // Initiative committed to Interrupt Actions is folded into the copy's
-    // running Score rather than refunded (p. 167). A row can never have an
+    // running Score rather than refunded (Core p. 167). A row can never have an
     // action history (canUseAction is always false), but the invariant is kept
     // so this stays correct if that ever changes.
     dst["_currentInitiativeScore"] = this.getCurrentInitiative();
@@ -546,14 +547,15 @@ export const MIN_MERGEABLE_GRUNTS = 2;
 
 /**
  * Has this participant already taken its Initiative Test for the **current**
- * Combat Turn? `diceIni` is the sum of the Initiative Dice rolled this turn and
- * is cleared by `softReset()` at the Combat Turn boundary, so `> 0` is exactly
- * "has a rolled Score for this turn" - the same signal the shared-state
- * `pendingRoll` flag is built from.
+ * Combat Turn? Re-exported under this file's original name for its existing
+ * public API (the `Grunts` barrel, `mergeGruntsIntoRow` below) - the
+ * definition itself now lives in `Combat/Participants/Participant.ts` as
+ * `hasRolledThisTurn`, the single canonical copy of this predicate
+ * (round-6 defect 5, `briefs/seize-initiative-spec.md`; see that function's
+ * own doc comment for why this used to be an independent, identically-bodied
+ * copy and why it no longer is).
  */
-export function hasRolledInitiativeThisTurn(p: IParticipant): boolean {
-  return p.diceIni > 0;
-}
+export const hasRolledInitiativeThisTurn = hasRolledThisTurn;
 
 /** Outcome of a merge attempt (Decision 10). Refusals are never silent. */
 export interface GruntMergeResult {
@@ -604,8 +606,8 @@ export interface GruntMergeResult {
  *
  * The row is handed back **unrolled** (`diceIni` 0) with the first grunt's
  * Initiative attribute and dice count, so the GM makes the one group Initiative
- * Test for it (criterion 1, p. 379). Grunts are grouped precisely because they
- * share one set of attributes (p. 378), so taking the stat block off the first
+ * Test for it (criterion 1, Core p. 379). Grunts are grouped precisely because they
+ * share one set of attributes (Core p. 378), so taking the stat block off the first
  * selected grunt is the group's stat block; the GM can edit it on the row.
  *
  * Pure: it builds and returns the row and never touches the encounter's

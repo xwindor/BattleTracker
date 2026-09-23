@@ -14,6 +14,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BattleTrackerComponent } from 'app/battle-tracker/battle-tracker.component';
 import { appConfig } from 'app/app.config';
 import { CombatManager } from 'Combat';
+import { StatusEnum } from 'Combat/Participants/StatusEnum';
 import { Participant, INITIATIVE_PASS_DECAY } from 'Combat/Participants/Participant';
 import { NpcRowParticipant, GruntMember } from 'Grunts';
 import { SessionCommand, SessionSyncService, SharedLogEntry } from 'app/services/session-sync.service';
@@ -494,11 +495,10 @@ describe('Action Log entries for combat structural boundaries', () => {
     it('re-based on RULINGS.md 2026-08-30: the "formed from" line no longer races the boundary line at all, because it is not written at merge time - the structural boundary from removing the acting grunt still fires correctly, and "formed from" only appears later, once the new row is rolled', () => {
       // Neither grunt has rolled Initiative this turn (`diceIni` stays 0) -
       // `mergeGruntsIntoRow` refuses any grunt that has, so a positive Score
-      // from `baseIni` alone (no dice) is what makes G1 eligible to be the
-      // current actor while still being merge-eligible.
+      // from `baseIni` alone (no dice) is what makes G1 merge-eligible.
       const g1 = component.addGrunt('G1');
       const g2 = component.addGrunt('G2');
-      g1.baseIni = 10; // Score 10 - the current actor
+      g1.baseIni = 10; // Score 10
       g2.baseIni = 0;  // Score 0 - never eligible to take the vacated slot
       sent.length = 0;
       CombatManager.started = true;
@@ -506,7 +506,7 @@ describe('Action Log entries for combat structural boundaries', () => {
       CombatManager.combatTurn = 1;
       // Pass 2, not 1: `mergeSelectedGrunts` inserts the new row via
       // `addParticipant(row, /* carriesRunningScore */ false)` (it is a new
-      // participant, not a joiner - criterion 15, p. 160), and the row's
+      // participant, not a joiner - criterion 15, Core p. 160), and the row's
       // Score starts as G1's `baseIni` (`mergeGruntsIntoRow` sets
       // `row.baseIni = grunts[0].baseIni`). In pass 1 that would hand the
       // vacated slot straight back to the row and no boundary would fire; the
@@ -514,7 +514,19 @@ describe('Action Log entries for combat structural boundaries', () => {
       // here, so removing G1 (the current actor) empties `currentActors` for
       // real and the cascade reaches `endInitiativePass()`.
       CombatManager.initiativePass = 2;
-      CombatManager.goToNextActors();
+      // Item 2 (round 3 table ruling, `briefs/mid-turn-joiner-spec.md`): an
+      // unrolled participant (`diceIni <= 0`, true of both grunts here by
+      // design - see above) is never *selected* as current actor by
+      // `CombatManager.getNextActors()` any more, so `goToNextActors()`
+      // cannot be used to place G1 there while it stays merge-eligible - the
+      // two are now mutually exclusive preconditions. G1 is placed directly
+      // instead: this test is about the log-ordering cascade
+      // `removeParticipant()`/`act()` runs once the current actor is
+      // removed, which does not care how a participant became the current
+      // actor, only that it is one when the merge removes it.
+      CombatManager.currentActors.clear();
+      CombatManager.currentActors.insert(g1);
+      g1.status = StatusEnum.Active;
       expect(CombatManager.currentActors.items).toEqual([g1]);
 
       component.toggleMergeSelection(g1);

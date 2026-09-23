@@ -1,10 +1,44 @@
 import { ParticipantList } from "./Participants/ParticipantList";
 import { StatusEnum } from "./Participants/StatusEnum";
 import { IParticipant } from "./Participants/IParticipant";
-import { INITIATIVE_PASS_DECAY } from "./Participants/Participant";
+import { INITIATIVE_PASS_DECAY, hasRolledThisTurn } from "./Participants/Participant";
 // Imported by module path, not through the "Grunts" barrel's consumers, so no
 // import cycle is introduced (Grunts only depends on Combat/Participants).
 import { isNpcRow, NpcRowParticipant } from "Grunts/NpcRowParticipant";
+
+// `hasRolledThisTurn` is defined in `./Participants/Participant.ts` (round-6
+// defect 5, `briefs/seize-initiative-spec.md`) - not here - because
+// `Grunts/NpcRowParticipant.ts` needs the same predicate and can only depend
+// on `Combat/Participants`, never on this file (see that file's own "imported
+// by module path" comment above and `hasRolledThisTurn`'s own doc comment).
+// Re-exported here so every existing call site in this file, and every
+// consumer that already imports it from `"Combat"` (the barrel) or directly
+// from `"Combat/CombatManager"`, keeps working unchanged.
+export { hasRolledThisTurn };
+
+/**
+ * Can `p` be handed an Action Phase this Initiative Pass? `Waiting`,
+ * non-`ooc`, current initiative above 0 (Core p. 159), and has made this
+ * Combat Turn's Initiative Test (`hasRolledThisTurn()`).
+ *
+ * The single choke point for this fact (`briefs/mid-turn-joiner-spec.md`,
+ * "RESOLVED - validation round 4", item 1). `getNextActors()` below and
+ * `BattleTrackerComponent.pendingPassEndRollNotice()` each used to re-derive
+ * their own copy of "is anyone else still able to act this pass", and they
+ * drifted apart when round 3 item 2 added the `diceIni > 0` skip to only one
+ * of the two copies - the third fix round in a row for the same defect
+ * class. Exported so both call sites read the identical function; neither
+ * may re-derive its own version of this test again.
+ * `BattleTrackerComponent.nobodyCanActRollNotice()` (round 5 item 2) also
+ * reads this function, expressed as its negation, rather than re-deriving a
+ * third hand-written copy of the same fact.
+ */
+export function canParticipantActThisPass(p: IParticipant): boolean {
+  return !p.ooc
+    && p.status === StatusEnum.Waiting
+    && p.getCurrentInitiative() > 0
+    && hasRolledThisTurn(p);
+}
 
 class CombatManager {
   participants: ParticipantList;
@@ -112,10 +146,10 @@ class CombatManager {
   /**
    * Advance to the next Initiative Pass: subtract exactly 10 from every
    * participant's running Initiative Score, once (brief criterion 2,
-   * pp. 159-160). Applied to everyone, including participants already at or
+   * Core pp. 159-160). Applied to everyone, including participants already at or
    * below zero and participants currently out of combat - the latter so that
    * re-entering mid-turn lands on the correct "roll, then subtract 10 per
-   * elapsed pass" value (brief F6, p. 160).
+   * elapsed pass" value (brief F6, Core p. 160).
    */
   nextIniPass() {
     this.passEnded = false;
@@ -127,7 +161,7 @@ class CombatManager {
       }
       // A row's members each carry their own "has acted this pass" marker
       // (brief "NPC Group Initiative" Decision 18); everyone still above 0 acts
-      // again in the new pass (p. 159), so the markers clear with the row's own
+      // again in the new pass (Core p. 159), so the markers clear with the row's own
       // status.
       if (isNpcRow(p)) {
         p.resetMemberActed();
@@ -172,9 +206,18 @@ class CombatManager {
     }
   }
 
+  /**
+   * Round 5 item 10: a participant who has not rolled this Combat Turn's
+   * Initiative Test (`hasRolledThisTurn()`) is skipped here too - their bare,
+   * unrolled attribute must not be what keeps the Combat Turn open, matching
+   * `canParticipantActThisPass()`'s ruling that they cannot be handed an
+   * Action Phase on it either. See `hasRolledThisTurn()`'s own doc comment
+   * for why this is a table ruling, not a printed rule, and for the 2026-09-21
+   * removal of the exemption that used to apply to an unrolled seizer.
+   */
   isOver() {
     for (const p of this.participants.items) {
-      if (p.getCurrentInitiative() > 0 && !p.ooc) {
+      if (p.getCurrentInitiative() > 0 && !p.ooc && hasRolledThisTurn(p)) {
         return false;
       }
     }
@@ -185,30 +228,91 @@ class CombatManager {
    * Would anyone still be above 0 after the next pass advance? This only
    * *previews* the decay - `nextIniPass()` is the single place that actually
    * applies it, so the -10 is never subtracted twice (brief criterion 4,
-   * p. 159).
+   * Core p. 159). Round 5 item 10: same `hasRolledThisTurn()` skip as `isOver()`,
+   * for the same reason.
    */
   hasMoreIniPasses() {
     for (const p of this.participants.items) {
-      if (p.getCurrentInitiative() - INITIATIVE_PASS_DECAY > 0 && !p.ooc) {
+      if (p.getCurrentInitiative() - INITIATIVE_PASS_DECAY > 0 && !p.ooc && hasRolledThisTurn(p)) {
         return true;
       }
     }
     return false;
   }
 
+  /**
+   * **Table ruling, not a printed rule** (`briefs/mid-turn-joiner-spec.md`,
+   * "RESOLVED - validation round 3", item 2, and round 5's rules-hygiene
+   * note; Xavier approved 2026-09-19 - pending a `RULINGS.md` entry at
+   * Stage 5, not added by this fix round): a participant who has not yet
+   * made this Combat Turn's Initiative Test (`diceIni <= 0`) is never handed
+   * an Action Phase. The core rulebook does not state this - it is silent on
+   * a combatant with no rolled Score at all. Core p. 160 has a late entrant
+   * "roll for their Initiative Score as normal" before they can act, which
+   * Xavier reads as implying there is no rolled Score to act on until they
+   * do; that inference is the table ruling, not a printed instruction.
+   * `getNextActors()` is only ever called once a Combat Turn is running
+   * (`startRound()`, `advanceToNextActors()`, `flagSpentNpcRows()`), so no
+   * separate `started` check is needed here.
+   *
+   * **No seize exemption from the skip above (`briefs/seize-initiative-spec.md`,
+   * "RESOLVED - Xavier's rulings, 2026-09-21", R1 and R3).** Round 4 item 6
+   * used to exempt a seized-but-unrolled participant (`p.edge`) from this
+   * skip, reading Core p. 160's "regardless of your Initiative Score" as
+   * covering an *absent* Score, not just a low one. Xavier's ruling R1
+   * ("you cannot seize initiative until you have rolled") closes that case
+   * instead: `seizeInitiative()` below refuses to set `p.edge` on a fresh
+   * declaration until `p.diceIni > 0`, so an unrolled seizer is no longer
+   * reachable that way, and the exemption here is removed rather than tuned.
+   * R3 confirms a seizer's own Score decays and gates exactly like anyone
+   * else's - seizing changes rank only.
+   *
+   * **Reported, not solved (brief's own instruction):** if every remaining
+   * `Waiting`, non-`ooc` participant still owes a roll, this filter empties
+   * `currentActors` every time, which cascades into `endInitiativePass()`
+   * with nobody having acted. Round 5 item 10 changed what happens next:
+   * `isOver()`/`hasMoreIniPasses()` now also skip a still-unrolled participant
+   * (`hasRolledThisTurn()`), so their bare (pre-roll) attribute no longer
+   * keeps the Combat Turn open by itself - if nobody else is above 0 and
+   * rolled, the Combat Turn ends rather than looping forever. The
+   * within-a-pass deadlock itself is still only reported, not solved: if a
+   * *rolled* participant remains above 0 elsewhere in the same pass, the
+   * Combat Turn stays open and the GM can still click Next Pass repeatedly
+   * while an unrolled participant nearby never gets an Action Phase, until
+   * their roll lands or the turn ends. No escape hatch is added for that
+   * narrower case; it is surfaced to the GM, not solved, by
+   * `BattleTrackerComponent.nobodyCanActRollNotice()` (round 4 item 7).
+   */
+  /**
+   * Recompute `currentActors` - the participant(s) actually acting this
+   * Initiative Score - and `currentInitiative`, the number the GM header
+   * displays alongside them.
+   *
+   * **`currentInitiative` must be the Score of whoever is actually acting,
+   * never merely the highest Score among everyone still eligible this pass**
+   * (round-6 defect 2, `briefs/seize-initiative-spec.md`). Before this fix the
+   * loop set `this.currentInitiative` to the largest `effIni` it saw among
+   * every `canParticipantActThisPass()` participant, independently of which
+   * one `currentActors` ended up holding - a seizer (Core p. 160, "regardless
+   * of your Initiative Score") unconditionally wins the `currentActors` group
+   * over a higher-Score non-seizer (the `p.edge && !edge` branch below), so a
+   * seizer at Score 4 leading past a Score-22 non-seizer displayed "Initiative
+   * 22" next to a Score-4 actor - the one case R2 makes routine (seize
+   * declared mid-pass, at any Score) instead of a corner case. `max` already
+   * tracks the *winning* group's `effIni` as the loop below decides who is in
+   * `currentActors` (an edge participant's `effIni` replaces `max` outright,
+   * a tie only joins the group when `effIni === max`), so assigning
+   * `this.currentInitiative = max` once, after the loop, is the group's real
+   * Score with no separate/independent tracking to drift from it.
+   */
   getNextActors() {
     this.currentActors.clear();
     let max = 0;
     let edge = false;
-    this.currentInitiative = 0;
 
     for (const p of this.participants.items) {
       const effIni = p.getCurrentInitiative();
-      if (!p.ooc && p.status === StatusEnum.Waiting && effIni > 0) {
-        if (effIni > this.currentInitiative) {
-          this.currentInitiative = effIni;
-        }
-
+      if (canParticipantActThisPass(p)) {
         if ((effIni > max && (p.edge || !edge)) || (p.edge && !edge)) {
           this.currentActors.clear();
           this.currentActors.insert(p);
@@ -219,9 +323,28 @@ class CombatManager {
         }
       }
     }
+    this.currentInitiative = max;
   }
 
+  /**
+   * Spend one point of Edge to seize the Initiative (Core p. 160, "Initiative
+   * and Edge"; general Edge cost, Core p. 56). This is an Edge Effect, not an
+   * Interrupt Action (Core p. 167) - it never touches Initiative Score and
+   * never routes through `canUseAction()`. Xavier's table ruling R1
+   * (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's rulings,
+   * 2026-09-21"): "you cannot seize initiative until you have rolled" - a
+   * participant with no rolled Initiative Score this Combat Turn
+   * (`hasRolledThisTurn()`) cannot seize at all, so this is a no-op for one.
+   * `BattleTrackerComponent`'s Seize Initiative button is the GM-facing half
+   * of this same ruling (hidden, not merely disabled, until the participant
+   * has rolled) - this is the engine-side backstop so the rule holds even if
+   * some future caller reaches `seizeInitiative()` without going through that
+   * button.
+   */
   seizeInitiative(p: IParticipant) {
+    if (!hasRolledThisTurn(p)) {
+      return;
+    }
     p.seizeInitiative();
   }
 
@@ -234,13 +357,13 @@ class CombatManager {
    * participant (the GM component's in-place type swaps, and the shared-state
    * restore path, which reconstructs the Score from the broadcast value).
    * Those must not be decayed a second time: the pass decay is subtracted
-   * once per elapsed pass, not twice (brief F6, p. 160).
+   * once per elapsed pass, not twice (brief F6, Core p. 160).
    */
   addParticipant(participant: IParticipant, carriesRunningScore = false) {
     participant.sortOrder = this.nextSortOrder++;
     // Late entry into an in-progress Combat Turn: roll for Initiative Score
     // as normal, then subtract 10 for each Initiative Pass that has already
-    // occurred (brief F6, p. 160). Under the old recompute-from-base
+    // occurred (brief F6, Core p. 160). Under the old recompute-from-base
     // accessor this fell out of the global pass counter for free; with a
     // per-participant running Score it has to be seeded explicitly.
     if (this.started && this.initiativePass > 1 && !carriesRunningScore) {

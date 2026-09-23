@@ -3,6 +3,17 @@
   <!-- Controls -->
   <div class="dice-roller-controls">
     <label class="dice-roller-label" for="dice-roller-count">Dice (d6)</label>
+    @if (fixedDiceCount !== null) {
+    <!-- Fix round (reviewer defect 2): a locked count is shown as plain text,
+         not an input - a `readOnly` number input still lets the spinner
+         arrows and mouse-wheel change its value, which `roll()` no longer
+         trusts anyway, but this also stops it from ever visually lying about
+         what will be rolled. -->
+    <span
+      id="dice-roller-count"
+      class="dice-count-fixed"
+      data-testid="dice-roller-count-fixed">{{ fixedDiceCount }}</span>
+    } @else {
     <input
       id="dice-roller-count"
       type="number"
@@ -11,11 +22,13 @@
       [min]="1"
       [max]="50"
       [disabled]="localRolling">
+    }
     <button
       type="button"
       class="btn btn-sm btn-primary"
+      data-testid="dice-roller-roll-button"
       (click)="roll()"
-      [disabled]="localRolling">
+      [disabled]="localRolling || rollDisabled">
       Roll
     </button>
   </div>
@@ -133,6 +146,12 @@
   </div>
 
   <!-- ── Other Players ── -->
+  <!-- QA fix round (briefs/player-initiative-prompt-spec.md, "the roll modal
+       must show only the player's own roll"): this whole section is skipped
+       when `showOtherPlayers` is off, e.g. inside the initiative-roll
+       modals - it is not deleted and still renders exactly as before
+       everywhere else (the page-level roller, the GM's roller). -->
+  @if (showOtherPlayers) {
   <div class="dice-section dice-section-remote">
     <button type="button" class="dice-section-toggle" (click)="otherPlayersVisible = !otherPlayersVisible">
       <span class="twirly">{{ otherPlayersVisible ? "v" : ">" }}</span>
@@ -186,5 +205,6 @@
       }
     }
   </div>
+  }
 
 </div>

@@ -168,32 +168,6 @@
       </div>
     </div>
     <div class="card-body">
-      @if (promptRoll) {
-      <div class="roll-banner mb-3" [class.nudge-pulse]="rollPromptNudge">
-        <div class="fw-semibold mb-1">GM requested initiative rolls.</div>
-        <div class="d-flex gap-2 align-items-center flex-wrap">
-          <input type="number" class="form-control roll-input" [(ngModel)]="manualRoll"
-            (ngModelChange)="onManualRollChanged($event)"
-            [min]="0"
-            [max]="getPrimaryCharacterManualRollMax()"
-            placeholder="Manual roll total">
-          <button class="btn btn-outline-primary" type="button" (click)="submitManualRoll()">Submit Manual Roll</button>
-          <button class="btn btn-primary" type="button" (click)="submitAutoRoll()">Auto Roll</button>
-        </div>
-      </div>
-      }
-      @if (pendingDeltaDice > 0) {
-      <div class="roll-banner mb-3">
-        <div class="fw-semibold mb-1">Roll {{ pendingDeltaDice }}d6 and add to initiative.</div>
-        <div class="d-flex gap-2 align-items-center flex-wrap">
-          <input type="number" class="form-control roll-input" [(ngModel)]="manualDeltaRoll"
-            [min]="pendingDeltaDice" [max]="pendingDeltaDice * 6"
-            placeholder="Manual roll total">
-          <button class="btn btn-outline-primary" type="button" (click)="submitDeltaRoll()">Submit</button>
-          <button class="btn btn-primary" type="button" (click)="submitAutoDeltaRoll()">Auto Roll</button>
-        </div>
-      </div>
-      }
       @if (!state.started) {
       <div class="text-muted small">
         Combat turn not active. Waiting for GM to start the next combat turn.
@@ -489,6 +463,109 @@
   </div>
   }
 </div>
+
+<!--
+  Initiative-roll prompt (briefs/player-initiative-prompt-spec.md). Not
+  dismissible - Xavier's resolved Open Decision 2 (2026-09-15): no close
+  button, no backdrop click, no Escape. It closes only from the component,
+  via `closeRollModal()`, on submit or one of the spec's named end/close
+  events. `[fixedDiceCount]` locks the embedded roller to this actor's own
+  Initiative Dice rather than its free 1-50 default.
+-->
+<ng-template #rollModalContent>
+  <div class="modal-header" data-testid="roll-modal">
+    <h5 class="modal-title">Roll Initiative</h5>
+  </div>
+  <div class="modal-body">
+    <div class="roll-banner mb-3" [class.nudge-pulse]="rollPromptNudge">
+      GM requested initiative rolls for {{ primaryCharacter?.name }}.
+    </div>
+    <app-dice-roller
+      data-testid="roll-modal-dice-roller"
+      [fixedDiceCount]="primaryCharacter?.initiativeDice ?? 1"
+      [showOtherPlayers]="false"
+      [rollDisabled]="rollAwaitingDone"
+      (rolledEvent)="onInitiativeRollFromModal($event)">
+    </app-dice-roller>
+    <!-- QA fix round 2 (briefs/player-initiative-prompt-spec.md): the roll is
+         already submitted by the time this shows - Done only closes the
+         window. Manual entry is hidden entirely while this is up, so there
+         is no route to a second submission. -->
+    @if (rollAwaitingDone) {
+    <div class="roll-result-summary mt-3" data-testid="roll-modal-result">
+      You rolled <strong>{{ rollResultTotal }}</strong>.
+    </div>
+    <div class="mt-2 roll-modal-done">
+      <button type="button" class="btn btn-primary" data-testid="roll-modal-done"
+        (click)="confirmRollDone()">Done</button>
+    </div>
+    } @else {
+    <div class="d-flex gap-2 align-items-center flex-wrap mt-3 roll-modal-manual">
+      <label class="small text-muted mb-0" for="pv-roll-manual">Or type a manually-rolled total:</label>
+      <input id="pv-roll-manual" type="number" class="form-control roll-input" [(ngModel)]="manualRoll"
+        data-testid="roll-modal-manual-input"
+        (ngModelChange)="onManualRollChanged($event)"
+        [min]="0"
+        [max]="getPrimaryCharacterManualRollMax()"
+        placeholder="Manual roll total">
+      <button class="btn btn-outline-primary" type="button" data-testid="roll-modal-manual-submit"
+        (click)="submitManualRoll()">Submit Manual Roll</button>
+    </div>
+    }
+  </div>
+</ng-template>
+
+<!-- Follow-up "extra/lost dice" prompt (spec AC 8; fix round 4 consistency
+     follow-up) - same modal pattern, own dice count and limits
+     (`deltaDiceCount` to `deltaDiceCount * 6`), never the main roll's.
+     `pendingDeltaDice` is signed: positive is dice gained (added), negative
+     is dice lost (subtracted) - the wording and the log's sign follow it. -->
+<ng-template #deltaRollModalContent>
+  <div class="modal-header" data-testid="delta-roll-modal">
+    <h5 class="modal-title">{{ isDeltaLoss ? 'Roll Lost Initiative Dice' : 'Roll Extra Initiative Dice' }}</h5>
+  </div>
+  <div class="modal-body">
+    <div class="fw-semibold mb-3" data-testid="delta-roll-modal-instructions">
+      @if (isDeltaLoss) {
+        Roll {{ deltaDiceCount }}d6 - this will be subtracted from your initiative.
+      } @else {
+        Roll {{ deltaDiceCount }}d6 and add to initiative.
+      }
+    </div>
+    <app-dice-roller
+      data-testid="delta-roll-modal-dice-roller"
+      [fixedDiceCount]="deltaDiceCount"
+      [showOtherPlayers]="false"
+      [rollDisabled]="deltaRollAwaitingDone"
+      (rolledEvent)="onDeltaRollFromModal($event)">
+    </app-dice-roller>
+    <!-- QA fix round 2: same pattern as the main roll modal above - the roll
+         is already submitted; Done only closes the window. -->
+    @if (deltaRollAwaitingDone) {
+    <div class="roll-result-summary mt-3" data-testid="delta-roll-modal-result">
+      @if (isDeltaLoss) {
+      You rolled <strong>{{ deltaRollResultTotal }}</strong> - subtracted from your initiative.
+      } @else {
+      You rolled <strong>{{ deltaRollResultTotal }}</strong> - added to your initiative.
+      }
+    </div>
+    <div class="mt-2 roll-modal-done">
+      <button type="button" class="btn btn-primary" data-testid="delta-roll-modal-done"
+        (click)="confirmDeltaRollDone()">Done</button>
+    </div>
+    } @else {
+    <div class="d-flex gap-2 align-items-center flex-wrap mt-3 roll-modal-manual">
+      <label class="small text-muted mb-0" for="pv-delta-roll-manual">Or type a manually-rolled total:</label>
+      <input id="pv-delta-roll-manual" type="number" class="form-control roll-input" [(ngModel)]="manualDeltaRoll"
+        data-testid="delta-roll-modal-manual-input"
+        [min]="deltaDiceCount" [max]="deltaDiceCount * 6"
+        placeholder="Manual roll total">
+      <button class="btn btn-outline-primary" type="button" data-testid="delta-roll-modal-manual-submit"
+        (click)="submitDeltaRoll()">Submit</button>
+    </div>
+    }
+  </div>
+</ng-template>
 
 <ng-template #actModalContent>
   <div class="modal-header">

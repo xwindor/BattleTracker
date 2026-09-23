@@ -21,7 +21,7 @@ export interface RemoteRoll {
   roller: string;
   values: number[];
   rolling: boolean;
-  /** The GM rolled these dice for a non-player combatant (brief p. 44). */
+  /** The GM rolled these dice for a non-player combatant (brief Core p. 44). */
   npc: boolean;
 }
 
@@ -30,7 +30,7 @@ export interface RemoteRoll {
  *
  * `rollAs` is the name the roll should be attributed to instead of the person
  * who pressed the button - the gamemaster "governs the actions of the
- * non-player characters, and determines the results of tests" (brief p. 44),
+ * non-player characters, and determines the results of tests" (brief Core p. 44),
  * so NPC dice are rolled by the GM but belong to the NPC. `null` means "this
  * roll is mine", which is every roll made from the player view.
  */
@@ -49,11 +49,29 @@ export interface DiceRollRequest {
 })
 export class DiceRollerComponent implements OnChanges {
   /**
+   * How long the tumbling-dice animation runs, in milliseconds, from the
+   * moment a roll starts. Exposed as a public constant so any consumer that
+   * cares how long the dice take to visibly land can read the real number
+   * instead of keeping a second copy that can drift out of step with it.
+   *
+   * QA fix round 2 (briefs/player-initiative-prompt-spec.md, "Pressing Roll
+   * closes the modal before the dice are seen"): the player-view
+   * initiative-roll modals used to defer their own close by exactly this
+   * long, which meant the modal closed the instant the animation finished -
+   * before the player had actually looked at the result. They no longer key
+   * anything off this constant: the modal now stays open (with the result
+   * and a Done button) until the player explicitly presses Done. This
+   * constant now only governs the tumbling animation itself, not when
+   * anything closes. Not a rules constant - a UI animation timing, not a
+   * page-cited game rule.
+   */
+  static readonly ROLL_ANIMATION_MS = 1550;
+  /**
    * A roll made by somebody else, to show in the "Other Players" tray.
    *
    * `npc` mirrors the same flag the log entry carries, so the tray and the log
    * agree about what a viewer is looking at: a GM roll made on behalf of a
-   * non-player combatant (brief p. 44), not that character's player rolling.
+   * non-player combatant (brief Core p. 44), not that character's player rolling.
    */
   @Input() incomingRoll: { roller: string; values: number[]; npc?: boolean } | null = null;
   @Input() ownRoll: { values: number[] } | null = null;
@@ -61,12 +79,61 @@ export class DiceRollerComponent implements OnChanges {
   /**
    * Whether the "Roll as" attribution field is offered at all. Off by default:
    * this component is shared with the player view, and only the gamemaster
-   * rolls on behalf of somebody else (brief p. 44). Set from the GM template.
+   * rolls on behalf of somebody else (brief Core p. 44). Set from the GM template.
    */
   @Input() allowRollAs = false;
 
   /** Names offered in the "Roll as" picker - the tracker's current combatants. */
   @Input() rollAsNames: string[] = [];
+
+  /**
+   * Locks `diceCount` to a caller-supplied number and makes the free 1-50
+   * count field read-only, instead of altering that field's existing
+   * behaviour. Added for the player-view initiative roll modal
+   * (briefs/player-initiative-prompt-spec.md, "Proposed approach"): an
+   * initiative roll has a fixed number of dice (the actor's Initiative
+   * Dice, or the pending delta dice count), not the free-entry default this
+   * component otherwise offers for general-purpose rolls. `null` (the
+   * default) leaves the field exactly as it always worked.
+   *
+   * Fix round (reviewer defect 2): a plain `readOnly` binding on a
+   * `type="number"` input does not block the up/down spinner arrows or a
+   * mouse-wheel scroll over the field - both can still change the DOM
+   * element's value even though typing and pasting are blocked. The
+   * template no longer renders an editable `<input>` at all while this is
+   * set; it shows the locked count as plain text instead (see
+   * `dice-roller.component.html`). `roll()` below also no longer trusts
+   * `diceCount` while this is set - it always rolls `fixedDiceCount`
+   * dice, so even a stray DOM mutation of the (now removed) input could
+   * never change what gets rolled.
+   */
+  @Input() fixedDiceCount: number | null = null;
+
+  /**
+   * Forces the Roll button off, independent of `localRolling`. Added for the
+   * player-view initiative-roll modals (QA fix round 2,
+   * briefs/player-initiative-prompt-spec.md): once a roll has settled and the
+   * modal is showing the result while it waits for the player to press Done,
+   * the Roll button must not be pressable again - the `roll_submission` for
+   * that result already went out, and rolling a second time would submit
+   * again for the same Initiative Test. Defaults to `false`, so every other
+   * use of this component (the page-level roller, the GM's own roller) is
+   * unaffected.
+   */
+  @Input() rollDisabled = false;
+
+  /**
+   * Whether the "Other Players" tray (a collapsible list of other people's
+   * recent rolls) is rendered at all. Defaults to `true` - today's existing
+   * behaviour, unchanged for the page-level roller and the GM's own roller.
+   * Set to `false` inside the player-view initiative-roll modals (main and
+   * delta): those modals are scoped to one player's own Initiative Test, so
+   * a stray incoming roll from someone else has no business appearing
+   * inside a dialog about this player's own roll (QA fix round,
+   * briefs/player-initiative-prompt-spec.md, "the roll modal must show only
+   * the player's own roll").
+   */
+  @Input() showOtherPlayers = true;
 
   @Output() rolledEvent = new EventEmitter<DiceRollRequest>();
 
@@ -207,7 +274,7 @@ export class DiceRollerComponent implements OnChanges {
     return this.localOutcome.hits;
   }
 
-  /** Hits, 1s and glitch status of the local roll (brief pp. 44-45). */
+  /** Hits, 1s and glitch status of the local roll (brief Core pp. 44-45). */
   get localOutcome(): RollOutcome {
     return classifyRoll(this.localValues);
   }
@@ -216,7 +283,7 @@ export class DiceRollerComponent implements OnChanges {
     return classifyRoll(values);
   }
 
-  /** "GLITCH" / "CRITICAL GLITCH" / "" - the printed terms (brief p. 45). */
+  /** "GLITCH" / "CRITICAL GLITCH" / "" - the printed terms (brief Core p. 45). */
   getGlitchLabel(level: GlitchLevel): string {
     return getGlitchLabel(level);
   }
@@ -261,11 +328,19 @@ export class DiceRollerComponent implements OnChanges {
     if (changes["ownRoll"] && this.ownRoll) {
       this.triggerLocalAnimation(this.ownRoll.values);
     }
+    if (changes["fixedDiceCount"] && this.fixedDiceCount !== null) {
+      this.diceCount = this.fixedDiceCount;
+    }
   }
 
   roll(): void {
-    if (this.localRolling) return;
-    const count = Math.max(1, Math.min(50, this.diceCount));
+    if (this.localRolling || this.rollDisabled) return;
+    // Fix round (reviewer defect 2): always roll exactly `fixedDiceCount`
+    // dice when it is set, never `diceCount` - `diceCount` is only ever
+    // meant to track it (`ngOnChanges` above), but this removes any chance
+    // of the two drifting apart from mattering.
+    const requested = this.fixedDiceCount ?? this.diceCount;
+    const count = Math.max(1, Math.min(50, requested));
     const values = Array.from({ length: count }, () => Math.floor(Math.random() * 6) + 1);
     // Captured now: the field can be retyped while the dice are still tumbling,
     // and the tray must keep naming whoever this roll was actually made for.
@@ -301,7 +376,7 @@ export class DiceRollerComponent implements OnChanges {
     return isHitFace(value);
   }
 
-  /** A 1 - the face that counts toward a glitch (brief p. 45). */
+  /** A 1 - the face that counts toward a glitch (brief Core p. 45). */
   isOne(value: number): boolean {
     return value === 1;
   }
@@ -336,7 +411,7 @@ export class DiceRollerComponent implements OnChanges {
           this.localRollTimeout = null;
           this.cdr.markForCheck();
         });
-      }, 1550)
+      }, DiceRollerComponent.ROLL_ANIMATION_MS)
     );
   }
 
@@ -354,7 +429,7 @@ export class DiceRollerComponent implements OnChanges {
           );
           this.cdr.markForCheck();
         });
-      }, 1550);
+      }, DiceRollerComponent.ROLL_ANIMATION_MS);
 
       // Auto-remove after 10 s
       setTimeout(() => {

@@ -6,9 +6,42 @@ Completed items are deleted from this file rather than kept as historical
 record — the change that shipped them is the record (`briefs/`,
 `ARCHITECTURE.md`, git history). Last swept 2026-08-23.
 
+## Removing a decker's deck after an unrolled VR gain silently wrecks their Initiative Score (pre-existing; found 2026-09-17, player-initiative-prompt review)
+
+**Serious, and already in the committed app** — it predates the initiative
+pop-up work. Reproduction (traced by the reviewer with a temporary test
+against the live code): a decker has already rolled this Combat Turn (say
+Score 14), jacks into Hot Sim mid-fight, and before they roll the gained
+dice the GM removes their deck. Score drops to 2. The Action Log line reads
+exactly like a legitimate mid-turn dice loss, so nothing tips the GM off.
+
+Cause: on a player-driven jack-in, a *gain* is written into the dice pool
+immediately (`setDicesWithoutRoll`) while the Score half waits for the
+player's roll. `demoteToParticipant` then re-rolls "lost" dice from that
+inflated pool through `changeParticipantDiceCount`, subtracting dice that
+were never credited. `demoteFromAstralParticipant` has the same shape.
+
+Needs its own run through **`/feature`**, not `/change`: fixing it means
+deciding how Initiative is recalculated when a deferred gain is abandoned,
+which is Core p. 160 territory. Do not patch it inside an unrelated change.
+
+## Opposite VR mode switches by the GM wobble a decker's Score instead of cancelling (found 2026-09-17, player-initiative-prompt review)
+
+Minor, GM-only. If the GM switches a decker's VR mode from the GM screen
+while that player still owes an unrolled delta roll (e.g. Hot Sim -> Cold
+Sim, then straight back to Hot Sim), the first change is settled GM-side
+(rolled and applied) before the second is computed, so the Score dips by a
+random amount and the player is then prompted to roll to recover it.
+Numbers stay internally consistent and logged — nothing is corrupted.
+Players cannot trigger it themselves: their mode controls are behind the
+non-dismissible delta modal until they roll. A true fix would compute what
+is owed from "mode now vs. mode at last roll" instead of settling eagerly
+(rejected for now as a larger change to paused Matrix bookkeeping; see
+`briefs/player-initiative-prompt-spec.md`, fix round 5).
+
 ## Retyping a damaged device to File leaves stale `matrixDamage` (found during pan-membership defect-fix round)
 
-Files cannot take Matrix damage (p. 227/228) and `calcMatrixHealth('file',
+Files cannot take Matrix damage (Core p. 227/228) and `calcMatrixHealth('file',
 ...)` already correctly returns no Condition Monitor for one — but
 retyping an existing, damaged public-space device to `file` via the Edit
 form does not clear its `matrixDamage` field; only `matrixHealth` gets
@@ -214,8 +247,8 @@ plan for untrusted-XML parsing (no XML parser currently in `package.json`;
 
 Marked explicitly out of scope for the combat-log-readability feature
 (`briefs/combat-log-readability.md`, ACs 22–23): neither the Surprise Test
-mechanic (p. 192–193 — glitch/critical glitch effects, the -10 Initiative
-Score modifier) nor spell Drain (p. 282 — Physical vs. Stun based on casting
+mechanic (Core p. 192–193 — glitch/critical glitch effects, the -10 Initiative
+Score modifier) nor spell Drain (Core p. 282 — Physical vs. Stun based on casting
 hits vs. Magic rating) exists anywhere in the app. Building log formatting
 for either means building the underlying mechanic first, via its own rules
 brief through the `/feature` pipeline — not a log-formatting change.

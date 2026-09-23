@@ -30,7 +30,7 @@ The test for any proposed behaviour:
 - Propagating a mark the GM placed on a slaved device to its host, and up a
   chain of open-grid devices parented to one another, automatically. This is
   the app writing a mark nobody directly clicked on that specific icon — a
-  fixed, one-for-one consequence of a rule the GM already knows (p. 233), not
+  fixed, one-for-one consequence of a rule the GM already knows (Core p. 233), not
   a value derived from a roll or comparison (`RULINGS.md` 2026-09-02, "Marks
   propagate up the containment hierarchy — this is not a Decision 1
   violation"). Scoped to devices only: only a `type: "device"` icon
@@ -67,7 +67,7 @@ The test for any proposed behaviour:
   refuse.
   - **Limits currently watched, with the call on record:**
     - The PAN slave cap — a device holding more than (Device Rating × 3)
-      slaved devices is flagged, never blocked (Xavier, 2026-09-11; p. 233;
+      slaved devices is flagged, never blocked (Xavier, 2026-09-11; Core p. 233;
       `RULINGS.md` same date). Files and personas nested under the same device
       do not count toward it. The boundary did not move: this is the stated
       default above, applied explicitly rather than a new kind of enforcement.
@@ -119,6 +119,38 @@ than a few days of work, it needs splitting before it enters the pipeline.
      Example:
      - Should the app roll a decker's Matrix initiative automatically when they
        jack in, or wait for the GM to trigger the roll? DECIDED: wait. -->
+
+- Can the app block a player's screen until they do something? **DECIDED
+  2026-09-16 (Xavier), for the initiative roll prompt:** yes. The prompt to
+  roll initiative is a modal the player cannot close — no close button, no
+  backdrop click, no Escape — and it blocks the rest of the player view while
+  it is up, the same way the Act planner modal does. The player gets out by
+  rolling; the GM gets them out by resolving the roll, clearing the prompt,
+  marking them out of combat, or ending combat.
+
+  Why: a prompt the player can dismiss recreates the problem it exists to fix
+  — a player who misses the ask and holds up the table. The cost is that a
+  blocking prompt must never be able to strand someone, which is why every
+  way a player can stop owing a roll has to close it
+  (`briefs/player-initiative-prompt.md`, and the review rounds recorded in
+  `briefs/player-initiative-prompt-spec.md`).
+
+  Two limits that come with it, both decided the same day: the app must not
+  raise a mandatory prompt the GM did not ask for (the prompt waits for
+  "Request Player Rolls" rather than opening off "hasn't rolled yet" alone),
+  and a mandatory prompt must reopen itself from shared state after a
+  reconnect, refresh or late join rather than depending on the player having
+  been connected at one particular moment.
+
+  This governs any future must-answer prompt, not just this one. Anything
+  else that would block the player view needs the same two guarantees.
+
+- Does a player get prompted for every character they control? **DECIDED
+  2026-09-16 (Xavier): no, not yet.** Only a player's first/primary character
+  is prompted; a second or third character they own is still rolled for by
+  the GM. Prompting per owned character is backlogged, not refused — it is a
+  materially larger change (several prompts, or one with a character picker)
+  than making the existing prompt harder to miss.
 
 - When the player view gets a Matrix display, whose marks does a player see?
   **DECIDED 2026-09-11: their own marks only.** A player sees the marks they

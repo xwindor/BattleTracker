@@ -86,3 +86,17 @@ approves it.
 Core tracker correctness. Matrix work is paused: the domain classes in
 `src/Matrix/` and the session-sync plumbing already exist, but rules
 verification and the remaining GM-workflow build-out are deferred.
+
+## Agent skills
+
+### Issue tracker
+
+To-do items live as markdown files under `.scratch/` in this repo (GitHub Issues is off). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five standard status tags (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the root, alongside the existing SCOPE / ARCHITECTURE / RULINGS docs. See `docs/agents/domain.md`.
