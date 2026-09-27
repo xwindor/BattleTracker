@@ -8,7 +8,7 @@ import { INTERRUPT_ACTION_META } from "app/shared/interrupt-actions";
 import { DiceRollerComponent, DiceRollRequest } from "app/dice-roller/dice-roller.component";
 import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
 import { buildDecodeFrame, randomMatrixChar, formatLogText, getLogTextClass, formatLogEntryReference } from "app/shared/log-formatter";
-import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax } from "app/shared/roll-utils";
+import { clampInitiativeRoll, clampRollToBounds, getInitiativeRollMax, NOT_ROLLED_DISPLAY } from "app/shared/roll-utils";
 
 @Component({
   standalone: true,
@@ -839,24 +839,68 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
     this.syncRollModal();
   }
 
-  onManualRollChanged(value: string | number | null) {
+  /**
+   * `inputEl` (QA fix, second half): Angular's `NgModel` only rewrites a
+   * native `<input>`'s own DOM value when the `[ngModel]`-bound expression
+   * differs from what it last wrote - once a clamp has landed on a value
+   * (e.g. "12"), a further keystroke that clamps back to that *same* "12"
+   * reads as "no change" to Angular, and the DOM is left showing whatever
+   * the browser's own keystroke wrote (Xavier: "I put 12000 for example when
+   * the limit should be 12" - each extra digit clamped to the same held
+   * value, so the field never visibly stopped growing). Writing the element
+   * back directly here is authoritative regardless of Angular's own
+   * dirty-checking. Optional so this method's existing direct callers
+   * (tests) keep working unchanged.
+   */
+  onManualRollChanged(value: string | number | null, inputEl?: HTMLInputElement) {
     if (value === null || value === undefined || value === "") {
       this.manualRoll = "";
+      if (inputEl) inputEl.value = "";
       return;
     }
     const numeric = Number(value);
     if (Number.isNaN(numeric)) {
       this.manualRoll = "";
+      if (inputEl) inputEl.value = "";
       return;
     }
     const max = this.getPrimaryCharacterManualRollMax();
     const clamped = clampRollToBounds(numeric, max);
     this.manualRoll = String(clamped);
+    if (inputEl) inputEl.value = this.manualRoll;
   }
 
   getPrimaryCharacterManualRollMax(): number {
     const actor = this.primaryCharacter;
     return this.getInitiativeRollMax(actor?.initiativeDice);
+  }
+
+  /**
+   * QA fix, delta modal's manual field: this field had no clamp of its own
+   * before - only HTML `[min]`/`[max]` attributes, which do not stop a
+   * `type="number"` input from holding a larger typed value. Mirrors
+   * `onManualRollChanged` exactly, but against the delta's own bounds
+   * (`deltaDiceCount` to `deltaDiceCount * 6` - a lost/gained-dice roll can
+   * never total less than one pip per die) instead of `[0,
+   * getPrimaryCharacterManualRollMax()]`.
+   */
+  onManualDeltaRollChanged(value: string | number | null, inputEl?: HTMLInputElement): void {
+    if (value === null || value === undefined || value === "") {
+      this.manualDeltaRoll = "";
+      if (inputEl) inputEl.value = "";
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+      this.manualDeltaRoll = "";
+      if (inputEl) inputEl.value = "";
+      return;
+    }
+    const min = this.deltaDiceCount;
+    const max = this.deltaDiceCount * 6;
+    const clamped = Math.max(min, Math.min(max, Math.floor(numeric)));
+    this.manualDeltaRoll = String(clamped);
+    if (inputEl) inputEl.value = this.manualDeltaRoll;
   }
 
   openActPlanner(actor: SharedParticipantState, modalContent: TemplateRef<unknown>) {
@@ -1259,6 +1303,16 @@ export class PlayerViewComponent implements OnInit, OnDestroy, AfterViewChecked 
   getVisibleInitiative(actor: SharedParticipantState): string {
     if (!this.canControl(actor)) {
       return "-";
+    }
+    // QA fix (hands-on findings, item 3): `initiativeScore` is seeded with
+    // the late-entry penalty (Core p. 160) the instant a mid-turn joiner is
+    // added, before they have ever rolled - a real number that reads as a
+    // genuine Initiative Score to a player who has not rolled yet. `pendingRoll`
+    // (`diceIni <= 0`, `SessionSyncService`/`getSharedParticipants()`) is the
+    // same signal the roll pop-up itself is driven by, so this can never
+    // disagree with whether that player is being asked to roll.
+    if (actor.pendingRoll) {
+      return NOT_ROLLED_DISPLAY;
     }
     return String(actor.initiativeScore ?? "-");
   }

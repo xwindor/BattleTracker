@@ -49,7 +49,7 @@ import {
   formatGroupWoundLogText, formatTurnStartLogText, formatTurnEndLogText,
   formatPassEndLogText, COMBAT_STARTED_LOG_TEXT, COMBAT_ENDED_LOG_TEXT
 } from "app/shared/log-formatter";
-import { classifyRoll } from "app/shared/roll-utils";
+import { classifyRoll, NOT_ROLLED_DISPLAY } from "app/shared/roll-utils";
 import { generateName, GeneratedNameKind, normaliseNameForComparison } from "app/shared/name-generator";
 
 /**
@@ -300,6 +300,7 @@ const MIN_ACTION_PHASE_INITIATIVE_SCORE = 0;
 const NO_ACTION_PHASE_MESSAGE =
   "Initiative Score 0 or below: no Action Phase this pass — one Free Action only "
   + "(defending is unaffected).";
+
 
 /**
  * How long a merge result stays on screen before it clears itself, in
@@ -3587,18 +3588,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
           const supersedeTotal = target.getCurrentInitiative();
           const supersedeIntuition = this.getParticipantIntuition(target);
           let supersedeLabel: string;
+          let supersedeAttributeTotal: number;
           if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
-            supersedeLabel = `INT×2(${supersedeIntuition * 2})`;
+            supersedeAttributeTotal = supersedeIntuition * 2;
+            supersedeLabel = `INT×2(${supersedeAttributeTotal})`;
           } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+            supersedeAttributeTotal = this.asMatrix(target).dataProcessing + supersedeIntuition;
             supersedeLabel = `DP(${this.formatDataProcessing(this.asMatrix(target).dataProcessing)}) + INT(${supersedeIntuition})`;
           } else {
+            supersedeAttributeTotal = this.getParticipantReaction(target) + supersedeIntuition;
             supersedeLabel = `REA(${this.getParticipantReaction(target)}) + INT(${supersedeIntuition})`;
           }
           const supersedeRawValues = command.payload?.["diceValues"];
           const supersedeDiceValues = Array.isArray(supersedeRawValues) ? (supersedeRawValues as unknown[]).map(Number) : [];
+          const supersedeRolledTotal = supersedeDiceValues.reduce((s, v) => s + v, 0);
+          const supersedeElapsedPasses = this.computeElapsedInitiativePassesForLog(supersedeAttributeTotal, supersedeRolledTotal, supersedeTotal);
           this.appendSharedLog(
             target.name || "Player",
-            formatInitiativeRollSupersededLogText(supersedeLabel, supersedeDiceValues, supersedeTotal)
+            formatInitiativeRollSupersededLogText(supersedeLabel, supersedeDiceValues, supersedeTotal, supersedeElapsedPasses)
           );
           this.updateInitiativePrepInfo();
           this.sort();
@@ -3631,20 +3638,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       const total = target.getCurrentInitiative();
       const intuition = this.getParticipantIntuition(target);
       let baseLabel: string;
+      let attributeTotal: number;
       if (this.isAstral(target) && this.asAstral(target).astralProjecting) {
-        baseLabel = `INT×2(${intuition * 2})`;
+        attributeTotal = intuition * 2;
+        baseLabel = `INT×2(${attributeTotal})`;
       } else if (this.isMatrix(target) && this.asMatrix(target).jackedIn && this.asMatrix(target).vrMode !== VRMode.AR && this.asMatrix(target).vrMode !== VRMode.None) {
+        attributeTotal = this.asMatrix(target).dataProcessing + intuition;
         baseLabel = `DP(${this.formatDataProcessing(this.asMatrix(target).dataProcessing)}) + INT(${intuition})`;
       } else {
+        attributeTotal = this.getParticipantReaction(target) + intuition;
         baseLabel = `REA(${this.getParticipantReaction(target)}) + INT(${intuition})`;
       }
       const rawValues = command.payload?.["diceValues"];
       const diceValues = Array.isArray(rawValues) ? (rawValues as unknown[]).map(Number) : [];
+      const rolledTotal = diceValues.length > 0 ? diceValues.reduce((s, v) => s + v, 0) : target.diceIni;
+      const elapsedPasses = this.computeElapsedInitiativePassesForLog(attributeTotal, rolledTotal, total);
       this.appendSharedLog(
         target.name || "Player",
         diceValues.length > 0
-          ? formatInitiativeRollLogText(baseLabel, diceValues, total)
-          : formatManualInitiativeRollLogText(baseLabel, target.diceIni, total)
+          ? formatInitiativeRollLogText(baseLabel, diceValues, total, elapsedPasses)
+          : formatManualInitiativeRollLogText(baseLabel, target.diceIni, total, elapsedPasses)
       );
       // Item E fix: same as the delta-roll branch above - must not be
       // gated behind `initiativePrepActive`, which is only ever true
@@ -3837,6 +3850,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   participantHasRolledThisTurn(p: IParticipant): boolean {
     return hasRolledThisTurn(p);
+  }
+
+  /**
+   * QA fix (hands-on findings on commit 304aa36, item 3): a participant added
+   * mid-Combat-Turn is seeded with `attribute - 10 * (elapsed passes)` before
+   * they have ever rolled (`CombatManager.addParticipant`, Core p. 160's
+   * late-entry penalty applied at add time) - a real number
+   * `getCurrentInitiative()` will happily return, but it is not an
+   * Initiative Score: nobody has taken this Combat Turn's Initiative Test
+   * yet. Xavier saw a freshly-added Reaction 3 / Intuition 1 character read
+   * "-6" before ever rolling and could not tell that from a real, very bad
+   * Score. Display only - the stored value and every reader of
+   * `getCurrentInitiative()` (sorting, gating, logging) are unchanged; this
+   * only decides what text a row *shows*.
+   */
+  getInitiativeScoreDisplay(p: IParticipant): string {
+    if (this.combatManager.started && !hasRolledThisTurn(p)) {
+      return NOT_ROLLED_DISPLAY;
+    }
+    return String(p.getCurrentInitiative());
   }
 
   private syncSharedState() {
@@ -7423,13 +7456,21 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.announceJoinIfPending(p);
     const total = p.getCurrentInitiative();
     const intuition = this.getParticipantIntuition(p);
+    const isJackedVR = this.isMatrix(p) && this.asMatrix(p).jackedIn
+      && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None;
+    const attributeTotal = this.isAstral(p) && this.asAstral(p).astralProjecting
+      ? intuition * 2
+      : isJackedVR
+          ? this.asMatrix(p).dataProcessing + intuition
+          : this.getParticipantReaction(p) + intuition;
     const baseLabel = this.isAstral(p) && this.asAstral(p).astralProjecting
       ? `INT×2(${intuition * 2})`
-      : this.isMatrix(p) && this.asMatrix(p).jackedIn
-          && this.asMatrix(p).vrMode !== VRMode.AR && this.asMatrix(p).vrMode !== VRMode.None
+      : isJackedVR
           ? `DP(${this.formatDataProcessing(this.asMatrix(p).dataProcessing)}) + INT(${intuition})`
           : `REA(${this.getParticipantReaction(p)}) + INT(${intuition})`;
-    const logText = formatInitiativeRollLogText(baseLabel, values, total);
+    const rolledTotal = values.reduce((s, v) => s + v, 0);
+    const elapsedPasses = this.computeElapsedInitiativePassesForLog(attributeTotal, rolledTotal, total);
+    const logText = formatInitiativeRollLogText(baseLabel, values, total, elapsedPasses);
     // appendParticipantRollLog writes the local line too, tagged if hidden.
     this.appendParticipantRollLog(p, logText, presetHidden);
   }
@@ -7479,6 +7520,28 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    */
   private formatDataProcessing(dp: number): string {
     return dp > DATA_PROCESSING_UNSET ? String(dp) : "not set";
+  }
+
+  /**
+   * QA fix (hands-on findings, item 4): how many Initiative Passes' worth of
+   * late-entry penalty (Core p. 160) are hiding inside the gap between
+   * "attribute + rolled total" and the actual resulting Score, for the
+   * Initiative Test log line. The penalty is applied once, at add time
+   * (`CombatManager.addParticipant()`), before the roll ever lands - by the
+   * time this runs (the first and only time `diceIni` goes from 0 to a real
+   * value this Combat Turn) the only thing that can produce this gap is that
+   * penalty, so reversing the arithmetic here reports exactly what was
+   * already applied rather than recomputing or re-deriving a new figure.
+   * Returns `undefined` (no clause) when there is no gap, or when the gap is
+   * not a whole number of passes - an unexpected shape this log line should
+   * stay silent about rather than guess at.
+   */
+  private computeElapsedInitiativePassesForLog(attributeTotal: number, rolledTotal: number, finalTotal: number): number | undefined {
+    const gap = attributeTotal + rolledTotal - finalTotal;
+    if (gap <= 0 || gap % INITIATIVE_PASS_DECAY !== 0) {
+      return undefined;
+    }
+    return gap / INITIATIVE_PASS_DECAY;
   }
 
   getParticipantEdgeRatingValue(p: IParticipant): number {
@@ -9641,8 +9704,43 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     options: DiceCountChangeOptions = {}
   ): DiceCountChangeResult {
     const restored = mp.preVrDiceCount ?? PHYSICAL_INITIATIVE_DICE;
-    mp.preVrDiceCount = null;
-    return this.changeParticipantDiceCount(mp, restored, options);
+    const result = this.changeParticipantDiceCount(mp, restored, options);
+    // QA fix (hands-on findings, item 6 - "jacking out of hot sim rolled the
+    // wrong number of dice"). Diagnosis: `preVrDiceCount` used to be forgotten
+    // (set to `null`) unconditionally, the instant this ran - including for a
+    // *deferred* loss (`rollGainedDice: false`, the player-initiated jack-out/
+    // switch-down path), where `changeParticipantDiceCount`'s own decrease
+    // branch deliberately leaves `dices` untouched until the owning player's
+    // own delta roll resolves it (that method's doc comment). So `mp.dices`
+    // could still read the *pre-restore* VR count (e.g. Hot Sim's 4) for as
+    // long as that roll was outstanding, while `preVrDiceCount` - the only
+    // record of the participant's real physical dice count (e.g. an augmented
+    // decker's 3) - had already been wiped.
+    //
+    // If that same participant re-entered a VR mode before the player ever
+    // rolled the deferred loss, `applyVRMode`'s jack-in branch
+    // (`if (mp.preVrDiceCount === null) { mp.preVrDiceCount = mp.dices; }`)
+    // ran ahead of this method's own guard-A settle and recorded whatever
+    // `mp.dices` happened to be at that stale, not-yet-restored moment (4, not
+    // the real 3) as the new "physical" baseline - permanently overwriting the
+    // real value. The next jack-out/switch-to-AR then restored to the wrong
+    // number, rolling the wrong count of lost dice. This is exactly the
+    // "ordering/state-dependent, not a fluke" shape Xavier described: a fresh
+    // decker (no stale note) restores correctly every time; the corruption
+    // only shows up once a deferred loss has been left unresolved across a
+    // re-entry.
+    //
+    // Fix: only forget `preVrDiceCount` once `dices` has actually landed on
+    // `restored` - immediately for a gain, a no-op, or any GM-resolved
+    // (non-deferred) change, all of which write `dices` synchronously inside
+    // `changeParticipantDiceCount` above. A still-outstanding deferred loss
+    // leaves the note alive, so a mid-air re-entry reads the real value
+    // instead of stomping on it.
+    const deferredLossStillOutstanding = options.rollGainedDice === false && result.delta < 0;
+    if (!deferredLossStillOutstanding) {
+      mp.preVrDiceCount = null;
+    }
+    return result;
   }
 
   private getParticipantEdgeRating(p: IParticipant): number {

@@ -135,6 +135,20 @@ export class DiceRollerComponent implements OnChanges {
    */
   @Input() showOtherPlayers = true;
 
+  /**
+   * Suppresses hits, the 1s count, glitch classification and the per-die
+   * hit/one colouring - everything this component derives from
+   * `classifyRoll()` - leaving only the individual dice and their plain
+   * total. Off by default, so the page-level roller and the GM's own roller
+   * are unaffected. Set inside the player-view initiative-roll modals (main
+   * and delta): an Initiative Test has no hits, 1s or glitches of its own
+   * (brief Core pp. 44-45 define those for a success test's dice pool, which
+   * an Initiative roll is not) - Xavier: "the dice roller should not track
+   * hits or glitches at all for rolling initiative. just the total result of
+   * the dice."
+   */
+  @Input() hideHitsAndGlitches = false;
+
   @Output() rolledEvent = new EventEmitter<DiceRollRequest>();
 
   /** The ad-hoc NPC name box, present only while "Other..." is selected. */

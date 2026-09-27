@@ -484,6 +484,7 @@
       data-testid="roll-modal-dice-roller"
       [fixedDiceCount]="primaryCharacter?.initiativeDice ?? 1"
       [showOtherPlayers]="false"
+      [hideHitsAndGlitches]="true"
       [rollDisabled]="rollAwaitingDone"
       (rolledEvent)="onInitiativeRollFromModal($event)">
     </app-dice-roller>
@@ -502,9 +503,30 @@
     } @else {
     <div class="d-flex gap-2 align-items-center flex-wrap mt-3 roll-modal-manual">
       <label class="small text-muted mb-0" for="pv-roll-manual">Or type a manually-rolled total:</label>
-      <input id="pv-roll-manual" type="number" class="form-control roll-input" [(ngModel)]="manualRoll"
+      <!--
+        One-way `[ngModel]` plus an explicit `(ngModelChange)`, not the
+        two-way `[(ngModel)]` this used to be bound with - the same fix
+        applied to the GM's rolled-total input for the identical reason
+        (ARCHITECTURE.md §3, "GM's rolled-dice-total input is bound
+        one-way").
+
+        QA fix, second half: one-way binding alone is not enough. Angular's
+        `NgModel` only calls `writeValue()` (which rewrites the DOM element's
+        own `value`) when the `[ngModel]`-bound expression differs from what
+        it last wrote - so once the clamp has already landed on a value
+        (e.g. "12"), a further keystroke that clamps back to that *same*
+        "12" reads as "no change" to Angular and the DOM is never rewritten,
+        even though `manualRoll` itself is correctly held at "12". The
+        native `<input>` was then left showing whatever the browser's own
+        keystroke wrote (e.g. "120", then "1200"...) - Xavier's exact
+        repro. `#rollManualInputEl` lets the handler write the DOM value
+        back directly, which is authoritative regardless of Angular's own
+        dirty-checking.
+      -->
+      <input id="pv-roll-manual" type="number" class="form-control roll-input" [ngModel]="manualRoll"
+        #rollManualInputEl
         data-testid="roll-modal-manual-input"
-        (ngModelChange)="onManualRollChanged($event)"
+        (ngModelChange)="onManualRollChanged($event, rollManualInputEl)"
         [min]="0"
         [max]="getPrimaryCharacterManualRollMax()"
         placeholder="Manual roll total">
@@ -536,6 +558,7 @@
       data-testid="delta-roll-modal-dice-roller"
       [fixedDiceCount]="deltaDiceCount"
       [showOtherPlayers]="false"
+      [hideHitsAndGlitches]="true"
       [rollDisabled]="deltaRollAwaitingDone"
       (rolledEvent)="onDeltaRollFromModal($event)">
     </app-dice-roller>
@@ -556,8 +579,24 @@
     } @else {
     <div class="d-flex gap-2 align-items-center flex-wrap mt-3 roll-modal-manual">
       <label class="small text-muted mb-0" for="pv-delta-roll-manual">Or type a manually-rolled total:</label>
-      <input id="pv-delta-roll-manual" type="number" class="form-control roll-input" [(ngModel)]="manualDeltaRoll"
+      <!--
+        QA fix: this field previously had no clamp handler at all - only the
+        HTML `[min]`/`[max]` attributes, which a browser does not enforce on
+        a `type="number"` input's actual value (they only drive `:invalid`
+        styling and the spinner arrows). A player could type a total with no
+        upper bound (Xavier: "so I put 12000 for example when the limit
+        should be 12"). One-way `[ngModel]` + `(ngModelChange)`, same pattern
+        as the main roll modal's manual field just above - including the
+        `#deltaManualInputEl` DOM-write-back for the same reason (see that
+        field's own comment: Angular's `NgModel` skips `writeValue()` when
+        the clamped result matches what it last wrote, which leaves the
+        native input showing extra typed digits even though the held value
+        is correctly clamped).
+      -->
+      <input id="pv-delta-roll-manual" type="number" class="form-control roll-input" [ngModel]="manualDeltaRoll"
+        #deltaManualInputEl
         data-testid="delta-roll-modal-manual-input"
+        (ngModelChange)="onManualDeltaRollChanged($event, deltaManualInputEl)"
         [min]="deltaDiceCount" [max]="deltaDiceCount * 6"
         placeholder="Manual roll total">
       <button class="btn btn-outline-primary" type="button" data-testid="delta-roll-modal-manual-submit"

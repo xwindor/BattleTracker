@@ -336,7 +336,7 @@
             }
           </div>
           <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
-            <span class="control-label lblIni">{{ p.getCurrentInitiative() }}</span>
+            <span class="control-label lblIni" data-testid="gm-initiative-score">{{ getInitiativeScoreDisplay(p) }}</span>
           </div>
           <!-- E/R/I/D collapse behind a twirly (Xavier: "maybe we need a twirly
                we can collapse for stat input"). Rationale is row height: these

@@ -88,3 +88,15 @@ export function clampRollToBounds(value: number, max: number): number {
 export function clampInitiativeRoll(value: number, diceCount: number | undefined): number {
   return clampRollToBounds(value, getInitiativeRollMax(diceCount));
 }
+
+/**
+ * Shown in place of a numeric Initiative Score for a participant who has not
+ * yet taken this Combat Turn's Initiative Test (QA fix, hands-on findings on
+ * commit 304aa36, item 3) - shared between the GM screen and the player view
+ * so the two can never disagree on the wording. Not a rules value - a display
+ * placeholder, so it carries no page citation. An em dash reads unambiguously
+ * as "nothing here yet" rather than as a number, which a bare "0" or a
+ * negative late-entry-penalty figure (Core p. 160, applied at add time before
+ * any roll) does not.
+ */
+export const NOT_ROLLED_DISPLAY = "— not rolled";

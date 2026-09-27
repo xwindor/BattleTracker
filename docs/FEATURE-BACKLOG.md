@@ -6,6 +6,30 @@ Completed items are deleted from this file rather than kept as historical
 record — the change that shipped them is the record (`briefs/`,
 `ARCHITECTURE.md`, git history). Last swept 2026-08-23.
 
+## Players have no defence or Seize the Initiative controls (Xavier, hands-on QA 2026-09-26)
+
+A player's own screen offers Act, Delay and the Interrupt list, but nothing
+for defending and no way to spend Edge to Seize the Initiative — Seize is a
+GM-screen button only. Xavier raised both while testing the initiative work.
+
+Seize in particular is now more attractive than it was: ruling R2
+(`briefs/seize-initiative-spec.md`, 2026-09-21) lets a player seize at any
+point after they have rolled, so the Edge decision could sit with the player
+where the book puts it. Xavier also suggested the roll pop-up as its home,
+alongside **Blitz** (Edge to roll the maximum 5D6, Core p. 159), which is
+unimplemented anywhere in the app today.
+
+Rules-dependent — run it through **`/feature`**, not `/change`.
+
+## GM-driven VR mode changes do not agree with the player view (Xavier, hands-on QA 2026-09-26)
+
+After the GM changes a decker's VR mode from the GM screen, the mode shown on
+the GM screen and the mode shown in that player's own view do not match.
+Xavier: "the mode status did not correlate at all between GM and player view."
+The dice-delta half of this was fixed separately; this entry is the *status
+display* disagreement only. The exact fields that diverge are recorded in the
+implementer's report for that fix round — start there rather than re-deriving.
+
 ## Removing a decker's deck after an unrolled VR gain silently wrecks their Initiative Score (pre-existing; found 2026-09-17, player-initiative-prompt review)
 
 **Serious, and already in the committed app** — it predates the initiative

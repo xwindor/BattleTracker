@@ -1,5 +1,6 @@
 import { GlitchLevel, classifyRoll } from "app/shared/roll-utils";
 import { DECLARED_ACTION_VERB_PHRASES } from "app/shared/declared-actions";
+import { INITIATIVE_PASS_DECAY } from "Combat/Participants/Participant";
 
 export const LOG_DECODE_DURATION_MS_PER_CHAR = 28;
 export const LOG_DECODE_MIN_MS = 420;
@@ -126,13 +127,41 @@ export function formatLogEntryReference(actor: string, text: string): string {
  * negative Scores, which are never clamped to 0 (ARCHITECTURE.md §1; brief
  * Core p. 160).
  */
-export function formatInitiativeRollLogText(baseLabel: string, values: readonly number[], total: number): string {
-  return `initiative roll: ${baseLabel} + [${values.join(", ")}] = ${total}`;
+/**
+ * QA fix (hands-on findings, item 4): the words describing a late-entry
+ * penalty (Core p. 160, applied at add time - `CombatManager.addParticipant()`,
+ * before the roll ever lands) so the line's own arithmetic adds up, e.g.
+ * `REA(6) + INT(8) + [1, 5, 4, 4] = 8` used to hide the -20 that actually
+ * produced 8 from 28. `elapsedPasses` is the number of Initiative Passes
+ * already elapsed when this participant was added - pass `undefined` (or 0)
+ * when no penalty applied, and the clause is omitted entirely.
+ */
+function lateEntryPenaltyClause(elapsedPasses: number | undefined): string {
+  if (!elapsedPasses || elapsedPasses <= 0) {
+    return "";
+  }
+  const penalty = elapsedPasses * INITIATIVE_PASS_DECAY;
+  const passWord = elapsedPasses === 1 ? "pass" : "passes";
+  return ` - ${penalty} (${elapsedPasses} ${passWord})`;
+}
+
+export function formatInitiativeRollLogText(
+  baseLabel: string,
+  values: readonly number[],
+  total: number,
+  elapsedPasses?: number
+): string {
+  return `initiative roll: ${baseLabel} + [${values.join(", ")}]${lateEntryPenaltyClause(elapsedPasses)} = ${total}`;
 }
 
 /** Initiative Test entered by hand rather than rolled in the app. */
-export function formatManualInitiativeRollLogText(baseLabel: string, rolledTotal: number, total: number): string {
-  return `initiative roll: ${baseLabel} + manual(${rolledTotal}) = ${total}`;
+export function formatManualInitiativeRollLogText(
+  baseLabel: string,
+  rolledTotal: number,
+  total: number,
+  elapsedPasses?: number
+): string {
+  return `initiative roll: ${baseLabel} + manual(${rolledTotal})${lateEntryPenaltyClause(elapsedPasses)} = ${total}`;
 }
 
 /**
@@ -143,8 +172,13 @@ export function formatManualInitiativeRollLogText(baseLabel: string, rolledTotal
  * to an ordinary roll line; only the prefix makes the supersession visible
  * to the GM in the Action Log, per the brief's "write a log line".
  */
-export function formatInitiativeRollSupersededLogText(baseLabel: string, values: readonly number[], total: number): string {
-  return `player's own roll supersedes the GM's earlier roll — ${formatInitiativeRollLogText(baseLabel, values, total)}`;
+export function formatInitiativeRollSupersededLogText(
+  baseLabel: string,
+  values: readonly number[],
+  total: number,
+  elapsedPasses?: number
+): string {
+  return `player's own roll supersedes the GM's earlier roll — ${formatInitiativeRollLogText(baseLabel, values, total, elapsedPasses)}`;
 }
 
 /**
