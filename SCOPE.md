@@ -71,6 +71,22 @@ The test for any proposed behaviour:
       `RULINGS.md` same date). Files and personas nested under the same device
       do not count toward it. The boundary did not move: this is the stated
       default above, applied explicitly rather than a new kind of enforcement.
+    - **Seize the Initiative is refused, not warned, before a roll** (Xavier,
+      2026-09-21; `RULINGS.md` same date). The control is simply unavailable
+      until that participant has made this Combat Turn's Initiative Test.
+      **This one does move the boundary**: it is the first place the tracker
+      refuses rather than warns. The call was made deliberately — seizing
+      spends a point of a player's Edge irreversibly, and the rule it rests on
+      (Core p. 160's "regardless of your Initiative Score", Core p. 161's
+      ordering of several seizers "by their Initiative Scores") only means
+      anything once a Score exists. A confirmation step guards the tap itself
+      for the same reason.
+    - **A participant who has not rolled Initiative is skipped, not warned
+      about** (Xavier, 2026-09-19; `RULINGS.md` same date). They are not given
+      a turn, cannot take an Initiative-costing Interrupt Action, and do not
+      hold the Combat Turn open. The GM is warned by name before the action
+      that would end the pass, and told when nobody can act — so the app
+      refuses the action but never hides why.
 
 ## Out of scope
 

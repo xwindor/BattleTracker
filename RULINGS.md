@@ -1461,3 +1461,79 @@ file, persona, all public-space); `canBeParent()` governs what may *be* one
 stay two — merging them puts an add-child control on files and personas, which
 would let a GM build a device nested inside a file. Mark propagation is gated
 separately again, on the icon being a device, and is unaffected by either.
+
+## 2026-09-19 — A participant who has not rolled Initiative is not given a turn
+
+**Ruling:** A participant in the fight who has not made this Combat Turn's
+Initiative Test is skipped when the tracker chooses who acts next, may not
+take an Initiative-costing Interrupt Action, and does not keep the Combat
+Turn alive. They enter the order the moment their roll lands.
+
+**Why:** The core rulebook never imagines a combatant who is in the fight
+without a rolled Score — Core p. 158 step 1 has everyone roll before the turn
+runs, and Core p. 159 ties both the order and the number of Action Phases to
+the Initiative Test. Before this ruling a mid-fight joiner could be handed a
+turn on their bare Initiative attribute, ahead of someone who had rolled, and
+their unrolled attribute kept the Combat Turn running. The book is silent, so
+this is a table call, not a printed rule.
+
+**How to apply:** The app forces every participant present at the start of a
+turn to roll before the turn begins, so this only ever affects someone who
+joins mid-fight. The GM is warned — by name — before the action that would
+end the pass, and told plainly when nobody can act because everyone left owes
+a roll.
+
+## 2026-09-21 — Seize the Initiative requires a rolled Initiative Score
+
+**Ruling:** A participant may not Seize the Initiative until they have made
+this Combat Turn's Initiative Test. The control is unavailable until then,
+rather than warned against.
+
+**Why:** Core p. 160 says seizing moves you to the top "regardless of your
+Initiative Score", and Core p. 161 orders several seizers "in order of their
+Initiative Scores" — both only mean anything if a Score already exists. The
+book never states the requirement outright, so this is a table call. Note it
+is stricter than `SCOPE.md`'s standing "warn rather than refuse" default; that
+exception is recorded there.
+
+## 2026-09-21 — Seize the Initiative may be declared at any time after rolling
+
+**Ruling:** Once a participant has rolled, they may seize at any point in the
+Combat Turn, including outside their own Action Phase. It costs one point of
+Edge and never costs Initiative Score.
+
+**Why:** The book anchors a Delayed Action to Step 3A of the Combat Turn
+Sequence (Core p. 161) and gives Seize no equivalent step, so the timing is
+undefined rather than restricted. Xavier: a seize you could only declare on
+your own turn would buy nothing. **Seize is not an Interrupt Action** — Core
+p. 167's framework is a separate mechanic paid for out of Initiative Score,
+and Seize is not listed in or cross-referenced from it. It is an Edge Effect
+(Core p. 56, Core p. 160). The timing resembles an interrupt; the cost does
+not.
+
+## 2026-09-21 — Seizing changes rank only, never how many turns you get
+
+**Ruling:** A seizer's own Initiative Score still drops by 10 at the end of
+each pass and still limits them to a Free Action and defending once it reaches
+0 or below, exactly like anyone else. Seizing keeps them at the top of the
+order for the whole Combat Turn and nothing more.
+
+**Why:** Core p. 159 ties how many times a character acts to the Initiative
+Test; Core p. 160–161 describe seizing purely as a change of position, lasting
+the entire Combat Turn. Nothing in the Seize text exempts the seizer from the
+ordinary decay or the 0-or-below limit (`RULINGS.md` 2026-08-07). An earlier
+build let a seizer act in every pass their bare attribute survived, which the
+book does not support.
+
+## 2026-09-20 — A player who jacks themselves out rolls their own lost dice
+
+**Ruling:** When a player jacks their own decker out of the Matrix mid-fight,
+that player is prompted to roll the dice they lose, in the same locked prompt
+a VR mode change uses. A jack out the GM performs from their own screen, and
+removing a deck entirely, still resolve immediately with the GM's roll.
+
+**Why:** Consistency for the player — they already roll the dice they gain or
+lose on a mode switch (Core p. 160's dice-change rule), so having the app
+quietly roll one direction and not the other was arbitrary. The GM-side
+exception exists because a jack out is often not the player's choice, and the
+table should not wait on someone who has just been dumped out.
