@@ -1,9 +1,8 @@
 # SR5E Battle Tracker
 
-A real-time initiative/combat tracker for Shadowrun 5th Edition, built with
-Angular 19 (frontend) and a Node/Express + Socket.IO server (`server.js`) for
-GM/player session sync. GMs run combat from a full-control view; players join
-a room to see initiative order, roll, and declare actions.
+A GM's live initiative and combat tracker for Shadowrun 5th Edition, with a
+player view kept in sync: Angular 19 in the browser, a Node/Express +
+Socket.IO server (`server.js`) connecting GM and players in a room.
 
 ## Commands
 
@@ -35,62 +34,62 @@ whether a term is jargon, assume it is.
 
 ## Working practices
 
-- Work directly on `main`. Do not create worktrees or branches unless I
-  explicitly ask for one.
+- Work directly on `main`. Create worktrees or branches only when I ask.
 - Commit after I approve a change, not before.
 - If you create a file, say where you put it.
+- When you're unsure what I want, or what the app should do, ask me. My answer
+  in the conversation outranks every file in this repo.
 
-## Where things are documented
+## What the app is
 
-- **`SCOPE.md`** — the product boundary: what this app is and isn't. Read
-  before proposing what to build. Finding a rule does not mean implementing it.
-- **`ARCHITECTURE.md`** — authoritative reference for combat and initiative:
-  initiative-order storage, turn/pass boundary semantics, participant state,
-  tie-breaking, and how session sync interacts with combat state. Read
-  this before any change touching those areas.
-- **`docs/APP_DOCUMENTATION.md`** — broader reference for UI flows, the socket
-  event catalog, deployment and infrastructure, and where to edit things.
-- **`docs/INITIATIVE-MUTATION-SOURCES.md`** — page-cited catalogue of
-  everything in SR5 that changes Initiative Score mid-turn, with
-  implementation status.
-- **`RULINGS.md`** — table rulings for anything the SR5 rulebook leaves open.
-  Check it before deciding an undefined case yourself; append decisions here,
-  don't re-decide them ad hoc.
-- **`docs/UNVERIFIED-RULES.md`** — rules claims found stated as fact somewhere
-  in this repo without a printed page citation. **Not authoritative. Never
-  cite or build against anything in this file** until it's been verified
-  against `rules/` and moved out with a page number.
-- **`docs/FEATURE-BACKLOG.md`** — running list of future work.
-- **`docs/MATRIX_MODULE_PLAN.md`** — Matrix build plan (parked).
-- **`.local-notes/`** — untracked personal notes. Lower authority than
-  anything in `docs/`; may be stale or wrong.
-- **`.claude/worktrees/`** — stale copies from around May 2026, pending
-  deletion. Never read or search here.
+The product decisions that bound everything built here live in `docs/adr/`,
+one file each. Read the ones touching an area before proposing work in it.
+The short version: the app is a **tracker, not a referee** (it remembers and
+shows; the GM decides outcomes), and it covers only what happens during the
+session.
 
 ## Rules facts
 
-Shadowrun 5e rules facts must come only from a page-cited brief backed by
-`rules/` (via `sr5-rules-analyst`) — never from your own memory of the game.
-Every citation must name the book and the printed page, e.g. `(Core p. 159)`.
-`rules/INDEX.md` lists the rulebooks and which are in use.
+Shadowrun 5e rules facts come only from the core rulebook, read in
+`rules/core/pages/`, never from memory of the game. Every citation names the
+book and the printed page: `(Core p. 159)`.
 
-**Only the core rulebook is in use.** The other books under `rules/` are
-extracted but not yet approved for use: do not search them, cite them, or
-propose rules from them. If something can't be answered from the core rulebook,
-say so and stop rather than reaching for another book. A book becomes usable
-only once its page offset is verified by hand against three pages and Xavier
-approves it.
+- **Rules question → `sr5-rules-lookup`.** Whenever a rules question comes up,
+  in any skill or conversation, ask the `sr5-rules-lookup` helper. Copy its
+  cited answer into the spec or to-do item the work comes from, so the review
+  at the end checks the build against those pages.
+- **If the helper can't be started,** read `rules/core/pages/` yourself the
+  way the helper would, quote each passage with its page, and tell Xavier
+  plainly that the helper wasn't used.
+- **`RULINGS.md`** holds this table's calls on cases the core rulebook leaves
+  open or contradicts. Check it before treating a case as undecided. New
+  rulings are Xavier's to make: put the question to him, then append his answer
+  with the date and the page it fills a gap next to.
+- **Core rulebook only.** The other books under `rules/` are extracted but not
+  approved; `rules/INDEX.md` records which books are in use. If the core
+  rulebook can't answer something, say so and stop. A book becomes usable only
+  once its page offset is verified by hand against three pages and Xavier
+  approves it.
 
-## Agent skills
+## Workflow
+
+Xavier drives the work with the Pocock skills: `/grill-with-docs` to question
+an idea until it's clear, `/to-spec` to write it up, `/to-tickets` to split it
+into to-do items, `/implement` or `/tdd` to build, `/code-review` to check it,
+`/diagnosing-bugs` for anything broken, `/wayfinder` for efforts too big for
+one session.
 
 ### Issue tracker
 
-To-do items live as markdown files under `.scratch/` in this repo (GitHub Issues is off). See `docs/agents/issue-tracker.md`.
+To-do items live as markdown files under `.scratch/` in this repo (GitHub
+Issues is off). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five standard status tags (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+The five standard status tags (needs-triage, needs-info, ready-for-agent,
+ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the root, alongside the existing SCOPE / ARCHITECTURE / RULINGS docs. See `docs/agents/domain.md`.
+Single-context: `CONTEXT.md` (the glossary) and `docs/adr/` (product
+decisions) at the root. See `docs/agents/domain.md`.

@@ -2,16 +2,17 @@
 
 Cached, page-cited rules citations for the Matrix subsystem. Scope: Matrix actions, marks, hosts, Matrix initiative, cyberprograms, Overwatch Score, IC.
 
-**How to use this file.** `sr5-rules-analyst` reads it before searching
-`rules/`, and reuses any citation already recorded here rather than
-re-deriving it. Only search `rules/` for what is not already below, then
-append what you find.
+**How to use this file.** `sr5-rules-lookup` reads it before searching
+`rules/core/pages/`, and reuses any citation already recorded here rather than
+re-deriving it. It searches the book only for what is not already below, then
+appends what it finds. In its answers, a reused citation is labelled "from the
+notebook", so it can be told apart from a page read that run.
 
 **Authority.** Every entry here was derived from `rules/core/pages/pNNNN.txt` by an
 agent that opened the page. This file is a cache, not a source: if an entry and
 the printed page disagree, the page wins — correct the entry. Entries without a
-printed page number do not belong here; unverified claims go to
-`docs/UNVERIFIED-RULES.md`.
+printed page number do not belong here; a rules claim nobody has found on a
+printed page stays out of the notebook altogether.
 
 **Appending.** One entry per rule, newest at the bottom of the relevant
 section. Keep the format:
@@ -37,21 +38,28 @@ Those refer to the core rulebook (`rules/core/pages/`). Upgrade an entry to the
 current format whenever you next touch it; upgrading the format alone does not
 change its `verified:` field.
 
-**The `verified:` field.** Every entry carries exactly one, and it records who
-last checked the citation against the printed page and when:
+**Older ruling pointers.** Entries written before 2026-09-28 point to table
+rulings by date (e.g. `RULINGS.md` 2026-09-11). Those dates belong to the old
+rulings list, archived on 2026-09-28; the current `RULINGS.md` holds only the
+rulings re-confirmed that day, under new dates. When you next touch such an
+entry, point it at the current ruling, or drop the pointer if the ruling
+wasn't carried forward.
 
-- `analyst YYYY-MM-DD` — derived by `sr5-rules-analyst`, which read the page
-  once. One pair of eyes. Trustworthy enough to reuse, and every entry starts
-  here.
-- `validator-confirmed YYYY-MM-DD` — `sr5-rules-validator` independently
-  re-derived this citation from `rules/` during a feature and it held up. Two
-  independent readings of the same page.
+**The `verified:` field.** Every entry carries exactly one. It records how many
+independent readings of the printed page back the citation, and the date of
+the latest:
 
+- `analyst YYYY-MM-DD` — one reading of the page. Every new entry starts
+  here; this is the label `sr5-rules-lookup` writes.
+- `validator-confirmed YYYY-MM-DD` — two independent readings: a separate,
+  later check re-derived the citation from the page and it held up.
+
+The label names are historical; keep them so old and new entries compare.
 Use today's date, written out in full. `validator-confirmed` is strictly
-stronger than `analyst`: upgrade an entry when the validator confirms it, and
-never downgrade one back. If the validator *disputes* an entry, that is not a
-downgrade — correct the paraphrase or the page to what the validator found and
-date it `validator-confirmed` as of that correction, or delete the entry
+stronger than `analyst`: upgrade an entry only when a separate check has
+independently re-read the page and agrees, and never downgrade one back. If a
+later reading *disputes* an entry, correct the paraphrase or the page to what
+the page actually says and date it as of that correction, or delete the entry
 outright if the rule does not exist. Neither level licenses citing a page
 without having seen its text.
 
@@ -86,7 +94,7 @@ leave the citation and note the ruling with a pointer to `RULINGS.md`.
 - **verified:** validator-confirmed 2026-09-11
 - **Rule:** Edit File (create, change, copy, delete or protect a file; Computer + Logic [Data Processing]) defends with the host holding the file, or the file's owner if it is not in a host. Protecting a file is a Simple Action, Computer + Logic [Data Processing]; hits become the protection rating, and a protected file cannot be read, changed, deleted or copied until that protection is broken.
 - **Interacts with:** p. 227 (owner's ratings generally). p. 238 Crack File (defends with Protection Rating × 2 once protection is set) and Disarm Data Bomb (a bomb can be attached to a file and destroy it).
-- **Undefined:** **which** non-host device a file sits on is never tested by any printed rule — the book distinguishes only "in a host" from "not." This is why the tracker places no restriction on a file's device parent (`RULINGS.md` 2026-09-11).
+- **Undefined:** **which** non-host device a file sits on is never tested by any printed rule — the book distinguishes only "in a host" from "not." So where a file may sit is a table call: files live only on commlinks, decks and hosts (`RULINGS.md` 2026-09-28, "Files live only on commlinks, decks and hosts"; replaces the old 2026-09-11 "any device" ruling).
 
 ### A folder is a file whose contents are other files
 - **Printed page:** p. 219 (source file: `rules/pages/p0221.txt`)
@@ -128,4 +136,4 @@ leave the citation and note the ruling with a pointer to `RULINGS.md`.
 - **verified:** validator-confirmed 2026-09-11
 - **Rule:** The printed examples show files in two places: on a personal device (a hacker copying a music file from a commlink) and inside a host (files taken from a bank's archives, belonging to no device). No page states a third location is disallowed.
 - **Interacts with:** p. 239 — Edit File's defender branches only on host-vs-not, which is why the absence of a stated restriction matters.
-- **Undefined:** whether files *should* be restricted to commlinks is not addressed; the tracker allows any device (`RULINGS.md` 2026-09-11).
+- **Undefined:** where else a file may sit is not addressed. Table ruling: files live only on commlinks, decks and hosts (`RULINGS.md` 2026-09-28, "Files live only on commlinks, decks and hosts"; replaces the old 2026-09-11 "any device" ruling).
