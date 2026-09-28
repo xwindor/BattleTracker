@@ -81,12 +81,6 @@ say so and stop rather than reaching for another book. A book becomes usable
 only once its page offset is verified by hand against three pages and Xavier
 approves it.
 
-## Current focus
-
-Core tracker correctness. Matrix work is paused: the domain classes in
-`src/Matrix/` and the session-sync plumbing already exist, but rules
-verification and the remaining GM-workflow build-out are deferred.
-
 ## Agent skills
 
 ### Issue tracker
