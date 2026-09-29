@@ -544,8 +544,7 @@ describe('Remove the undo/redo system', () => {
       component.onParticipantEdgeRatingChanged(gangerA, 3);
       component.onParticipantReactionChanged(gangerA, 5);
       component.onParticipantIntuitionChanged(gangerA, 4);
-      component.expandedStatEditors.add(gangerA);
-      component.selectActor(gangerA);
+      component.selectActor(gangerA); // opens the participant panel
       const gangerAId = component['getParticipantId'](gangerA);
 
       spyOn(component['confirmationDialog'], 'simpleConfirm').and.resolveTo(true);
@@ -562,7 +561,6 @@ describe('Remove the undo/redo system', () => {
       expect(component['participantTieBreakers'].has(gangerA)).toBeFalse();
       expect(component['lastKnownDamage'].has(gangerAId)).toBeFalse();
       expect(component['declaredActionSelections'].has(gangerA)).toBeFalse();
-      expect(component.expandedStatEditors.has(gangerA)).toBeFalse();
       expect(component.selectedActor).toBeNull();
 
       const lastBroadcastState = sent[sent.length - 1];

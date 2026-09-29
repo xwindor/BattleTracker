@@ -1117,7 +1117,7 @@ describe('Grunt naming on add, and grunts from CRB statblocks (briefs/grunt-nami
       component.selectActor(p);
       fixture.detectChanges();
       const links = Array.from(
-        fixture.nativeElement.querySelectorAll('.detailsBar nav button')
+        fixture.nativeElement.querySelectorAll('[data-testid="participant-panel"] nav button')
       ) as HTMLButtonElement[];
       const stats = links.find(b => (b.textContent || '').trim() === 'Stats');
       expect(stats).withContext('Stats tab button').toBeTruthy();

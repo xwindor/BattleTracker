@@ -1085,22 +1085,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /** Which linked NPC rows have their member list open (brief Core p. 379). */
   expandedRowPanels = new Set<IParticipant>();
   /**
-   * Which participants show their E/R/I/D stats as editable inputs rather than
-   * as the read-only `E2 R5 I4 D2` summary.
-   *
-   * Purely presentational, and the reason it exists is row height: the four
-   * chip+input pairs are ~230px of controls in a `col-lg-3`, which is a quarter
-   * of the row's width spent on values that are typed once at setup and then
-   * essentially never touched again (Xavier: "maybe we need a twirly we can
-   * collapse for stat input"). Collapsed, the same numbers still read at a
-   * glance in ~70px, so nothing is hidden - only made non-editable until asked
-   * for.
-   *
-   * Transient view state, the same class of thing as `expandedRowPanels` -
-   * holds no game state.
-   */
-  expandedStatEditors = new Set<IParticipant>();
-  /**
    * The Damage Value the GM is about to apply to each NPC in a row.
    *
    * Needed because Core p. 379 settles a downed grunt's alive-or-dead from the DV of
@@ -1340,6 +1324,12 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return new BTTime(this.combatManager.combatTurn, this.combatManager.initiativePass, this.combatManager.currentInitiative);
   }
 
+  /**
+   * The participant whose participant panel is open (CONTEXT.md), or null when
+   * the panel is closed; their row is marked `selected`. Opened by a click on
+   * their row (see `onParticipantRowClick`), or by adding a participant. It
+   * never follows the turn.
+   */
   selectedActor: IParticipant | null = null;
 
   constructor(
@@ -1558,8 +1548,29 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.scrollLogToBottom();
   }
 
+  /** Open `p`'s participant panel, or switch it to `p`. */
   selectActor(p: IParticipant) {
     this.selectedActor = p;
+  }
+
+  /**
+   * A click anywhere on a participant's row opens their participant panel,
+   * or switches it to them - except a click on something in the row you
+   * press or type into (Act, Delay, the roll box, the icons, a menu): those do
+   * their own job and leave the panel alone, so a stray click on Act never
+   * moves it. (Xavier, 2026-09-28, after "clicking a row only highlights it"
+   * proved confusing at the table.)
+   */
+  onParticipantRowClick(p: IParticipant, event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, input, select, textarea, a, label, .dropdown-menu')) {
+      return;
+    }
+    this.selectActor(p);
+  }
+
+  closeParticipantPanel() {
+    this.selectedActor = null;
   }
 
   sort() {
@@ -7481,7 +7492,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * hand-built participant. Defect 7 fix (fix round 2): D-X4 retains
    * `professionalRating`/`label` as GM-only identification "so the GM can
    * see what a participant was created from", but nothing ever rendered it -
-   * this is the local (non-wire) lookup the details panel binds to.
+   * this is the local (non-wire) lookup the participant panel binds to.
    * Never touches `SharedParticipantState`; the label only ever travels on
    * `SharedGmParticipantState` (U2, unchanged).
    */
@@ -9009,7 +9020,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetSetEntry(this.expandedRowPanels, p);
     this.forgetSetEntry(this.expandedDeckPanels, p);
     this.forgetSetEntry(this.expandedAstralPanels, p);
-    this.forgetSetEntry(this.expandedStatEditors, p);
     if (this.selectedActor === p) {
       this.selectedActor = null;
     }
@@ -9067,19 +9077,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.demoteToParticipant(p as MatrixParticipant);
     this.syncSharedState();
     this.sort();
-  }
-
-  /** Are this participant's E/R/I/D shown as inputs (true) or as a summary? */
-  areStatsExpanded(p: IParticipant): boolean {
-    return this.expandedStatEditors.has(p);
-  }
-
-  toggleStatEditor(p: IParticipant): void {
-    if (this.expandedStatEditors.has(p)) {
-      this.expandedStatEditors.delete(p);
-    } else {
-      this.expandedStatEditors.add(p);
-    }
   }
 
   isAstralPanelExpanded(p: IParticipant): boolean {
@@ -9343,13 +9340,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.expandedDeckPanels.delete(p);
       this.expandedDeckPanels.add(mp);
     }
-    // Carried across the type swap for the same reason the deck panel is: this
-    // keys off the participant instance, and enabling a deck replaces that
-    // instance, so without this an open stat twirly would silently snap shut.
-    if (this.expandedStatEditors.has(p)) {
-      this.expandedStatEditors.delete(p);
-      this.expandedStatEditors.add(mp);
-    }
+    // Carried across the type swap: enabling a deck replaces the participant
+    // instance, so an open participant panel must follow it.
     if (this.selectedActor === p) this.selectedActor = mp;
     if (this.actModalParticipant === p) this.actModalParticipant = mp;
     this.combatManager.removeParticipant(p);
@@ -9429,12 +9421,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantLieutenantTeamRowId.delete(mp);
     this.pendingJoinAnnouncement.delete(mp);
     this.expandedDeckPanels.delete(mp);
-    // Same instance-swap carry-over as promoteToMatrixParticipant, in reverse:
-    // removing the deck must not also collapse an open stat twirly.
-    if (this.expandedStatEditors.has(mp)) {
-      this.expandedStatEditors.delete(mp);
-      this.expandedStatEditors.add(p);
-    }
+    // Same instance-swap carry-over as promoteToMatrixParticipant, in reverse.
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;
     this.combatManager.removeParticipant(mp);

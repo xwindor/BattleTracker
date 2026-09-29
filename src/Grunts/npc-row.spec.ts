@@ -1015,7 +1015,7 @@ describe('NPC group initiative - GM workflow', () => {
     expect(component.hasGruntConditionMonitor(row)).toBeFalse();
     let tabs = Array.from(fixture.nativeElement.querySelectorAll('a[ngbNavLink], button[ngbNavLink]'))
       .map(e => (e as HTMLElement).textContent?.trim());
-    expect(tabs).not.toContain('Condition Monitor');
+    expect(tabs).not.toContain('Condition'); // the participant panel's Condition tab
 
     const detached = component.detachRowMember(row, row.members[0]) as DetachedGruntParticipant;
     component.selectActor(detached);
@@ -1024,7 +1024,7 @@ describe('NPC group initiative - GM workflow', () => {
     expect(component.hasGruntConditionMonitor(detached)).toBeTrue();
     tabs = Array.from(fixture.nativeElement.querySelectorAll('a[ngbNavLink], button[ngbNavLink]'))
       .map(e => (e as HTMLElement).textContent?.trim());
-    expect(tabs).toContain('Condition Monitor');
+    expect(tabs).toContain('Condition');
     // One bar, not two: the widget is bound to the combined pool.
     component.onGruntCombinedDamageChanged(detached, 4);
     expect(detached.combinedDamage).toBe(4);

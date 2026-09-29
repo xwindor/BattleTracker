@@ -116,27 +116,51 @@
   padding-bottom: 2px;
 }
 
-/* Open Decision 2: a real grid column, not a fixed overlay. `position: fixed`
-   meant the panel overlaid the initiative list at any width where col-3 was
-   narrower than its content.
-
-   It is still a normal-flow grid column — this does NOT revert Open Decision 2
-   — but at `lg` and up it is ALSO `position: sticky`, so a GM who taps a row
-   near the bottom of a long scrolled participant list does not have the panel
-   open off-screen above them. `align-self: flex-start` is what makes sticky
-   possible: Bootstrap's `.row` is a flex container, and a column stretched to
-   the row's full height has no slack to slide within.
-
-   Sticky is deliberately confined to `lg`+. The column is `col-12 col-lg-3`
-   (battle-tracker.component.html:828), so below 992px it stacks UNDER the list
-   at full width, where pinning it would cover the list instead of flanking it.
-   The un-stick lives in the existing `max-width: 991.98px` block below rather
-   than in a new `min-width` query, keeping this file's desktop-first
-   max-width-only convention. */
-.detailsBar {
+/* Participant panel (CONTEXT.md; GM screen overhaul 01). A normal-flow column
+   BESIDE the initiative list, never an overlay: the list narrows to make room,
+   so Act and Delay stay clickable while the panel is open. Fixed width at `lg`
+   and up (see the `min-width: 992px` block below) so opening it never reflows
+   the panel's own contents, and sticky so a GM scrolled down a long list still
+   sees it. `align-self: flex-start` is what makes sticky possible inside
+   Bootstrap's flex `.row`. Below lg it stacks under the list and un-sticks
+   (the `max-width: 991.98px` block). */
+.participant-panel {
   align-self: flex-start;
   position: sticky;
   top: 0.5rem;
+  animation: participant-panel-in 150ms ease-out;
+}
+
+@keyframes participant-panel-in {
+  from { opacity: 0; transform: translateX(1.5rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+.participant-panel-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ui-gap);
+}
+
+.participant-panel-header h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.participant-panel-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .participant-panel { animation: none; }
+}
+
+/* Lets the initiative list's column actually shrink beside the participant
+   panel instead of being held at its content's width and pushing the panel
+   off-screen. */
+.gm-list-col {
+  min-width: 0;
 }
 
 .participant {
@@ -433,54 +457,6 @@
   margin-right: 0.4rem;
 }
 
-/* `min-width: 0` is the real fix for a flex/grid child that would otherwise
-   refuse to shrink. It used to be `overflow: hidden`, which clipped
-   library-positioned popovers (ngbDropdown / the Matrix OS editor) that
-   legitimately escape the column. */
-.gm-stats-col {
-  min-width: 0;
-}
-
-.gm-stats-roll-group {
-  flex-wrap: wrap;
-  column-gap: 0;
-  row-gap: var(--ui-gap);
-  width: 100%;
-}
-
-/* Atomic chip+input pair (E/R/I/D). `.gm-stats-roll-group` above may only
-   ever wrap BETWEEN pairs, never inside one, so a stat label can never land
-   on a different line from its own input (Xavier: "D should stick with its
-   right most box if it gets shrunken horizontally"). `flex: 0 0 auto` keeps
-   a pair sized to its own content instead of stretching or being asked to
-   shrink below it. */
-.gm-stat-pair {
-  display: flex;
-  flex-wrap: nowrap;
-  flex: 0 0 auto;
-}
-
-/* Recreates the merged single-border look Bootstrap's `.input-group` gives
-   its children via `.input-group > :not(:first-child) { margin-left: -1px }`
-   — that rule only fires on DIRECT children of `.input-group`, and the chip
-   and input are now grandchildren (nested one level inside `.gm-stat-pair`),
-   so it no longer applies to them. Restored by hand at the same offset, off
-   the theme's own border-width token, so a pair reads as one merged control
-   exactly as it did before the wrapper existed. Border-radius needs no
-   equivalent fix: the theme already zeroes it on `.form-control` /
-   `.input-group-text` everywhere (see `:root body .form-control` etc. in
-   styles.scss), so there was never a corner to square here. */
-.gm-stat-pair .gm-stat-input,
-.gm-stat-pair .gm-dice-count-input {
-  margin-left: calc(-1 * var(--cd-border-thin));
-}
-
-/* ── Stats twirly ──────────────────────────────────────────────────────────
-   Wrapper for the stats cell in both states: collapsed (one summary button)
-   and expanded (caret button + the four pairs). `min-width: 0` so the
-   input-group inside — which `styles.scss` gives `width: 100%` — can actually
-   shrink to the space left beside the caret instead of overflowing the
-   column. */
 /* Capped well below the cell's own max width, deliberately: the leftover is
    the breathing room the GROUP / GRUNT badge sits in (Xavier: "i see there is
    some room for the badge which is good, keep that bit of extra space still").
@@ -489,23 +465,10 @@
   max-width: 14.25rem;
 }
 
-.gm-stats-cell {
-  display: flex;
-  align-items: center;
-  gap: var(--ui-gap);
-  min-width: 0;
-  width: 100%;
-}
-
-.gm-stats-cell .gm-stats-roll-group {
-  min-width: 0;
-}
-
-/* Square icon-button geometry, shared by the expanded-state caret and the
-   trailing Deck/Awakened/Private icons. Sized off the same control tokens as
-   every other control in the row, so they line up on a shared baseline
-   instead of being hand-tuned pixel values. */
-.gm-stat-twirl,
+/* Square icon-button geometry for the trailing Deck/Awakened/Private icons.
+   Sized off the same control tokens as every other control in the row, so
+   they line up on a shared baseline instead of being hand-tuned pixel
+   values. */
 .gm-trailing-icon {
   flex: 0 0 auto;
   width: var(--ui-icon-btn-w);
@@ -582,42 +545,6 @@
   order: 2;
 }
 
-/* Collapsed summary: caret + `E2 R5 I4 D2`. A button rather than a span so the
-   numbers are the click target, but it must not look or size like a normal
-   `.btn` — it is a readout first and a control second, so the chrome is
-   minimal and it hugs its content. */
-.gm-stats-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: 0 var(--ui-control-pad-x-xs);
-  height: var(--ui-control-h);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.gm-stat-caret {
-  opacity: 0.75;
-  flex: 0 0 auto;
-}
-
-/* Each value keeps the colour its editable chip has (`.gm-chip-*` in
-   styles.scss), so E/R/I/D stay identifiable at a glance in either state and
-   the collapse is not a change of visual language. Sized as a compact pill:
-   four of these plus the caret are ~115px against the ~230px the eight
-   editable controls occupy. */
-.gm-stat-read {
-  font-size: var(--ui-control-font-xs);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.02em;
-  padding: 0.15rem 0.22rem;
-  border: var(--cd-border-thin) solid transparent;
-  flex: 0 0 auto;
-}
-
 /* An input-group with a wrapped second line needs its own inline sizing so the
    fields do not stretch to the full column width. */
 .gm-inline-input-group {
@@ -631,15 +558,8 @@
   padding-right: 0.2rem;
 }
 
-.gm-dice-count-input {
-  min-width: 2.7rem;
-  max-width: 3.2rem;
-  padding-left: 0.2rem;
-  padding-right: 0.2rem;
-}
-
 /* Rolled Initiative column. Its input-group holds only the rolled-total input
-   and the roll-die button, so unlike .gm-stats-roll-group it neither needs to
+   and the roll-die button, so it neither needs to
    wrap nor to stretch to the full column width. Stacked column, not row
    (overriding the template's `d-flex align-items-center`, which is a row by
    default): the ask-to-roll button and the roll-status badge (QA fix round 3)
@@ -727,8 +647,8 @@
    is the ceiling.
 
    The old 5rem was a reaction to this input being clipped at 3.6rem back when
-   it was the 10th child of the Stats input-group. The clipping was never really
-   about the box width — it was the full `--ui-control-pad-x` of side padding
+   it shared an input-group with the row's stat boxes. The clipping was never
+   really about the box width — it was the full `--ui-control-pad-x` of side padding
    eating the content box. Tightening the padding the way the stat inputs beside
    it already do buys back more room than the extra 1.4rem of width did, so two
    digits plus the number spinner fit comfortably in 2.9rem. */
@@ -759,8 +679,7 @@
    beside it), not two hard-stacked rows. Right-aligned via
    `justify-content: flex-end` so the row is sized to its own content rather
    than stretched to the column. `min-width: 0` is what lets this flex child
-   shrink to the column's actual width in the first place — the same fix
-   already applied to `.gm-stats-col` above. Without the width cap below, a
+   shrink to the column's actual width in the first place. Without the width cap below, a
    right-aligned row whose buttons don't fit the column (e.g. Deck + Awakened
    + Private together) is not clamped — it grows to its full content width
    and overflows LEFTWARD, painting over the Actions column beside it
@@ -1209,21 +1128,15 @@
    ini column could be much narrower, its very wide for just a two digit
    number... the rolled initiative column could be much narrower too").
 
-   Only Name flexes. Everything else is pinned to the width its content
-   actually needs, so the leftover space at wide viewports lands in the one
-   cell that can use it, and the trailing icon strip stays pinned to the right
-   edge. The header cells above carry these same classes, so labels stay over
-   the columns they describe (AC 10).
+   Only Name flexes (up to a cap). Everything else is pinned to the width its
+   content actually needs, and the trailing icon strip stays pinned to the
+   right edge. The header cells above carry these same classes, so labels stay
+   over the columns they describe (AC 10). The row's E/R/I/D column is gone:
+   those stats live in the participant panel's Stats tab (GM screen overhaul
+   01).
 
    The widths are content measurements, not round numbers:
      ini      2 digits, centred
-     stats    the collapsed `E2 R5 I4 D2` readout (~115px). The EXPANDED
-              editor wraps to four lines here, one chip+input pair per line.
-              Widening this cell does not fix that and was tried: the caret
-              button sits on the same line and takes 28px, so fitting two
-              ~64px pairs beside it needs ~173px — 58px of dead space every
-              time the cell is collapsed, which is nearly always. Four lines
-              on the one row being edited is the better trade.
      rolled   2.9rem input + a square roll button + the group's borders
      actions  the worst real case, Seize Initiative + Interrupts (~161px),
               which is just wider than Act + Delay + Interrupts (~155px)
@@ -1233,14 +1146,10 @@
      about 25% and i think everything will fit great") - and that is exactly
      right: this basis is the width the Name cell refuses to shrink below, so
      it was the last 32px standing between the 1024px row and a single line. */
-  /* Name and Stats are BOTH growable now, and both capped. Name used to be the
-     row's only flexible cell, which meant it swallowed every pixel the fixed
-     cells didn't use and left a lake of empty space beside the input (Xavier:
-     "the name input is still a bit long and the other columns dont flow to
-     take that space"). Capping Name lets the rest flow into Stats instead.
-     18.25rem = the 14.25rem input cap plus the same 4rem of badge room the
-     15rem/11rem pairing had, so widening the input did not eat it. Everything
-     to the right of Name — Ini, Stats, Roll — shifts right with it. */
+  /* Name grows but is capped, so it doesn't swallow every spare pixel and
+     leave a lake of empty space beside the input (Xavier: "the name input is
+     still a bit long and the other columns dont flow to take that space").
+     18.25rem = the 14.25rem input cap plus 4rem of badge room. */
   .gm-col-name {
     flex: 1 1 5.75rem;
     width: auto;
@@ -1249,7 +1158,7 @@
   }
 
   /* 3.25rem left the six cells 4px wider than the 738px list at 1024px with the
-     details panel open, which wrapped the whole trailing strip to a second line
+     old details column open, which wrapped the whole trailing strip to a second line
      and doubled every row there. 3rem leaves 36px of content box, comfortable
      for the widest value this ever holds: a negative two-digit Score plus the
      `.edged` marker ("-15e", ~30px). */
@@ -1258,32 +1167,16 @@
     width: 3rem;
   }
 
-  /* Grows into the space Name no longer takes, up to the width that fits the
-     EXPANDED editor on two lines instead of four: caret (28px) + two ~64px
-     chip+input pairs per line ≈ 172px of content box, so 11.5rem. Xavier
-     prefers the two-line editor, and this is the width that buys it without
-     any cell being padded out with dead space to get there.
-     It still starts at 8rem, the collapsed `E2 R5 I4 D2` readout's own width,
-     so at 1024px — where there is no slack at all — nothing is stolen from the
-     cells that need it and the editor falls back to four lines. */
-  .gm-col-stats {
-    flex: 1 1 8rem;
-    width: auto;
-    max-width: 11.5rem;
-    min-width: 0;
-  }
-
   .gm-col-rolled {
     flex: 0 0 5rem;
     width: 5rem;
   }
 
-  /* `margin-left: auto` absorbs whatever is still free once Name and Stats have
-     both hit their caps, which pins Actions + Trailing to the row's right edge.
-     Without it that leftover trails off the right-hand end at wide viewports
-     and the icon strip drifts away from the edge. Auto margins only take free
-     space AFTER flex-grow has had it, so this never competes with Name/Stats
-     growing — at 1024px, where there is no free space at all, it resolves to
+  /* `margin-left: auto` absorbs whatever is still free once Name has hit its
+     cap, which pins Actions + Trailing to the row's right edge. Without it
+     that leftover trails off the right-hand end at wide viewports and the icon
+     strip drifts away from the edge. Auto margins only take free space AFTER
+     flex-grow has had it, so this never competes with Name growing — at 1024px, where there is no free space at all, it resolves to
      zero and changes nothing. */
   .gm-col-actions {
     flex: 0 0 11rem;
@@ -1304,12 +1197,21 @@
     width: 24rem;
     margin-left: auto;
   }
+
+  /* The participant panel's fixed width beside the list (the list column is
+     `col-lg`, so it takes whatever is left). 25rem fits the two Condition
+     Monitor tracks and the Stats tab's label/input rows without wrapping. */
+  .participant-panel {
+    flex: 0 0 25rem;
+    width: 25rem;
+    max-width: 25rem;
+  }
 }
 
 /* Below lg the initiative row falls back to two 12-column lines and the
-   details panel drops under the list; keep both readable. */
+   participant panel drops under the list; keep both readable. */
 @media (max-width: 991.98px) {
-  .detailsBar {
+  .participant-panel {
     margin-top: 0.75rem;
     /* Un-stick: below lg the panel is a full-width block UNDER the list, so
        pinning it would park it over the list instead of beside it. */
@@ -1321,10 +1223,6 @@
    header above them describes nothing and is hidden rather than drawn as a
    stack of three orphaned labels. The row itself keeps every control. */
 @media (max-width: 767.98px) {
-  .gm-stats-roll-group {
-    width: 100%;
-  }
-
   /* Full-width stacked cell below md, so the rolled-total input and its roll
      button spread across the row instead of huddling in the centre. */
   .gm-rolled-ini-group {

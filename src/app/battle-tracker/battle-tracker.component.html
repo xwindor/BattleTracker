@@ -220,10 +220,9 @@
     </div>
   </div>
   <div class="row">
-    <!-- Open Decision 2: the 9/12 main column applies only while the details
-         panel is actually open. With nothing selected it used to waste 25% of
-         a wide desktop permanently. -->
-    <div class="col-12" [class.col-lg-9]="selectedActor !== null && selectedActor !== undefined">
+    <!-- The initiative list takes whatever width the participant panel
+         (below) leaves. With the panel closed it takes the full width. -->
+    <div class="col-12 col-lg gm-list-col">
       <!-- Overwatch reminders. OS rises by the DEFENDER's hits on any Attack
            or Sleaze action (Core p. 232), which this app does not roll - so the GM
            is reminded to apply it. Not an alert threshold: SR5 has no
@@ -253,24 +252,18 @@
            its very wide for just a two digit number". `col-12`/`col-md-*` are
            kept: below lg the twelfths are still exactly right. -->
       <div class="row bg-dark text-light d-none d-md-flex">
-        <div class="col-md-4 gm-col-name">
+        <div class="col-md-7 gm-col-name">
           <span class="gm-col-header">Name</span>
         </div>
         <div class="col-md-2 text-center gm-col-ini">
           <span class="gm-col-header">Ini</span>
         </div>
-        <div class="col-md-6 text-center gm-col-stats">
-          <span class="gm-col-header">Stats / Dice Pool</span>
-        </div>
-        <!-- The rolled Initiative total has its own column: it used to be the
-             10th child of the Stats input-group, where it was the first thing
-             to be squeezed off and was routinely clipped. Only labelled at lg —
-             below that the column sits on the row's second 12-column line,
-             which this header does not describe. Now that it is sized to its
-             own content rather than to a twelfth, the long label no longer
-             fits, so it is abbreviated to "Roll" with the full wording in the
-             tooltip. -->
-        <div class="d-none d-lg-block text-center gm-col-rolled">
+        <!-- The rolled Initiative total's column. With the E/R/I/D column gone
+             (moved to the participant panel's Stats tab), Name + Ini + Roll
+             fill the row's first 12-column line from md up, so the label shows
+             from md. Sized to its own content, so the long label is abbreviated
+             to "Roll" with the full wording in the tooltip. -->
+        <div class="d-none d-md-block col-md-3 text-center gm-col-rolled">
           <span class="gm-col-header" title="Rolled Initiative">Roll</span>
         </div>
         <!-- Spacer over the unlabelled Actions + Trailing cells. Sized to the
@@ -282,8 +275,8 @@
       <div cdkDropList (cdkDropListDropped)="drop($event)">
         @for(p of combatManager.participants.items; track $index; let i = $index; let last = $last) {
         <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
-          (click)="selectActor(p)" [class]="getParticipantStyles(p)" cdkDrag>
-          <div class="col-12 col-md-4 gm-col-name d-flex align-items-center gap-1">
+          (click)="onParticipantRowClick(p, $event)" [class]="getParticipantStyles(p)" cdkDrag>
+          <div class="col-12 col-md-7 gm-col-name d-flex align-items-center gap-1">
             <!-- Merge tick (addendum Decision 10): only a standalone grunt can
                  be folded into a group, so only a grunt gets the box. -->
             @if (isMergeableGruntCandidate(p)) {
@@ -300,7 +293,12 @@
                  line off (RULINGS.md 2026-08-30). The join line now fires
                  only from `announceJoinIfPending`, itself only called from a
                  genuine Initiative Test result. -->
+            <!-- Clicking the name box opens this participant's panel, like a
+                 click on the row itself (GM screen overhaul 01). The row's
+                 own handler ignores clicks on boxes, so this one opens it. -->
             <input name="name" type="text" autocomplete="off" placeholder="Name" class="form-control gm-name-input"
+              title="Click to open this participant's panel"
+              (click)="selectActor(p)"
               (keydown)="inpName_KeyDown($event)" [(ngModel)]="p.name" (ngModelChange)="onParticipantUpdated()">
             <!-- Identification badges (addendum Decision 12): presentation only.
                  A group row and a lone grunt both read differently from a PC or
@@ -338,92 +336,13 @@
           <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
             <span class="control-label lblIni" data-testid="gm-initiative-score">{{ getInitiativeScoreDisplay(p) }}</span>
           </div>
-          <!-- E/R/I/D collapse behind a twirly (Xavier: "maybe we need a twirly
-               we can collapse for stat input"). Rationale is row height: these
-               eight controls are ~230px of a `col-lg-3` - a quarter of the
-               row's width - spent on values typed once at setup and then
-               essentially never touched again, while the every-pass controls
-               (Act / Delay / Interrupts / roll) were the ones being forced to
-               wrap. Collapsed still SHOWS the numbers rather than hiding them,
-               so init dice can still be sanity-checked mid-fight at a glance;
-               only editing costs a tap. State lives in `expandedStatEditors`
-               (battle-tracker.component.ts) and is per-participant.
-               No `$event.stopPropagation()`: every other button in this row
-               (Deck, Awakened, Delete...) lets the click through to the row's
-               `selectActor`, and selecting the actor you are editing is the
-               desired behaviour anyway. -->
-          <div class="col-12 col-md-6 gm-col-stats text-center gm-stats-col d-flex align-items-center">
-            <div class="gm-stats-cell">
-            @if (!areStatsExpanded(p)) {
-            <!-- Collapsed: caret and the four values are ONE control, so the
-                 numbers themselves are the click target (clicking a value to
-                 edit it is the instinct) without adding a second focusable
-                 element to the row. -->
-            <button type="button" class="btn btn-outline-secondary gm-stats-summary"
-              data-testid="stat-twirl"
-              (click)="toggleStatEditor(p)"
-              [attr.aria-expanded]="false"
-              title="Edit Edge / Reaction / Intuition / Initiative Dice">
-              <i class="fa fa-caret-right gm-stat-caret" aria-hidden="true"></i>
-              <span class="gm-stat-read gm-chip-edge" title="Edge">E{{ getParticipantEdgeRatingValue(p) }}</span>
-              <span class="gm-stat-read gm-chip-reaction" title="Reaction">R{{ getParticipantReactionValue(p) }}</span>
-              <span class="gm-stat-read gm-chip-intuition" title="Intuition">I{{ getParticipantIntuitionValue(p) }}</span>
-              <span class="gm-stat-read gm-chip-initdice" title="Initiative Dice">D{{ p.dices }}</span>
-            </button>
-            }
-            @else {
-            <button type="button" class="btn btn-secondary gm-stat-twirl"
-              data-testid="stat-twirl"
-              (click)="toggleStatEditor(p)"
-              [attr.aria-expanded]="true"
-              title="Done editing Edge / Reaction / Intuition / Initiative Dice">
-              <i class="fa fa-caret-down gm-stat-caret" aria-hidden="true"></i>
-            </button>
-            <div class="input-group gm-stats-roll-group">
-              <!-- Each chip+input is an atomic, unbreakable pair (Xavier: "D
-                   should stick with its right most box if it gets shrunken
-                   horizontally"). The group below may wrap between pairs,
-                   never inside one - see `.gm-stat-pair` in
-                   battle-tracker.component.css. -->
-              <div class="gm-stat-pair">
-                <span class="input-group-text gm-stat-chip gm-chip-edge" title="Edge">E</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="getParticipantEdgeRatingValue(p)"
-                  (ngModelChange)="onParticipantEdgeRatingChanged(p, $event)" [min]="0" title="Edge">
-              </div>
-              <div class="gm-stat-pair">
-                <span class="input-group-text gm-stat-chip gm-chip-reaction" title="Reaction">R</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="getParticipantReactionValue(p)"
-                  (ngModelChange)="onParticipantReactionChanged(p, $event)" [min]="0" title="Reaction">
-              </div>
-              <div class="gm-stat-pair">
-                <span class="input-group-text gm-stat-chip gm-chip-intuition" title="Intuition">I</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="getParticipantIntuitionValue(p)"
-                  (ngModelChange)="onParticipantIntuitionChanged(p, $event)" [min]="0" title="Intuition">
-              </div>
-              <div class="gm-stat-pair">
-                <span class="input-group-text gm-stat-chip gm-chip-initdice" title="Initiative Dice">D</span>
-                <input class="form-control text-center gm-dice-count-input" type="number"
-                  [ngModel]="p.dices"
-                  (ngModelChange)="onParticipantDiceCountChanged(p, $event)"
-                  [min]="1"
-                  title="Initiative Dice">
-              </div>
-            </div>
-            }
-            </div>
-          </div>
-          <!-- Rolled Initiative: its own column (header "Rolled Initiative"
-               above). The input and the roll-die button are one input-group so
-               they stay adjacent and the same height; they used to be the last
-               two children of the Stats group, where the input was the first
-               thing squeezed and was clipped at any laptop width. -->
+          <!-- Rolled Initiative: its own column (header "Roll" above). The input
+               and the roll-die button are one input-group so they stay adjacent
+               and the same height. -->
           <div class="col-12 col-md-3 gm-col-rolled text-center gm-rolled-ini-col d-flex align-items-center">
             <div class="input-group gm-rolled-ini-group">
-              <!-- One-way binding + explicit handler (same shape as the dice-count
-                   box above): the typed value must be clamped *before* it reaches
+              <!-- One-way binding + explicit handler (same shape as the Stats
+                   tab's Initiative Dice box): the typed value must be clamped *before* it reaches
                    the Score-moving `diceIni` setter, otherwise an out-of-range
                    entry moves the running Initiative Score by the unclamped
                    amount (Core p. 160 - the Score only moves by the rolled delta). -->
@@ -498,7 +417,7 @@
                from 1024 to 1920px whenever more than two buttons were
                present. `.gm-action-buttons` (below) wraps instead. `role`
                kept for the same grouping semantics. -->
-          <div class="col-12 col-md-5 gm-col-actions gm-action-buttons" role="group">
+          <div class="col-12 col-md-7 gm-col-actions gm-action-buttons" role="group">
             <!-- Seize the Initiative (Core p. 160, "Initiative and Edge";
                  one point of Edge, Core p. 56). Table ruling R1
                  (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's
@@ -636,7 +555,7 @@
           <!-- Sized at lg to the six icon buttons plus their gaps (~196px), so
                the strip sits on one line instead of the two it wrapped to at
                every width, 1024px included. -->
-          <div class="col-12 col-md-4 gm-col-trailing">
+          <div class="col-12 col-md-5 gm-col-trailing">
             <!-- Deck(or Group)/Awakened/Claimable/Claimed/Duplicate/Enter-or-
                  Leave/Delete: ONE wrapping flex row, not two hard-stacked rows
                  (text buttons above, icon buttons below). The two-row split was
@@ -1295,12 +1214,22 @@
       </div>
     </div>
 
+    <!-- Participant panel (CONTEXT.md; GM screen overhaul 01, GitHub #4).
+         Opened by a click on a participant's row or name box (not on the
+         row's buttons), or by adding a participant; closed by its ×. It sits
+         BESIDE the list, which narrows, so the list stays clickable. It never
+         follows the turn. -->
     @if (selectedActor !== null && selectedActor !== undefined)
     {
-    <div class="col-12 col-lg-3 detailsBar">
+    <aside class="col-12 participant-panel" data-testid="participant-panel"
+      [attr.aria-label]="(selectedActor.name || 'Participant') + ' details'">
       <div class="card">
         <div class="card-header">
-          <h3>{{ selectedActor.name || "Selected Actor" }}</h3>
+          <div class="participant-panel-header">
+            <h3 data-testid="participant-panel-name">{{ selectedActor.name || "Participant" }}</h3>
+            <button type="button" class="btn-close participant-panel-close" data-testid="participant-panel-close"
+              aria-label="Close panel" title="Close" (click)="closeParticipantPanel()"></button>
+          </div>
           <!-- Defect 7 (fix round 2): D-X4 retains professionalRating/label
                as GM-only identification "so the GM can see what a
                participant was created from" - nothing rendered it. GM-only
@@ -1322,7 +1251,7 @@
                  the entire row. -->
             @if (!isNpcRow(selectedActor)) {
             <ng-container ngbNavItem>
-              <button ngbNavLink>Condition Monitor</button>
+              <button ngbNavLink>Condition</button>
               <ng-template ngbNavContent>
                 <h4>Condition Monitor</h4>
                 @if (hasGruntConditionMonitor(selectedActor)) {
@@ -1444,11 +1373,40 @@
                   </div>
                 </div>
                 }
+                <!-- Edge, Reaction and Intuition moved here from the row
+                     (GM screen overhaul 01). Same bindings and handlers the
+                     row boxes used, so an edit records exactly as before. -->
                 <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Initiative Dices</span></div>
+                  <div class="col-7"><label for="panel-edge-input">Edge</label></div>
                   <div class="col-5">
-                    <!-- One-way binding + explicit handler, same shape as the
-                         row dice-count box. A two-way [(ngModel)] would write
+                    <input id="panel-edge-input" type="number" class="form-control form-control-sm"
+                      data-testid="panel-edge-input" [min]="0"
+                      [ngModel]="getParticipantEdgeRatingValue(selectedActor)"
+                      (ngModelChange)="onParticipantEdgeRatingChanged(selectedActor, $event)">
+                  </div>
+                </div>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><label for="panel-reaction-input">Reaction</label></div>
+                  <div class="col-5">
+                    <input id="panel-reaction-input" type="number" class="form-control form-control-sm"
+                      data-testid="panel-reaction-input" [min]="0"
+                      [ngModel]="getParticipantReactionValue(selectedActor)"
+                      (ngModelChange)="onParticipantReactionChanged(selectedActor, $event)">
+                  </div>
+                </div>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><label for="panel-intuition-input">Intuition</label></div>
+                  <div class="col-5">
+                    <input id="panel-intuition-input" type="number" class="form-control form-control-sm"
+                      data-testid="panel-intuition-input" [min]="0"
+                      [ngModel]="getParticipantIntuitionValue(selectedActor)"
+                      (ngModelChange)="onParticipantIntuitionChanged(selectedActor, $event)">
+                  </div>
+                </div>
+                <div class="row align-items-center mb-2">
+                  <div class="col-7"><span>Initiative Dice</span></div>
+                  <div class="col-5">
+                    <!-- One-way binding + explicit handler. A two-way [(ngModel)] would write
                          the new count onto the participant *before* the
                          handler ran, so the handler would compare the new
                          value against itself, see no change, and skip the
@@ -1512,7 +1470,7 @@
           <div [ngbNavOutlet]="nav" class="mt-2"></div>
         </div>
       </div>
-    </div>
+    </aside>
     }
   </div>
 </div>

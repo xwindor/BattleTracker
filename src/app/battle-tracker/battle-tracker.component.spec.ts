@@ -403,30 +403,30 @@ describe('BattleTrackerComponent', () => {
   }
 
   /**
-   * The Initiative Dice *count* box on participant row `index`.
+   * The Initiative Dice *count* box for participant row `index`.
    *
-   * The row's E/R/I/D now collapse behind a twirly and render as a read-only
-   * `E2 R5 I4 D2` summary until expanded, so the input does not exist in the
-   * DOM at rest. This opens that row's twirly through its real control - the
-   * same click the GM makes - rather than reaching into `expandedStatEditors`,
-   * so these stay end-to-end DOM tests of the box the GM actually types in.
+   * GM screen overhaul 01 moved the row's E/R/I/D boxes into the participant
+   * panel's Stats tab. This opens that participant's panel the way the GM does
+   * (a click on the row's name box), then the Stats tab, so these stay
+   * end-to-end DOM tests of the box the GM actually types in.
    */
   function rowDiceCountInput(index: number): HTMLInputElement {
     const row = fixture.nativeElement.querySelector('#participant' + index) as HTMLElement;
-    if (!row.querySelector('input.gm-dice-count-input')) {
-      const twirl = row.querySelector('[data-testid="stat-twirl"]') as HTMLButtonElement;
-      twirl.click();
-      fixture.detectChanges();
-    }
-    return row.querySelector('input.gm-dice-count-input') as HTMLInputElement;
+    (row.querySelector('input.gm-name-input') as HTMLInputElement).click();
+    fixture.detectChanges();
+    return openStatsTabOfOpenPanel();
   }
 
-  /** Select `p` and open the details pane's Stats tab, then return its dice input. */
+  /** Select `p` and open the participant panel's Stats tab, then return its dice input. */
   function openStatsTab(p: IParticipant): HTMLInputElement {
     component.selectActor(p);
     fixture.detectChanges();
+    return openStatsTabOfOpenPanel();
+  }
+
+  function openStatsTabOfOpenPanel(): HTMLInputElement {
     const links = Array.from(
-      fixture.nativeElement.querySelectorAll('.detailsBar nav button')
+      fixture.nativeElement.querySelectorAll('[data-testid="participant-panel"] nav button')
     ) as HTMLButtonElement[];
     const stats = links.find(b => (b.textContent || '').trim() === 'Stats');
     expect(stats).withContext('Stats tab button').toBeTruthy();
@@ -482,9 +482,10 @@ describe('BattleTrackerComponent', () => {
     });
   });
 
-  // Acceptance criterion 9 (Core pp. 52/288): 5D6 hard cap, call site 2 of 2 - the
-  // participant-row dice-count box.
-  describe('row Initiative Dice count input (DOM)', () => {
+  // Acceptance criterion 9 (Core pp. 52/288): 5D6 hard cap, reached the way the
+  // GM now reaches it from a row - click the name box to open the participant
+  // panel, then the Stats tab (GM screen overhaul 01 moved the row's box there).
+  describe('row Initiative Dice count input, via the participant panel (DOM)', () => {
     it('rejects a count above the 5D6 hard cap', async () => {
       const p = rolled('Wired', 8, 1, 3); // Score 11
       CombatManager.started = true;
