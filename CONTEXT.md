@@ -35,7 +35,7 @@ The ⋯ menu on a participant's row, holding occasional actions on that particip
 _Avoid_: More menu, overflow menu, trailing buttons
 
 **Participant panel**:
-The right-hand panel showing one participant's details (Condition, Stats, Deck, Magic or Group); it opens only when asked for and stays on that participant until changed.
+The right-hand panel showing one participant's details (Condition, Stats, Deck, Awakened or Group); it opens only when asked for and stays on that participant until changed.
 _Avoid_: Character panel, details bar, side panel, drawer
 
 **Matrix panel**:
