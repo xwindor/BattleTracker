@@ -81,8 +81,9 @@ one session.
 
 ### Issue tracker
 
-To-do items live as markdown files under `.scratch/` in this repo (GitHub
-Issues is off). See `docs/agents/issue-tracker.md`.
+To-do items live in GitHub Issues on Xavier's fork, `xwindor/BattleTracker`,
+never on the original `MerGatto/BattleTracker`. See
+`docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
