@@ -59,6 +59,15 @@ describe('Grunt heal applies the DV input (briefs/grunt-heal-uses-dv-input.md)',
 
   afterEach(resetCombat);
 
+  /** Click the participant panel's Condition tab. */
+  function openConditionTab(): void {
+    const tab = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="participant-panel"] nav button') as NodeListOf<HTMLButtonElement>)
+      .find(b => (b.textContent || '').trim() === 'Condition');
+    expect(tab).withContext('Condition tab').toBeTruthy();
+    tab!.click();
+    fixture.detectChanges();
+  }
+
   /** A row created the way the GM's Grunt Group button creates one. */
   function gmRow(name: string, attribute: number, roll: number, memberNames: string[]): NpcRowParticipant {
     const row = component.addNpcRow(false);
@@ -193,6 +202,7 @@ describe('Grunt heal applies the DV input (briefs/grunt-heal-uses-dv-input.md)',
     component.hitGruntPhysical(grunt);        // 7 boxes on
     component.selectActor(grunt);
     fixture.detectChanges();
+    openConditionTab();                        // adding a grunt opens Stats (#5)
 
     const healBtn = fixture.nativeElement.querySelector('.grunt-heal') as HTMLButtonElement;
     expect(healBtn).withContext('heal button still classed .grunt-heal').toBeTruthy();

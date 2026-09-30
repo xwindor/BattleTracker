@@ -1216,7 +1216,9 @@
 
     <!-- Participant panel (CONTEXT.md; GM screen overhaul 01, GitHub #4).
          Opened by a click on a participant's row or name box (not on the
-         row's buttons), or by adding a participant; closed by its ×. It sits
+         row's buttons), or by adding a participant (on Stats); closed by its
+         ×, Escape, or deleting the participant (GitHub #5), and reopened
+         after a refresh once the GM rejoins the room. It sits
          BESIDE the list, which narrows, so the list stays clickable. It never
          follows the turn. -->
     @if (selectedActor !== null && selectedActor !== undefined)
@@ -1230,19 +1232,21 @@
             <button type="button" class="btn-close participant-panel-close" data-testid="participant-panel-close"
               aria-label="Close panel" title="Close" (click)="closeParticipantPanel()"></button>
           </div>
-          <!-- Defect 7 (fix round 2): D-X4 retains professionalRating/label
-               as GM-only identification "so the GM can see what a
-               participant was created from" - nothing rendered it. GM-only
-               view, GM-only data (getParticipantStatblockLabel never reads
-               SharedParticipantState). -->
-          @if (getParticipantStatblockLabel(selectedActor); as statblockLabel) {
-          <div class="text-muted small" title="Statblock this participant was created from (GM only)">
-            {{ statblockLabel }}
+          <!-- A short description under the name: what kind of participant
+               this is, the statblock they were created from (defect 7, fix
+               round 2: D-X4 keeps professionalRating/label as GM-only
+               identification "so the GM can see what a participant was
+               created from"; getParticipantStatblockLabel never reads
+               SharedParticipantState), and whether they have left combat. -->
+          <div class="participant-panel-description" data-testid="participant-panel-description"
+            [attr.title]="getParticipantStatblockLabel(selectedActor) ? 'Statblock this participant was created from (GM only)' : null">
+            {{ participantPanelDescription(selectedActor) }}
           </div>
-          }
         </div>
         <div class="card-body">
-          <nav ngbNav #nav="ngbNav" class="nav-tabs">
+          <nav ngbNav #nav="ngbNav" class="nav-tabs participant-panel-tabs"
+            [activeId]="participantPanelTabFor(selectedActor)"
+            (activeIdChange)="onParticipantPanelTabChange($event)">
             <!-- A linked NPC row has no Condition Monitor of its own: the row
                  is a shared Initiative Score, the Condition Monitors belong to
                  its NPCs one each (criteria 3-4 / 18, Core p. 379) and are edited in
@@ -1250,7 +1254,7 @@
                  here showed a phantom 10/10 + 10/10 that, when tapped, benched
                  the entire row. -->
             @if (!isNpcRow(selectedActor)) {
-            <ng-container ngbNavItem>
+            <ng-container ngbNavItem="condition">
               <button ngbNavLink>Condition</button>
               <ng-template ngbNavContent>
                 <h4>Condition Monitor</h4>
@@ -1321,8 +1325,10 @@
                   </div>
                 </div>
                 } @else {
-                <div class="row">
-                  <div class="col-12 cm">
+                <!-- Physical and Stun side by side, each an even grid of
+                     square boxes (GM screen overhaul 02, target picture). -->
+                <div class="row participant-panel-tracks">
+                  <div class="col-6 cm">
                     <h4>Physical</h4>
                     <app-condition-monitor [health]="selectedActor.physicalHealth"
                       [overflow]="selectedActor.overflowHealth" [painTolerance]="selectedActor.painTolerance"
@@ -1330,7 +1336,7 @@
                       (damageChange)="onParticipantDamageChanged()">
                     </app-condition-monitor>
                   </div>
-                  <div class="col-12 cm">
+                  <div class="col-6 cm">
                     <h4>Stun</h4>
                     <app-condition-monitor [health]="selectedActor.stunHealth"
                       [painTolerance]="selectedActor.painTolerance" [hasPainEditor]="selectedActor.hasPainEditor"
@@ -1342,7 +1348,7 @@
               </ng-template>
             </ng-container>
             }
-            <ng-container ngbNavItem>
+            <ng-container ngbNavItem="stats">
               <button ngbNavLink>Stats</button>
               <ng-template ngbNavContent>
                 <h4>Stats</h4>
@@ -1375,37 +1381,33 @@
                 }
                 <!-- Edge, Reaction and Intuition moved here from the row
                      (GM screen overhaul 01). Same bindings and handlers the
-                     row boxes used, so an edit records exactly as before. -->
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><label for="panel-edge-input">Edge</label></div>
-                  <div class="col-5">
+                     row boxes used, so an edit records exactly as before.
+                     Laid out as two even columns, each label above its box
+                     (GM screen overhaul 02, target picture). -->
+                <div class="panel-stats-grid">
+                  <div class="panel-stat">
+                    <label for="panel-edge-input">Edge</label>
                     <input id="panel-edge-input" type="number" class="form-control form-control-sm"
                       data-testid="panel-edge-input" [min]="0"
                       [ngModel]="getParticipantEdgeRatingValue(selectedActor)"
                       (ngModelChange)="onParticipantEdgeRatingChanged(selectedActor, $event)">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><label for="panel-reaction-input">Reaction</label></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <label for="panel-reaction-input">Reaction</label>
                     <input id="panel-reaction-input" type="number" class="form-control form-control-sm"
                       data-testid="panel-reaction-input" [min]="0"
                       [ngModel]="getParticipantReactionValue(selectedActor)"
                       (ngModelChange)="onParticipantReactionChanged(selectedActor, $event)">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><label for="panel-intuition-input">Intuition</label></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <label for="panel-intuition-input">Intuition</label>
                     <input id="panel-intuition-input" type="number" class="form-control form-control-sm"
                       data-testid="panel-intuition-input" [min]="0"
                       [ngModel]="getParticipantIntuitionValue(selectedActor)"
                       (ngModelChange)="onParticipantIntuitionChanged(selectedActor, $event)">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Initiative Dice</span></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <span>Initiative Dice</span>
                     <!-- One-way binding + explicit handler. A two-way [(ngModel)] would write
                          the new count onto the participant *before* the
                          handler ran, so the handler would compare the new
@@ -1416,48 +1418,36 @@
                       [ngModel]="selectedActor.dices"
                       (ngModelChange)="onParticipantDiceCountChanged(selectedActor, $event)">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Overflow</span></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <span>Overflow</span>
                     <input type="number" class="form-control form-control-sm"
                       [min]="0" [max]="20" step="1"
                       [(ngModel)]="selectedActor.overflowHealth"
                       (ngModelChange)="onParticipantUpdated()">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Physical Health</span></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <span>Physical Health</span>
                     <input type="number" class="form-control form-control-sm"
                       [min]="0" [max]="20" step="1"
                       [(ngModel)]="selectedActor.physicalHealth"
                       (ngModelChange)="onParticipantUpdated()">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Stun Health</span></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <span>Stun Health</span>
                     <input type="number" class="form-control form-control-sm"
                       [min]="0" [max]="20" step="1"
                       [(ngModel)]="selectedActor.stunHealth"
                       (ngModelChange)="onParticipantUpdated()">
                   </div>
-                </div>
-                <div class="row align-items-center mb-2">
-                  <div class="col-7"><span>Pain Tolerance</span></div>
-                  <div class="col-5">
+                  <div class="panel-stat">
+                    <span>Pain Tolerance</span>
                     <input type="number" class="form-control form-control-sm"
                       [min]="0" [max]="15" step="1"
                       [(ngModel)]="selectedActor.painTolerance"
                       (ngModelChange)="onParticipantUpdated()">
                   </div>
-                </div>
-                <div class="row">
-                  <div class="col-12">
+                  <div class="panel-stat">
                     <span>Ignore Pain</span>
-                  </div>
-                  <div class="col-12">
                     <label class="switch">
                       <input type="checkbox" [(ngModel)]="selectedActor.hasPainEditor" />
                       <span class="slider round"></span>

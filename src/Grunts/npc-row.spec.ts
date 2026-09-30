@@ -2585,6 +2585,12 @@ describe('NPC group initiative - Round 4 Decisions 20-25', () => {
       const grunt = component.addGrunt('Lone Ganger');
       component.selectActor(grunt);
       fixture.detectChanges();
+      // Adding a grunt opens their panel on Stats (GM screen overhaul 02, #5);
+      // the damage controls are on Condition.
+      const conditionTab = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="participant-panel"] nav button') as NodeListOf<HTMLButtonElement>)
+        .find(b => (b.textContent || '').trim() === 'Condition');
+      conditionTab!.click();
+      fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('.grunt-dv')).withContext('DV input').toBeTruthy();
       expect(fixture.nativeElement.querySelector('.grunt-hit-physical')).withContext('P button').toBeTruthy();

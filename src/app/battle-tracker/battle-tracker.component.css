@@ -152,6 +152,80 @@
   flex: 0 0 auto;
 }
 
+/* Look (GM screen overhaul 02, target picture): the name large at the top
+   with a short description under it, tabs marked by an underline rather than
+   a boxed folder tab, Physical and Stun side by side, and the Stats boxes in
+   two even columns. Colours are the app's own (styles.scss). */
+.participant-panel {
+  /* One gap size for the whole panel (spec #3, "Look": the gaps are the same
+     everywhere). */
+  --panel-gap: calc(var(--ui-gap) * 2);
+}
+
+.participant-panel-header h3 {
+  font-size: 1.6rem;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+
+.participant-panel-description {
+  margin-top: var(--panel-gap);
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.participant-panel-tabs {
+  gap: var(--panel-gap);
+  border-bottom: 1px solid #1f3c48;
+}
+
+.participant-panel-tabs .nav-link,
+.participant-panel-tabs .nav-link:hover,
+.participant-panel-tabs .nav-link.active {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  padding: var(--panel-gap) 0;
+  margin-bottom: -1px;
+}
+
+.participant-panel-tabs .nav-link:hover {
+  border-bottom-color: #205464;
+}
+
+.participant-panel-tabs .nav-link.active {
+  border-bottom-color: #2bf4c8;
+}
+
+.participant-panel h4 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+  margin-bottom: var(--panel-gap);
+}
+
+.panel-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--panel-gap);
+}
+
+.panel-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-gap);
+  min-width: 0;
+}
+
+.panel-stat > :first-child {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .participant-panel { animation: none; }
 }

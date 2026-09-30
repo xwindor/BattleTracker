@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, TemplateRef, ViewChild, ElementRef } from "@angular/core";
+import { AfterViewChecked, Component, OnInit, OnDestroy, ChangeDetectorRef, TemplateRef, ViewChild, ElementRef, HostListener } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import { NgbNavModule, NgbDropdownModule, NgbModal, NgbModalRef, NgbTooltip } from "@ng-bootstrap/ng-bootstrap";
 import { Subscription } from "rxjs";
@@ -24,6 +24,10 @@ import {
   SharedGmState, SharedGmParticipantState, SharedActionState
 } from "app/services/session-sync.service";
 import { MatrixStateService } from "app/services/matrix-state.service";
+import {
+  ParticipantPanelTab, RememberedParticipantPanel,
+  readRememberedParticipantPanel, rememberParticipantPanel
+} from "app/battle-tracker/gm-screen-memory";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, DATA_PROCESSING_UNSET } from "Matrix";
 import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
@@ -1328,9 +1332,34 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * The participant whose participant panel is open (CONTEXT.md), or null when
    * the panel is closed; their row is marked `selected`. Opened by a click on
    * their row (see `onParticipantRowClick`), or by adding a participant. It
-   * never follows the turn.
+   * never follows the turn. Every change is remembered in the GM's browser
+   * (`rememberOpenPanel`), whichever of the many paths made it.
    */
-  selectedActor: IParticipant | null = null;
+  get selectedActor(): IParticipant | null {
+    return this._selectedActor;
+  }
+  set selectedActor(p: IParticipant | null) {
+    this._selectedActor = p;
+    this.rememberOpenPanel();
+  }
+  private _selectedActor: IParticipant | null = null;
+
+  /**
+   * The tab the participant panel shows. Kept when the panel switches to
+   * someone else, as the tab strip always did; a grunt group, which has only
+   * Stats, shows Stats without changing it (`participantPanelTabFor`).
+   */
+  participantPanelTab: ParticipantPanelTab = "condition";
+
+  /**
+   * The panel that was open before the last refresh, waiting for its
+   * participant to come back. Participants only come back when the GM
+   * rejoins their room (`restoreFromSharedState`), so the screen starts with
+   * the panel closed and reopens it then. Read before the constructor adds
+   * its blank participant; dropped as soon as the GM opens or closes a panel
+   * themself, or a rejoin settles it.
+   */
+  private pendingRememberedPanel: RememberedParticipantPanel | null = readRememberedParticipantPanel();
 
   constructor(
     private ref: ChangeDetectorRef,
@@ -1340,7 +1369,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     public matrixState: MatrixStateService,
     public osTracking: OsTrackingService
   ) {
-    this.addParticipant();
+    // The blank participant every screen starts with does not open its panel:
+    // the panel starts closed unless a remembered one comes back (spec #3,
+    // "Remembering": empty storage means nothing open).
+    this.addParticipant(false);
     this.changeDetector = ref;
     // A linked NPC row can be found spent by the engine itself
     // (`advanceToNextActors()`'s pre-step), not just by a GM tap. Registering
@@ -1569,8 +1601,76 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.selectActor(p);
   }
 
+  /** Open `p`'s participant panel on `tab` (adding someone opens it on Stats). */
+  openParticipantPanel(p: IParticipant, tab: ParticipantPanelTab) {
+    this.participantPanelTab = tab;
+    this.selectActor(p);
+  }
+
   closeParticipantPanel() {
     this.selectedActor = null;
+  }
+
+  /**
+   * Escape closes the participant panel - unless a pop-up or a menu is open,
+   * in which case Escape is theirs to close.
+   */
+  @HostListener("document:keydown.escape")
+  onEscapeKey() {
+    if (this.modalService.hasOpenModals() || document.querySelector(".dropdown-menu.show")) {
+      return;
+    }
+    if (this.selectedActor) {
+      this.closeParticipantPanel();
+    }
+  }
+
+  /**
+   * The short line under the name in the participant panel: what kind of
+   * participant this is (CONTEXT.md), the statblock they were created from,
+   * and whether they have left combat.
+   */
+  participantPanelDescription(p: IParticipant): string {
+    const kind = isNpcRow(p) ? "Grunt group" : hasGruntConditionMonitor(p) ? "Grunt" : "Character";
+    return [kind, this.getParticipantStatblockLabel(p), p.ooc ? "Left combat" : ""]
+      .filter(part => !!part)
+      .join(" · ");
+  }
+
+  /** The tab `p`'s panel shows: a grunt group has only Stats. */
+  participantPanelTabFor(p: IParticipant): ParticipantPanelTab {
+    return isNpcRow(p) ? "stats" : this.participantPanelTab;
+  }
+
+  onParticipantPanelTabChange(tab: ParticipantPanelTab) {
+    this.participantPanelTab = tab;
+    this.rememberOpenPanel();
+  }
+
+  /** The open panel as the GM's browser remembers it, or null when closed. */
+  private currentPanelMemory(): RememberedParticipantPanel | null {
+    const p = this._selectedActor;
+    return p ? { participantId: this.getParticipantId(p), tab: this.participantPanelTabFor(p) } : null;
+  }
+
+  private rememberOpenPanel() {
+    this.pendingRememberedPanel = null;
+    rememberParticipantPanel(this.currentPanelMemory());
+  }
+
+  /**
+   * After a rejoin rebuilds every participant: open `remembered`'s panel
+   * again if they are back, or leave it closed, with no message, if they are
+   * gone (story 64).
+   */
+  private reopenParticipantPanel(remembered: RememberedParticipantPanel | null) {
+    const p = remembered
+      ? this.combatManager.participants.items.find(x => this.getParticipantId(x) === remembered.participantId) ?? null
+      : null;
+    if (p && remembered) {
+      this.participantPanelTab = remembered.tab;
+    }
+    this.selectedActor = p;
   }
 
   sort() {
@@ -5123,6 +5223,11 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       return;
     }
 
+    // Taken before the ids are cleared below: which panel to reopen once
+    // everyone is rebuilt - the one remembered from before a refresh, else the
+    // one open now.
+    const panelToReopen = this.pendingRememberedPanel ?? this.currentPanelMemory();
+
     this.declaredActionSelections.clear();
     this.participantIds.clear();
     this.participantOwners.clear();
@@ -5445,6 +5550,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
     this.combatManager.participants.sortBySortOrder();
     this.restoreWarning = this.buildRestoreWarning(gmState);
+    this.reopenParticipantPanel(panelToReopen);
   }
 
   /**
@@ -5760,7 +5866,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
           actor: participant.name || finalName,
           text: PARTICIPANT_JOINED_LOG_TEXT
         }));
-        this.selectActor(p);
+        this.openParticipantPanel(p, "stats");
         this.syncSharedState();
         break;
       }
@@ -5843,7 +5949,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       actor: participant.name || STANDALONE_GRUNT_NAME_PREFIX,
       text: GRUNT_ADDED_LOG_TEXT
     }));
-    this.selectActor(grunt);
+    this.openParticipantPanel(grunt, "stats");
     this.syncSharedState();
     this.sort();
     return grunt;
@@ -5927,7 +6033,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       actor: participant.name || MERGED_GRUNT_ROW_NAME,
       text: ROW_FORMED_LOG_TEXT
     }));
-    this.selectActor(row);
+    this.openParticipantPanel(row, "stats");
     this.syncSharedState();
     this.sort();
     return row;
@@ -7648,7 +7754,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       stun: Math.max(0, Number(p.stunDamage || 0))
     });
     if (selectNewParticipant) {
-      this.selectActor(p);
+      this.openParticipantPanel(p, "stats");
     }
     this.syncSharedState();
     return p;
@@ -7704,7 +7810,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       text: GRUNT_ADDED_LOG_TEXT
     }));
     if (selectNewGrunt) {
-      this.selectActor(grunt);
+      this.openParticipantPanel(grunt, "stats");
     }
     this.syncSharedState();
     this.sort();
@@ -8358,7 +8464,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       text: ROW_FORMED_LOG_TEXT
     }));
     if (selectNewRow) {
-      this.selectActor(row);
+      this.openParticipantPanel(row, "stats");
     }
     this.syncSharedState();
     this.sort();
