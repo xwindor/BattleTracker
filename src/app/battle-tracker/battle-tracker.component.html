@@ -1338,7 +1338,16 @@
        one line showing the latest log entry; the choice is remembered in the
        GM's browser. Shrinking only HIDES the log and the roller (never removes
        them), so an incoming roll or a "Roll as" choice survives it. -->
+  <!-- Clear space the height of the strip's tab, so the tab never covers the
+       last initiative row (its Delete button) when scrolled to the end. -->
+  <div class="bottom-strip-clearance" aria-hidden="true"></div>
   <footer class="bottom-strip" data-testid="bottom-strip">
+    <!-- Shrink / Show: a folder tab standing on the strip's top-right corner
+         (Xavier, 2026-09-30), in the same place whether the strip is open or
+         shrunk to one line. -->
+    <button type="button" class="bottom-strip-tab" [attr.aria-expanded]="!bottomStripShrunk"
+      [title]="bottomStripShrunk ? 'Show the action log and the dice roller again' : 'Shrink to one line showing the latest log entry'"
+      (click)="setBottomStripShrunk(!bottomStripShrunk)">{{ bottomStripShrunk ? "Show log & dice ▴" : "Shrink ▾" }}</button>
     @if (bottomStripShrunk) {
     <div class="bottom-strip-line" data-testid="bottom-strip-line">
       <span class="bottom-strip-label">// Log</span>
@@ -1357,8 +1366,6 @@
       @else {
       <span class="bottom-strip-latest text-muted">No log entries yet.</span>
       }
-      <button type="button" class="btn btn-sm btn-outline-secondary bottom-strip-toggle"
-        (click)="setBottomStripShrunk(false)" title="Show the action log and the dice roller again">Show log &amp; dice ▴</button>
     </div>
     }
     <div class="bottom-strip-body" [hidden]="bottomStripShrunk">
@@ -1467,7 +1474,6 @@
       <section class="bottom-strip-dice" aria-label="Dice roller">
         <div class="bottom-strip-heading">
           <span class="bottom-strip-label bottom-strip-label-dice">// Dice</span>
-          <!-- The strip's top-right corner: the GM-rolls switches, then Shrink. -->
           <div class="bottom-strip-actions">
             @if (shareRoomCode) {
             <div class="gm-roll-visibility">
@@ -1493,8 +1499,6 @@
               }
             </div>
             }
-            <button type="button" class="btn btn-sm btn-outline-secondary"
-              (click)="setBottomStripShrunk(true)" title="Shrink to one line showing the latest log entry">Shrink ▾</button>
           </div>
         </div>
         <app-dice-roller

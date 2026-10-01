@@ -176,11 +176,17 @@ describe('Bottom strip (GM screen overhaul 03, #6)', () => {
     expect(lastRow.getBoundingClientRect().top).toBeGreaterThan(box.top);
   });
 
-  it('Shrink sits in the top-right corner of the strip, after the dice heading', () => {
-    const shrinkBox = buttonLabelled('Shrink').getBoundingClientRect();
-    const diceBox = strip().querySelector('.bottom-strip-dice')!.getBoundingClientRect();
-    expect(shrinkBox.left).toBeGreaterThan(diceBox.left);
-    expect(shrinkBox.top - diceBox.top).toBeLessThan(40);
+  it('Shrink is a tab standing on the top-right corner of the strip, and stays there when shrunk', () => {
+    const tabBox = () => buttonLabelled(component.bottomStripShrunk ? 'Show log' : 'Shrink').getBoundingClientRect();
+    const stripBox = () => strip().getBoundingClientRect();
+    expect(tabBox().bottom).toBeLessThanOrEqual(stripBox().top + 2); // joins the strip's top line
+    expect(stripBox().right - tabBox().right).toBeLessThan(40);
+    const right = tabBox().right;
+
+    shrink();
+
+    expect(tabBox().bottom).toBeLessThanOrEqual(stripBox().top + 2); // joins the strip's top line
+    expect(tabBox().right).toBeCloseTo(right, 0);
   });
 
   it('the roller shows "Your roll" and "Other players" as tabs, one at a time', () => {

@@ -788,7 +788,8 @@
    ever hidden underneath. */
 .gm-screen {
   --bottom-strip-height: 16rem;
-  --bottom-strip-cover: calc(var(--bottom-strip-height) + 1px);
+  --bottom-strip-tab-height: 1.6rem;
+  --bottom-strip-cover: calc(var(--bottom-strip-height) + 1px + var(--bottom-strip-tab-height));
   /* At least a window tall (less the page's own top bar), with the strip
      pushed to the end: on a short list the strip still rests on the window's
      bottom edge instead of floating under the last row. */
@@ -798,7 +799,7 @@
 }
 
 .gm-screen-strip-shrunk {
-  --bottom-strip-cover: 2.75rem;
+  --bottom-strip-cover: calc(2.75rem + var(--bottom-strip-tab-height));
 }
 
 @media (min-width: 992px) {
@@ -820,7 +821,6 @@
   position: sticky;
   bottom: 0;
   z-index: 20;
-  margin-top: auto;
   /* Out to the same edges as the initiative list above it. */
   margin-inline: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
   background: var(--cd-bg-elev, #0a1118);
@@ -895,13 +895,47 @@
   margin-left: auto;
 }
 
-.bottom-strip-actions .btn,
-.bottom-strip-toggle {
+.bottom-strip-actions .btn {
   white-space: nowrap;
 }
 
-.bottom-strip-toggle {
-  margin-left: auto;
+/* Shrink / Show: a folder tab standing on the strip's top edge at the right,
+   drawn in the strip's own top line and background so the two read as one
+   piece. Square corners, like everything else (spec #3, "Look"). */
+.bottom-strip-tab {
+  position: absolute;
+  bottom: 100%;
+  right: calc(var(--strip-gap) * 2);
+  height: var(--bottom-strip-tab-height);
+  padding: 0 calc(var(--strip-gap) * 1.5);
+  border: 1px solid var(--cd-line-strong, #2bf4c8);
+  border-bottom: 0;
+  margin-bottom: -1px;
+  background: var(--cd-bg-elev, #0a1118);
+  color: var(--cd-primary, #2bf4c8);
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bottom-strip-tab:hover {
+  color: var(--cd-text, #d5ffe9);
+  box-shadow: var(--cd-glow-soft, none);
+}
+
+.bottom-strip-tab:focus-visible {
+  outline: 1px solid var(--cd-text, #d5ffe9);
+  outline-offset: -3px;
+}
+
+.bottom-strip-clearance {
+  flex-shrink: 0;
+  height: var(--bottom-strip-tab-height);
+  /* Pushes the strip to the window's bottom edge on a short list. */
+  margin-top: auto;
 }
 
 /* The scroll bars still needed (a long log, a tall participant panel): thin
