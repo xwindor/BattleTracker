@@ -26,7 +26,8 @@ import {
 import { MatrixStateService } from "app/services/matrix-state.service";
 import {
   ParticipantPanelTab, RememberedParticipantPanel,
-  readRememberedParticipantPanel, rememberParticipantPanel
+  readRememberedParticipantPanel, rememberParticipantPanel,
+  readRememberedBottomStripShrunk, rememberBottomStripShrunk
 } from "app/battle-tracker/gm-screen-memory";
 import { OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, DATA_PROCESSING_UNSET } from "Matrix";
@@ -520,6 +521,16 @@ const GM_LOG_TEXT = {
   nonPlayerRolledBatch: (count: number) =>
     `Rolled initiative for ${pluralize(count, "non-player participant")}`
 } as const;
+
+/** One log line as the shrunk bottom strip shows it. */
+interface LatestLogLine {
+  timestamp: string | Date;
+  /** Empty for the no-room log, whose lines already start with who acted. */
+  actor: string;
+  text: string;
+  /** Kept off the players' screens (the log's "hidden" marker). */
+  hidden: boolean;
+}
 
 @Component({
   standalone: true,
@@ -1623,6 +1634,48 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     if (this.selectedActor) {
       this.closeParticipantPanel();
     }
+  }
+
+  /**
+   * The bottom strip (CONTEXT.md; GM screen overhaul 03, GitHub #6) is shrunk
+   * to one line showing the latest log entry. Remembered in the GM's browser;
+   * blocked or empty storage means expanded (story 65). Shrinking only hides
+   * the log and the dice roller - they stay built, so a roll landing or a
+   * "Roll as" choice made meanwhile is still there when the strip comes back.
+   */
+  bottomStripShrunk = readRememberedBottomStripShrunk();
+
+  setBottomStripShrunk(shrunk: boolean) {
+    this.bottomStripShrunk = shrunk;
+    rememberBottomStripShrunk(shrunk);
+    if (!shrunk) {
+      // A hidden list can't scroll, so entries logged while shrunk would
+      // otherwise sit below the fold when it comes back.
+      this.pendingLogScroll = true;
+    }
+  }
+
+  /**
+   * The newest line in the log pane, for the shrunk strip: the last shared
+   * entry in a room, otherwise the last line the pane shows with no room
+   * (its own lines come after any retained hidden ones). Null when empty.
+   */
+  get latestLogLine(): LatestLogLine | null {
+    if (this.shareRoomCode) {
+      return this.sharedLogLine(this.sharedLogEntries[this.sharedLogEntries.length - 1]);
+    }
+    const local = this.logHandler.logbook[this.logHandler.logbook.length - 1];
+    if (local) {
+      return { timestamp: local.timestamp, actor: "", text: local.text, hidden: false };
+    }
+    const retained = this.getRetainedHiddenLogEntries();
+    return this.sharedLogLine(retained[retained.length - 1]);
+  }
+
+  private sharedLogLine(entry: SharedLogEntry | undefined): LatestLogLine | null {
+    return entry
+      ? { timestamp: entry.timestamp, actor: entry.actor, text: entry.text, hidden: !!entry.hiddenFromPlayers }
+      : null;
   }
 
   /**

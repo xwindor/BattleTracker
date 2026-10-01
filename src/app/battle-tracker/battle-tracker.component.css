@@ -782,6 +782,274 @@
   border-radius: 0.375rem;
 }
 
+/* How much of the window's bottom edge the bottom strip covers: its fixed
+   expanded height, or its one line when shrunk. The participant panel stops
+   short of it (the `min-width: 992px` rule below) so nothing in the panel is
+   ever hidden underneath. */
+.gm-screen {
+  --bottom-strip-height: 16rem;
+  --bottom-strip-cover: calc(var(--bottom-strip-height) + 1px);
+  /* At least a window tall (less the page's own top bar), with the strip
+     pushed to the end: on a short list the strip still rests on the window's
+     bottom edge instead of floating under the last row. */
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 4rem);
+}
+
+.gm-screen-strip-shrunk {
+  --bottom-strip-cover: 2.75rem;
+}
+
+@media (min-width: 992px) {
+  .participant-panel {
+    max-height: calc(100vh - var(--bottom-strip-cover) - 1rem);
+    overflow-y: auto;
+  }
+}
+
+/* Bottom strip (CONTEXT.md; GM screen overhaul 03, target picture): the log
+   on the left, the dice on the right, pinned to the bottom of the window.
+   `position: sticky` rather than `fixed`: the strip keeps its own place at the
+   end of the GM screen, so scrolled right to the bottom nothing is left hidden
+   behind it, and above that it sticks to the window's bottom edge. One fixed
+   height when expanded, so rolling dice or a new log line never makes the
+   list above it jump; each half scrolls inside itself instead. */
+.bottom-strip {
+  --strip-gap: calc(var(--ui-gap) * 2);
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: auto;
+  /* Out to the same edges as the initiative list above it. */
+  margin-inline: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+  background: var(--cd-bg-elev, #0a1118);
+  border-top: 1px solid var(--cd-line-strong, #2bf4c8);
+}
+
+.bottom-strip-body {
+  display: flex;
+  height: var(--bottom-strip-height);
+}
+
+.bottom-strip-body[hidden] {
+  display: none;
+}
+
+.bottom-strip-log,
+.bottom-strip-dice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--strip-gap);
+  min-height: 0;
+  padding: var(--strip-gap) calc(var(--strip-gap) * 2);
+}
+
+.bottom-strip-log {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The dice keep their laptop size on a big monitor; the log takes the rest. */
+.bottom-strip-dice {
+  flex: 0 0 34rem;
+  padding-bottom: var(--ui-gap);
+  overflow-y: auto;
+  border-left: 1px solid var(--cd-line, #16313b);
+  background: var(--dice-bg, #000);
+}
+
+/* A narrow window: the dice give up their fixed width so the log half keeps
+   room beside them. */
+@media (max-width: 991.98px) {
+  .bottom-strip-dice {
+    flex: 1 1 50%;
+    min-width: 0;
+  }
+}
+
+.bottom-strip-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--strip-gap);
+  flex-shrink: 0;
+}
+
+.bottom-strip-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cd-text-muted, #79bda8);
+}
+
+.bottom-strip-label-dice {
+  color: var(--dice-fg, #00ff41);
+}
+
+.bottom-strip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--strip-gap);
+  margin-left: auto;
+}
+
+.bottom-strip-actions .btn,
+.bottom-strip-toggle {
+  white-space: nowrap;
+}
+
+.bottom-strip-toggle {
+  margin-left: auto;
+}
+
+/* The scroll bars still needed (a long log, a tall participant panel): thin
+   and in the app's own colours rather than the browser's grey ones. */
+.gm-log-list,
+.bottom-strip-dice,
+.participant-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cd-line, #16313b) transparent;
+}
+
+/* The log fills its half of the strip instead of its old 16rem box, its
+   lines straight on the strip rather than in a second bordered box. */
+.bottom-strip .gm-log-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  box-shadow: none;
+}
+
+/* The roller, arranged for a short strip (target picture): dice count and
+   Roll on one line, Roll as and its note on the next, the rolled dice
+   straight under them without a box of their own. Only its arrangement -
+   the same controls, doing the same things - and only here: the player
+   view's roller is untouched. */
+.bottom-strip-dice ::ng-deep .dice-roller-panel {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap) var(--strip-gap);
+  padding: 0;
+}
+
+.bottom-strip-dice ::ng-deep .dice-roller-rollas {
+  flex: 1 1 100%;
+  flex-wrap: nowrap;
+  margin-top: 0;
+}
+
+.bottom-strip-dice ::ng-deep .roll-as-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The dice fill the width of the box (Xavier, 2026-09-30): full size while
+   they fit, then smaller - just enough that the row still spans the box -
+   until ten fit across; the eleventh starts a new row at that size.
+   `--dice-cols` is how many dice share a row (1 to 10, counted from the
+   tray); the die size is the box width (100cqw, the dice section being the
+   measured box) shared between them, never bigger than a full-size die. */
+.bottom-strip-dice ::ng-deep .dice-roller-panel > .dice-section {
+  container-type: inline-size;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray {
+  --dice-cols: 1;
+  --dice-gap: 0.4rem;
+  --die-size: min(2.8rem, calc((100cqw - (var(--dice-cols) - 1) * var(--dice-gap)) / var(--dice-cols)));
+  display: grid;
+  grid-template-columns: repeat(var(--dice-cols), var(--die-size));
+  gap: var(--dice-gap);
+  /* Clear space above the dice (under the tabs' line) and below them
+     (before the numbered results) - Xavier, 2026-09-30. */
+  margin: var(--strip-gap) 0;
+  padding: 0;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(2)) {
+  --dice-cols: 2;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(3)) {
+  --dice-cols: 3;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(4)) {
+  --dice-cols: 4;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(5)) {
+  --dice-cols: 5;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(6)) {
+  --dice-cols: 6;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(7)) {
+  --dice-cols: 7;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(8)) {
+  --dice-cols: 8;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(9)) {
+  --dice-cols: 9;
+}
+
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(10)) {
+  --dice-cols: 10;
+}
+
+/* Two rows (11+ dice; Xavier, 2026-09-30): both rows shrink together so the
+   two rows, the numbered results and the hit total fit the strip's height
+   without a scroll bar. */
+.bottom-strip-dice ::ng-deep .dice-tray:has(> .die-scene:nth-child(11)) {
+  --die-size: 1.4rem;
+}
+
+/* The numbered results under the dice: smaller once there are two rows, so
+   up to twenty still fit on one line. */
+.bottom-strip-dice ::ng-deep .dice-section:has(.die-scene:nth-child(11)) .die-result-badge {
+  zoom: 0.65;
+}
+
+.bottom-strip-dice ::ng-deep .dice-roller-panel > .dice-section {
+  flex: 1 0 100%;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* Shrunk: one line, the latest log entry cut short with "…" if too long. */
+.bottom-strip-line {
+  display: flex;
+  align-items: center;
+  gap: var(--strip-gap);
+  min-width: 0;
+  padding: var(--ui-gap) calc(var(--strip-gap) * 2);
+}
+
+.bottom-strip-line .log-time {
+  min-width: 0;
+  margin-right: 0;
+}
+
+.bottom-strip-latest {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
    player-view.component.css. */
 .log-entry-new {
@@ -1162,11 +1430,12 @@
   border-left: 3px solid #d97706;
 }
 
+/* In the bottom strip's top-right corner, before Shrink (target picture). */
 .gm-roll-visibility {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--ui-gap);
-  padding: 0.4rem 0.6rem 0;
 }
 
 /* ── Classes replacing template inline styles ──────────────────────────── */

@@ -83,12 +83,29 @@
   </div>
   }
 
+  <!-- Tabs instead of two stacked sections, where the host asks for them
+       (the GM's bottom strip, GM screen overhaul 03 - Xavier, 2026-09-30):
+       the strip is too short for both at once. The two sections below are
+       unchanged; the tabs only choose which one shows. -->
+  @if (otherPlayersAsTabs && showOtherPlayers) {
+  <div class="dice-roller-tabs" role="tablist">
+    <button type="button" role="tab" class="dice-roller-tab" data-testid="dice-roller-tab-mine"
+      [class.dice-roller-tab--on]="rollerTab === 'mine'" [attr.aria-selected]="rollerTab === 'mine'"
+      (click)="rollerTab = 'mine'">Your roll</button>
+    <button type="button" role="tab" class="dice-roller-tab" data-testid="dice-roller-tab-others"
+      [class.dice-roller-tab--on]="rollerTab === 'others'" [attr.aria-selected]="rollerTab === 'others'"
+      (click)="rollerTab = 'others'">Other players ({{ remoteRolls.length }})</button>
+  </div>
+  }
+
   <!-- ── Your Roll ── -->
-  <div class="dice-section">
+  <div class="dice-section" [hidden]="otherPlayersAsTabs && rollerTab !== 'mine'">
     <!-- The label describes the roll already in the tray; the "Roll as" hint
          above describes the *next* roll. Once those two disagree (Clear or a
          retype), the label is greyed and says so, so only one of the two lines
-         reads as current. -->
+         reads as current. As a tab, the tab already says "Your roll", so the
+         line only shows when it has a name to add. -->
+    @if (!otherPlayersAsTabs || localRollAs || attributionOverrideNote) {
     <div class="dice-section-label"
          [class.dice-section-label--stale]="isLocalAttributionStale"
          [attr.data-testid]="isLocalAttributionStale ? 'local-roll-attribution-stale' : null">
@@ -109,6 +126,7 @@
             data-testid="local-roll-attribution-override">{{ attributionOverrideNote }}</span>
       }
     </div>
+    }
     @if (localValues.length > 0) {
     <div class="dice-tray">
       @for (value of localValues; track $index) {
@@ -156,12 +174,14 @@
        modals - it is not deleted and still renders exactly as before
        everywhere else (the page-level roller, the GM's roller). -->
   @if (showOtherPlayers) {
-  <div class="dice-section dice-section-remote">
+  <div class="dice-section dice-section-remote" [hidden]="otherPlayersAsTabs && rollerTab !== 'others'">
+    @if (!otherPlayersAsTabs) {
     <button type="button" class="dice-section-toggle" (click)="otherPlayersVisible = !otherPlayersVisible">
       <span class="twirly">{{ otherPlayersVisible ? "v" : ">" }}</span>
       Other Players
     </button>
-    @if (otherPlayersVisible) {
+    }
+    @if (otherPlayersVisible || otherPlayersAsTabs) {
       @if (remoteRolls.length > 0) {
         @for (roll of remoteRolls; track roll.id) {
         <div class="remote-roll-entry">

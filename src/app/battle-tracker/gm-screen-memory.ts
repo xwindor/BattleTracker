@@ -6,8 +6,8 @@
  * or unreadable storage reads as "nothing remembered", and a failed write is
  * simply dropped, so storage settings can never break the screen (story 65).
  * Later items reuse `readRemembered`/`writeRemembered` under their own keys:
- * the bottom strip's collapse (ticket 03) and the Matrix panel sharing the
- * right-hand slot (ticket 10).
+ * whether the bottom strip is shrunk (ticket 03) and the Matrix panel
+ * sharing the right-hand slot (ticket 10).
  */
 
 /** Read `key` and hand its parsed JSON to `parse`; null if absent or unusable. */
@@ -71,4 +71,18 @@ export function readRememberedParticipantPanel(): RememberedParticipantPanel | n
 
 export function rememberParticipantPanel(panel: RememberedParticipantPanel | null): void {
   writeRemembered(PARTICIPANT_PANEL_MEMORY_KEY, panel);
+}
+
+/**
+ * Whether the bottom strip is shrunk to one line (ticket 03, story 63).
+ * Nothing stored, or anything but `true`, means expanded.
+ */
+export const BOTTOM_STRIP_MEMORY_KEY = "bt.gmScreen.bottomStripShrunk.v1";
+
+export function readRememberedBottomStripShrunk(): boolean {
+  return readRemembered(BOTTOM_STRIP_MEMORY_KEY, raw => raw === true) ?? false;
+}
+
+export function rememberBottomStripShrunk(shrunk: boolean): void {
+  writeRemembered(BOTTOM_STRIP_MEMORY_KEY, shrunk ? true : null);
 }

@@ -1,4 +1,4 @@
-<div class="container-fluid">
+<div class="container-fluid gm-screen" [class.gm-screen-strip-shrunk]="bottomStripShrunk">
   <div class="row mb-2">
     <div class="col-12">
       <div class="input-group">
@@ -1080,138 +1080,6 @@
         Combat Turn {{ combatManager.combatTurn }}
         }
       </div>
-      <div class="card mt-3">
-        <div class="card-header">Action Log</div>
-        <ul class="list-group list-group-flush gm-log-list" #gmLogListContainer>
-          @if (shareRoomCode) {
-            @if (getSharedLogEntriesForGm().length === 0) {
-            <li class="list-group-item text-muted">No log entries yet.</li>
-            }
-            @for (entry of getSharedLogEntriesForGm(); track $index) {
-            <li class="list-group-item"
-                [class.log-entry-new]="isSharedLogEntryNew($index)"
-                [class.log-entry-gm-note]="entry.gmNote"
-                [class.log-entry-hidden]="entry.hiddenFromPlayers">
-              @if (entry.hiddenFromPlayers) {
-              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
-              }
-              @if (entry.houseRule) {
-              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
-                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
-              }
-              @if (entry.npc) {
-              <span class="log-badge log-badge-npc" data-testid="log-badge-npc"
-                    ngbTooltip="You rolled these dice on behalf of this non-player combatant (Core p. 44).">NPC</span>
-              }
-              @if (entry.gmNote) {
-              <span class="log-badge log-badge-note">GM narration</span>
-              }
-              @if (entry.gmNote && getLogEntryReference(entry)) {
-              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
-              }
-              <strong>{{ entry.actor }}</strong>:
-              <span class="log-text" [class]="getLogTextClass(getSharedLogDisplayText(entry, $index))"
-                    [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
-              @if (canAnnotateGlitch(entry)) {
-                @if (isGlitchNoteOpen(entry)) {
-                <div class="glitch-note-visibility"
-                     data-testid="glitch-note-visibility"
-                     [class.glitch-note-visibility-public]="isGlitchNoteVisibleToPlayers(entry)"
-                     [class.glitch-note-visibility-private]="!isGlitchNoteVisibleToPlayers(entry)"
-                     ngbTooltip="Narration follows the visibility of the roll it is attached to, not the current GM-roll switch.">
-                  This narration {{ getGlitchNoteVisibilityLabel(entry) }}.
-                </div>
-                <div class="glitch-note-editor input-group input-group-sm mt-1">
-                  <input type="text"
-                         class="form-control form-control-sm"
-                         placeholder="What happened? (your words)"
-                         [maxlength]="glitchNoteMaxLength"
-                         [ngModel]="getGlitchNoteDraft(entry)"
-                         (ngModelChange)="setGlitchNoteDraft(entry, $event)"
-                         (keyup.enter)="submitGlitchNote(entry)">
-                  <button type="button" class="btn btn-sm btn-primary" (click)="submitGlitchNote(entry)">Add</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" (click)="toggleGlitchNote(entry)">Cancel</button>
-                </div>
-                } @else {
-                <button type="button" class="btn btn-link btn-sm glitch-note-toggle" (click)="toggleGlitchNote(entry)">+ narration</button>
-                }
-              }
-            </li>
-            }
-          } @else {
-            @if (hasRetainedHiddenLogEntries()) {
-            <li class="list-group-item log-retained-banner" data-testid="retained-hidden-banner">
-              <span class="log-badge log-badge-hidden">retained</span>
-              {{ retainedHiddenLogBanner }}
-            </li>
-            @for (entry of getRetainedHiddenLogEntries(); track $index) {
-            <li class="list-group-item log-entry-hidden"
-                [class.log-entry-gm-note]="entry.gmNote"
-                data-testid="retained-hidden-entry">
-              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
-              @if (entry.houseRule) {
-              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
-                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
-              }
-              @if (entry.npc) {
-              <span class="log-badge log-badge-npc" data-testid="log-badge-npc">NPC</span>
-              }
-              @if (entry.gmNote) {
-              <span class="log-badge log-badge-note">GM narration</span>
-              }
-              @if (entry.gmNote && getLogEntryReference(entry)) {
-              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
-              }
-              <strong>{{ entry.actor }}</strong>:
-              <span class="log-text" [class]="getLogTextClass(entry.text)"
-                    [innerHTML]="formatLogText(entry.text)"></span>
-            </li>
-            }
-            }
-            @if (getVisibleLogEntries().length === 0) {
-            <li class="list-group-item text-muted">No log entries yet.</li>
-            }
-            @for (entry of getVisibleLogEntries(); track $index) {
-            <li class="list-group-item">
-              <span class="log-time">{{ entry.timestamp | date:'HH:mm:ss' }}</span>
-              <span class="log-text" [class]="getLogTextClass(entry.text)">{{ getLocalLogDisplayText(entry) }}</span>
-            </li>
-            }
-          }
-        </ul>
-      </div>
-      <div class="card mt-3">
-        <div class="card-header">Dice Roller</div>
-        @if (shareRoomCode) {
-        <div class="gm-roll-visibility">
-          <button type="button"
-                  class="btn btn-sm"
-                  [class.btn-outline-secondary]="gmRollsVisibleToPlayers"
-                  [class.btn-warning]="!gmRollsVisibleToPlayers"
-                  (click)="toggleGmRollVisibility()"
-                  ngbTooltip="Whether your dice are visible to the players is a table agreement, not a rule (Core p. 330). Default: visible.">
-            {{ gmRollsVisibleToPlayers ? "GM rolls: visible to players" : "GM rolls: hidden (session)" }}
-          </button>
-          @if (gmRollsVisibleToPlayers) {
-          <button type="button"
-                  class="btn btn-sm"
-                  [class.btn-outline-secondary]="!hideNextGmRoll"
-                  [class.btn-warning]="hideNextGmRoll"
-                  (click)="toggleHideNextGmRoll()"
-                  ngbTooltip="Hide only the next roll from players; resets itself afterwards.">
-            {{ hideNextGmRoll ? "Next roll: hidden" : "Hide next roll" }}
-          </button>
-          }
-        </div>
-        }
-        <app-dice-roller
-          #gmDiceRoller
-          [incomingRoll]="incomingDiceRoll"
-          [allowRollAs]="true"
-          [rollAsNames]="rollAsNames"
-          (rolledEvent)="onGmDiceRolled($event)">
-        </app-dice-roller>
-      </div>
     </div>
 
     <!-- Participant panel (CONTEXT.md; GM screen overhaul 01, GitHub #4).
@@ -1463,6 +1331,183 @@
     </aside>
     }
   </div>
+
+  <!-- Bottom strip (CONTEXT.md; GM screen overhaul 03, GitHub #6): the action
+       log and the dice roller, pinned to the bottom of the screen so neither
+       scrolls away however long the initiative list is. Shrink turns it into
+       one line showing the latest log entry; the choice is remembered in the
+       GM's browser. Shrinking only HIDES the log and the roller (never removes
+       them), so an incoming roll or a "Roll as" choice survives it. -->
+  <footer class="bottom-strip" data-testid="bottom-strip">
+    @if (bottomStripShrunk) {
+    <div class="bottom-strip-line" data-testid="bottom-strip-line">
+      <span class="bottom-strip-label">// Log</span>
+      @if (latestLogLine; as line) {
+      <span class="log-time">{{ line.timestamp | date:'HH:mm:ss' }}</span>
+      @if (line.hidden) {
+      <span class="log-badge log-badge-hidden">hidden</span>
+      }
+      <span class="bottom-strip-latest">
+        @if (line.actor) {
+        <strong>{{ line.actor }}</strong>:
+        }
+        <span class="log-text" [class]="getLogTextClass(line.text)">{{ line.text }}</span>
+      </span>
+      }
+      @else {
+      <span class="bottom-strip-latest text-muted">No log entries yet.</span>
+      }
+      <button type="button" class="btn btn-sm btn-outline-secondary bottom-strip-toggle"
+        (click)="setBottomStripShrunk(false)" title="Show the action log and the dice roller again">Show log &amp; dice ▴</button>
+    </div>
+    }
+    <div class="bottom-strip-body" [hidden]="bottomStripShrunk">
+      <section class="bottom-strip-log" aria-label="Action log">
+        <div class="bottom-strip-heading">
+          <span class="bottom-strip-label">// Action log</span>
+        </div>
+        <ul class="list-group list-group-flush gm-log-list" #gmLogListContainer>
+          @if (shareRoomCode) {
+            @if (getSharedLogEntriesForGm().length === 0) {
+            <li class="list-group-item text-muted">No log entries yet.</li>
+            }
+            @for (entry of getSharedLogEntriesForGm(); track $index) {
+            <li class="list-group-item"
+                [class.log-entry-new]="isSharedLogEntryNew($index)"
+                [class.log-entry-gm-note]="entry.gmNote"
+                [class.log-entry-hidden]="entry.hiddenFromPlayers">
+              @if (entry.hiddenFromPlayers) {
+              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              }
+              @if (entry.houseRule) {
+              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
+                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
+              }
+              @if (entry.npc) {
+              <span class="log-badge log-badge-npc" data-testid="log-badge-npc"
+                    ngbTooltip="You rolled these dice on behalf of this non-player combatant (Core p. 44).">NPC</span>
+              }
+              @if (entry.gmNote) {
+              <span class="log-badge log-badge-note">GM narration</span>
+              }
+              @if (entry.gmNote && getLogEntryReference(entry)) {
+              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
+              }
+              <strong>{{ entry.actor }}</strong>:
+              <span class="log-text" [class]="getLogTextClass(getSharedLogDisplayText(entry, $index))"
+                    [innerHTML]="formatLogText(getSharedLogDisplayText(entry, $index))"></span>
+              @if (canAnnotateGlitch(entry)) {
+                @if (isGlitchNoteOpen(entry)) {
+                <div class="glitch-note-visibility"
+                     data-testid="glitch-note-visibility"
+                     [class.glitch-note-visibility-public]="isGlitchNoteVisibleToPlayers(entry)"
+                     [class.glitch-note-visibility-private]="!isGlitchNoteVisibleToPlayers(entry)"
+                     ngbTooltip="Narration follows the visibility of the roll it is attached to, not the current GM-roll switch.">
+                  This narration {{ getGlitchNoteVisibilityLabel(entry) }}.
+                </div>
+                <div class="glitch-note-editor input-group input-group-sm mt-1">
+                  <input type="text"
+                         class="form-control form-control-sm"
+                         placeholder="What happened? (your words)"
+                         [maxlength]="glitchNoteMaxLength"
+                         [ngModel]="getGlitchNoteDraft(entry)"
+                         (ngModelChange)="setGlitchNoteDraft(entry, $event)"
+                         (keyup.enter)="submitGlitchNote(entry)">
+                  <button type="button" class="btn btn-sm btn-primary" (click)="submitGlitchNote(entry)">Add</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" (click)="toggleGlitchNote(entry)">Cancel</button>
+                </div>
+                } @else {
+                <button type="button" class="btn btn-link btn-sm glitch-note-toggle" (click)="toggleGlitchNote(entry)">+ narration</button>
+                }
+              }
+            </li>
+            }
+          } @else {
+            @if (hasRetainedHiddenLogEntries()) {
+            <li class="list-group-item log-retained-banner" data-testid="retained-hidden-banner">
+              <span class="log-badge log-badge-hidden">retained</span>
+              {{ retainedHiddenLogBanner }}
+            </li>
+            @for (entry of getRetainedHiddenLogEntries(); track $index) {
+            <li class="list-group-item log-entry-hidden"
+                [class.log-entry-gm-note]="entry.gmNote"
+                data-testid="retained-hidden-entry">
+              <span class="log-badge log-badge-hidden" ngbTooltip="Recorded for you only; never sent to players.">hidden</span>
+              @if (entry.houseRule) {
+              <span class="log-badge log-badge-house-rule" data-testid="log-badge-house-rule"
+                    ngbTooltip="A table ruling, not a printed rule: one NPC's wound moves the whole group's shared Initiative Score.">house rule</span>
+              }
+              @if (entry.npc) {
+              <span class="log-badge log-badge-npc" data-testid="log-badge-npc">NPC</span>
+              }
+              @if (entry.gmNote) {
+              <span class="log-badge log-badge-note">GM narration</span>
+              }
+              @if (entry.gmNote && getLogEntryReference(entry)) {
+              <div class="log-entry-ref" data-testid="log-entry-ref">{{ getLogEntryReference(entry) }}</div>
+              }
+              <strong>{{ entry.actor }}</strong>:
+              <span class="log-text" [class]="getLogTextClass(entry.text)"
+                    [innerHTML]="formatLogText(entry.text)"></span>
+            </li>
+            }
+            }
+            @if (getVisibleLogEntries().length === 0) {
+            <li class="list-group-item text-muted">No log entries yet.</li>
+            }
+            @for (entry of getVisibleLogEntries(); track $index) {
+            <li class="list-group-item">
+              <span class="log-time">{{ entry.timestamp | date:'HH:mm:ss' }}</span>
+              <span class="log-text" [class]="getLogTextClass(entry.text)">{{ getLocalLogDisplayText(entry) }}</span>
+            </li>
+            }
+          }
+        </ul>
+      </section>
+      <section class="bottom-strip-dice" aria-label="Dice roller">
+        <div class="bottom-strip-heading">
+          <span class="bottom-strip-label bottom-strip-label-dice">// Dice</span>
+          <!-- The strip's top-right corner: the GM-rolls switches, then Shrink. -->
+          <div class="bottom-strip-actions">
+            @if (shareRoomCode) {
+            <div class="gm-roll-visibility">
+              <button type="button"
+                      class="btn btn-sm"
+                      [class.btn-outline-secondary]="gmRollsVisibleToPlayers"
+                      [class.btn-warning]="!gmRollsVisibleToPlayers"
+                      (click)="toggleGmRollVisibility()"
+                      ngbTooltip="Whether your dice are visible to the players is a table agreement, not a rule (Core p. 330). Default: visible."
+                      container="body">
+                {{ gmRollsVisibleToPlayers ? "GM rolls: visible to players" : "GM rolls: hidden (session)" }}
+              </button>
+              @if (gmRollsVisibleToPlayers) {
+              <button type="button"
+                      class="btn btn-sm"
+                      [class.btn-outline-secondary]="!hideNextGmRoll"
+                      [class.btn-warning]="hideNextGmRoll"
+                      (click)="toggleHideNextGmRoll()"
+                      ngbTooltip="Hide only the next roll from players; resets itself afterwards."
+                      container="body">
+                {{ hideNextGmRoll ? "Next roll: hidden" : "Hide next roll" }}
+              </button>
+              }
+            </div>
+            }
+            <button type="button" class="btn btn-sm btn-outline-secondary"
+              (click)="setBottomStripShrunk(true)" title="Shrink to one line showing the latest log entry">Shrink ▾</button>
+          </div>
+        </div>
+        <app-dice-roller
+          #gmDiceRoller
+          [incomingRoll]="incomingDiceRoll"
+          [allowRollAs]="true"
+          [rollAsNames]="rollAsNames"
+          [otherPlayersAsTabs]="true"
+          (rolledEvent)="onGmDiceRolled($event)">
+        </app-dice-roller>
+      </section>
+    </div>
+  </footer>
 </div>
 
 <ng-template #actModalContent>

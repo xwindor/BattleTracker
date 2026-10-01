@@ -146,6 +146,41 @@
   }
 }
 
+// Tabs (`otherPlayersAsTabs`): marked by an underline like the participant
+// panel's tabs, in the roller's own colours.
+.dice-roller-tabs {
+  display: flex;
+  gap: 1rem;
+  flex-basis: 100%;
+  border-bottom: 1px solid var(--dice-border-soft, rgba(148, 163, 184, 0.5));
+}
+
+.dice-roller-tab {
+  all: unset;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dice-fg-dim, rgba(31, 41, 55, 0.55));
+  min-height: var(--ui-control-h-sm);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+
+  &:hover {
+    color: var(--dice-fg, #1f2937);
+  }
+
+  &:focus-visible {
+    outline: 1px solid var(--dice-fg, #1f2937);
+  }
+}
+
+.dice-roller-tab--on {
+  color: var(--dice-fg, #1f2937);
+  border-bottom-color: var(--dice-fg, #1f2937);
+}
+
 .dice-section-empty {
   font-size: 0.75rem;
   color: var(--dice-fg-faint, rgba(31, 41, 55, 0.4));
@@ -193,9 +228,12 @@
 }
 
 // ── Individual die ─────────────────────────────────────────────────────────
+// Every die measurement derives from --die-size (2.8rem unless a host sets it,
+// as the GM's bottom strip does to fit its width), so a die scales whole:
+// faces, pips and the 3D depth together.
 .die-scene {
-  width: 2.8rem;
-  height: 2.8rem;
+  width: var(--die-size, 2.8rem);
+  height: var(--die-size, 2.8rem);
   perspective: 200px;
 }
 
@@ -236,33 +274,34 @@
 // ── Die faces ──────────────────────────────────────────────────────────────
 .die-face {
   position: absolute;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: var(--die-size, 2.8rem);
+  height: var(--die-size, 2.8rem);
   border: 1px solid var(--dice-border, #94a3b8);
-  border-radius: 0.3rem;
+  border-radius: calc(var(--die-size, 2.8rem) * 0.107);
   background: var(--dice-bg, #ffffff);
   box-shadow: var(--dice-face-glow, none);
   // Pip grid: 3 columns × 3 rows
   display: grid;
   grid-template: repeat(3, 1fr) / repeat(3, 1fr);
-  padding: 0.3rem;
+  padding: calc(var(--die-size, 2.8rem) * 0.107);
   box-sizing: border-box;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
 
-// Standard die positioning — translateZ = half the die width (1.4rem)
-.die-face--1 { transform: rotateX(0deg)   rotateY(0deg)    translateZ(1.4rem); }
-.die-face--6 { transform: rotateX(0deg)   rotateY(180deg)  translateZ(1.4rem); }
-.die-face--2 { transform: rotateX(90deg)  rotateY(0deg)    translateZ(1.4rem); }
-.die-face--5 { transform: rotateX(-90deg) rotateY(0deg)    translateZ(1.4rem); }
-.die-face--3 { transform: rotateX(0deg)   rotateY(-90deg)  translateZ(1.4rem); }
-.die-face--4 { transform: rotateX(0deg)   rotateY(90deg)   translateZ(1.4rem); }
+// Standard die positioning — translateZ = half the die width
+.die-face { --half: calc(var(--die-size, 2.8rem) / 2); }
+.die-face--1 { transform: rotateX(0deg)   rotateY(0deg)    translateZ(var(--half)); }
+.die-face--6 { transform: rotateX(0deg)   rotateY(180deg)  translateZ(var(--half)); }
+.die-face--2 { transform: rotateX(90deg)  rotateY(0deg)    translateZ(var(--half)); }
+.die-face--5 { transform: rotateX(-90deg) rotateY(0deg)    translateZ(var(--half)); }
+.die-face--3 { transform: rotateX(0deg)   rotateY(-90deg)  translateZ(var(--half)); }
+.die-face--4 { transform: rotateX(0deg)   rotateY(90deg)   translateZ(var(--half)); }
 
 // ── Pips ──────────────────────────────────────────────────────────────────
 .pip {
-  width: 0.32rem;
-  height: 0.32rem;
+  width: calc(var(--die-size, 2.8rem) * 0.114);
+  height: calc(var(--die-size, 2.8rem) * 0.114);
   border-radius: 50%;
   background: var(--dice-fg, #1f2937);
   box-shadow: var(--dice-glow, none);

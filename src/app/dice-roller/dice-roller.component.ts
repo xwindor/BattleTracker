@@ -136,6 +136,17 @@ export class DiceRollerComponent implements OnChanges {
   @Input() showOtherPlayers = true;
 
   /**
+   * Show "Your roll" and "Other players" as two tabs, one at a time, instead
+   * of one section above the other. Off by default, so the player view is
+   * unchanged; the GM's bottom strip turns it on because it is too short for
+   * both (GM screen overhaul 03, Xavier 2026-09-30).
+   */
+  @Input() otherPlayersAsTabs = false;
+
+  /** Which tab shows when `otherPlayersAsTabs` is on. */
+  rollerTab: "mine" | "others" = "mine";
+
+  /**
    * Suppresses hits, the 1s count, glitch classification and the per-die
    * hit/one colouring - everything this component derives from
    * `classifyRoll()` - leaving only the individual dice and their plain
