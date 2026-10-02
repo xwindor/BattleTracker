@@ -37,7 +37,7 @@ export function writeRemembered(key: string, value: unknown): void {
 }
 
 /** The participant panel's tabs, by the id the panel's tab strip uses. */
-export const PARTICIPANT_PANEL_TABS = ["condition", "stats", "deck"] as const;
+export const PARTICIPANT_PANEL_TABS = ["condition", "stats", "deck", "awakened"] as const;
 export type ParticipantPanelTab = typeof PARTICIPANT_PANEL_TABS[number];
 
 /**

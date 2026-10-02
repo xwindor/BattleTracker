@@ -234,12 +234,12 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
 
   // ── tabs ───────────────────────────────────────────────────────────────
 
-  it('a character\'s panel has Condition, Stats and Deck tabs', () => {
+  it('a character\'s panel has Condition, Stats, Deck and Awakened tabs', () => {
     const razor = scored('Razor', 10, 5);
     fixture.detectChanges();
     clickName(razor);
 
-    expect(tabLabels()).toEqual(['Condition', 'Stats', 'Deck']);
+    expect(tabLabels()).toEqual(['Condition', 'Stats', 'Deck', 'Awakened']);
   });
 
   it('a grunt group\'s panel has no Condition tab', () => {

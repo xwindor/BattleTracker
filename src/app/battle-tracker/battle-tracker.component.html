@@ -613,16 +613,18 @@
                 <span class="visually-hidden">Deck</span>
               </button>
               }
+              <!-- Opens the participant panel on the Awakened tab (GM screen
+                   overhaul 05, GitHub #8); filled while that tab is showing. -->
               <!-- A row is a group, not a character: it cannot project or jack
                    in. An NPC in the row that changes Initiative type must be
                    detached onto its own row first (criterion 13, Core pp. 159-160)
                    - the Detach control in the Group panel below. -->
               @if (!isNpcRow(p)) {
               <button type="button" class="btn gm-trailing-icon"
-                [class.btn-warning]="isAstralPanelExpanded(p)"
-                [class.btn-outline-warning]="!isAstralPanelExpanded(p) && isAstral(p)"
-                [class.btn-outline-secondary]="!isAstralPanelExpanded(p) && !isAstral(p)"
-                (click)="toggleAstralPanel(p)"
+                [class.btn-warning]="isAwakenedTabOpen(p)"
+                [class.btn-outline-warning]="!isAwakenedTabOpen(p) && isAstral(p)"
+                [class.btn-outline-secondary]="!isAwakenedTabOpen(p) && !isAstral(p)"
+                (click)="openParticipantPanel(p, 'awakened')"
                 data-testid="awakened-btn"
                 title="Awakened — astral projection">
                 <i class="fas fa-ghost fa-lg" aria-hidden="true"></i>
@@ -884,36 +886,6 @@
             </div>
             }
           </div>
-        </div>
-        }
-        @if (isAstralPanelExpanded(p)) {
-        <div class="row astral-panel py-2 px-3 mb-1">
-          @if (!isAstral(p)) {
-          <div class="col d-flex align-items-center gap-2">
-            <span class="small text-muted">Not configured as Awakened.</span>
-            <button type="button" class="btn btn-sm btn-outline-warning" (click)="enableAstral(p)">
-              Enable Awakened
-            </button>
-          </div>
-          } @else {
-          <div class="col d-flex align-items-center gap-2 flex-wrap">
-            <div class="btn-group btn-group-sm">
-              <button type="button" class="btn"
-                [class.btn-warning]="asAstral(p).astralProjecting"
-                [class.btn-outline-warning]="!asAstral(p).astralProjecting"
-                (click)="toggleAstralProjecting(p)"
-                title="Toggle astral projection — adds 2 Initiative Dice (max 5D6) and switches the initiative attribute to INT×2 (RULINGS.md 2026-08-30)">
-                {{ asAstral(p).astralProjecting ? "Return to Body" : "Astral Project" }}
-              </button>
-            </div>
-            @if (asAstral(p).astralProjecting) {
-            <app-astral-badge [participant]="asAstral(p)"></app-astral-badge>
-            }
-            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" (click)="disableAstral(p)">
-              Remove Awakened
-            </button>
-          </div>
-          }
         </div>
         }
         }
@@ -1328,6 +1300,46 @@
                     </app-matrix-participant-badge>
                   </div>
                   }
+                  }
+                </div>
+              </ng-template>
+            </ng-container>
+            }
+            <!-- Awakened tab (GM screen overhaul 05, GitHub #8): everything the
+                 Awakened panel under the row used to hold, with the same
+                 handlers. Look (target picture): one line saying where they
+                 are, then the action button with Remove Awakened set apart on
+                 the right. The line stands in for the old panel's "ASTRAL
+                 PROJECTING" badge. A grunt group cannot project (same rule as
+                 the row's Awakened button). -->
+            @if (!isNpcRow(selectedActor)) {
+            <ng-container ngbNavItem="awakened">
+              <button ngbNavLink>Awakened</button>
+              <ng-template ngbNavContent>
+                <div class="awakened-tab" data-testid="awakened-tab">
+                  @if (!isAstral(selectedActor)) {
+                  <span class="small text-muted">Not set up as Awakened.</span>
+                  <div>
+                    <button type="button" class="btn btn-sm btn-outline-warning" (click)="enableAstral(selectedActor)">
+                      Enable Awakened
+                    </button>
+                  </div>
+                  } @else {
+                  <span class="small" data-testid="awakened-where">
+                    Awakened · {{ asAstral(selectedActor).astralProjecting ? "astral projecting" : "currently in their body" }}
+                  </span>
+                  <div class="awakened-actions">
+                    <button type="button" class="btn btn-sm"
+                      [class.btn-warning]="asAstral(selectedActor).astralProjecting"
+                      [class.btn-outline-warning]="!asAstral(selectedActor).astralProjecting"
+                      (click)="toggleAstralProjecting(selectedActor)"
+                      title="Toggle astral projection — adds 2 Initiative Dice (max 5D6) and switches the initiative attribute to INT×2 (RULINGS.md 2026-08-30)">
+                      {{ asAstral(selectedActor).astralProjecting ? "Return to Body" : "Astral Project" }}
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto" (click)="disableAstral(selectedActor)">
+                      Remove Awakened
+                    </button>
+                  </div>
                   }
                 </div>
               </ng-template>

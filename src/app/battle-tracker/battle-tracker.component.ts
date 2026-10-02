@@ -1095,7 +1095,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private readonly localLogDecodeTimers = new Map<string, number>();
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
-  expandedAstralPanels = new Set<IParticipant>();
   /** Which linked NPC rows have their member list open (brief Core p. 379). */
   expandedRowPanels = new Set<IParticipant>();
   /**
@@ -9176,7 +9175,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetMapEntry(this.pendingJoinAnnouncement, p);
     this.forgetMapEntry(this.participantPendingDeltaDice, p);
     this.forgetSetEntry(this.expandedRowPanels, p);
-    this.forgetSetEntry(this.expandedAstralPanels, p);
     if (this.selectedActor === p) {
       this.selectedActor = null;
     }
@@ -9229,16 +9227,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.sort();
   }
 
-  isAstralPanelExpanded(p: IParticipant): boolean {
-    return this.expandedAstralPanels.has(p);
-  }
-
-  toggleAstralPanel(p: IParticipant): void {
-    if (this.expandedAstralPanels.has(p)) {
-      this.expandedAstralPanels.delete(p);
-    } else {
-      this.expandedAstralPanels.add(p);
-    }
+  /** Whether `p`'s participant panel is open on the Awakened tab (lights the row's Awakened button). */
+  isAwakenedTabOpen(p: IParticipant): boolean {
+    return this.selectedActor === p && this.participantPanelTabFor(p) === "awakened";
   }
 
   enableAstral(p: IParticipant): void {
@@ -9250,19 +9241,13 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // must not land above this one (brief "Combat boundary logging" fix
     // round, Defect 1).
     this.appendParticipantEventLog(astralName, PLAYER_COMMAND_LOG_TEXT.awakened);
-    const ap = this.promoteToAstralParticipant(p);
+    this.promoteToAstralParticipant(p);
     this.syncSharedState();
     this.sort();
-    // Carry the panel expansion to the new instance
-    if (this.expandedAstralPanels.has(p)) {
-      this.expandedAstralPanels.delete(p);
-      this.expandedAstralPanels.add(ap);
-    }
   }
 
   disableAstral(p: IParticipant): void {
     if (!this.isAstral(p)) return;
-    this.expandedAstralPanels.delete(p);
     // Name captured before the demote: that swaps the participant instance.
     const astralName = p.name || "";
     // Logged before the demote: `demoteFromAstralParticipant` ->
@@ -9730,7 +9715,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // entry, and `promoteToAstralParticipant` now clears it on the way in),
     // but a stray entry here would be exactly the same silent-leak shape.
     this.participantPendingDeltaDice.delete(ap);
-    this.expandedAstralPanels.delete(ap);
     if (this.selectedActor === ap) this.selectedActor = p;
     if (this.actModalParticipant === ap) this.actModalParticipant = p;
     this.combatManager.removeParticipant(ap);

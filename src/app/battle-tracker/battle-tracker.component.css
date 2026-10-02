@@ -266,6 +266,26 @@
   white-space: nowrap;
 }
 
+/* Awakened tab (GM screen overhaul 05, target picture): one line saying
+   where they are, then the action button with Remove Awakened on the right. */
+.awakened-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--panel-gap);
+}
+
+.awakened-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--panel-gap);
+  align-self: stretch;
+}
+
+.awakened-actions .btn {
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .participant-panel { animation: none; }
 }
@@ -1373,11 +1393,6 @@
   background: rgba(111, 66, 193, 0.04);
   font-size: 0.78rem;
   flex-wrap: wrap;
-}
-
-.astral-panel {
-  background: rgba(111, 66, 193, 0.06);
-  border-top: 1px solid rgba(111, 66, 193, 0.2);
 }
 
 /* ── Combat log readability ─────────────────────────────────────────────── */
