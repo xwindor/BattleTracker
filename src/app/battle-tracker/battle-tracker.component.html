@@ -581,10 +581,12 @@
                    than icon-only, and `.gm-trailing-icon` is deliberately not
                    applied - it would clamp the button to a square and clip the
                    count. It still drops from ~95px to ~60px. -->
+              <!-- Opens the participant panel on the Group tab (GM screen
+                   overhaul 06, GitHub #9); filled while that tab is showing. -->
               <button type="button" class="btn gm-group-btn"
-                [class.btn-info]="isRowPanelExpanded(p)"
-                [class.btn-outline-info]="!isRowPanelExpanded(p)"
-                (click)="toggleRowPanel(p)"
+                [class.btn-info]="isGroupTabOpen(p)"
+                [class.btn-outline-info]="!isGroupTabOpen(p)"
+                (click)="openParticipantPanel(p, 'group')"
                 data-testid="group-btn"
                 title="Group — the NPCs in this row and their Condition Monitors">
                 <i class="fas fa-users" aria-hidden="true"></i>
@@ -618,7 +620,7 @@
               <!-- A row is a group, not a character: it cannot project or jack
                    in. An NPC in the row that changes Initiative type must be
                    detached onto its own row first (criterion 13, Core pp. 159-160)
-                   - the Detach control in the Group panel below. -->
+                   - the Detach control on the Group tab. -->
               @if (!isNpcRow(p)) {
               <button type="button" class="btn gm-trailing-icon"
                 [class.btn-warning]="isAwakenedTabOpen(p)"
@@ -716,178 +718,6 @@
           </div>
           }
         </div>
-        <!-- Linked NPC row panel: the group's NPCs, each with its own Condition
-             Monitor (brief criteria 3-4, 7, Core p. 379). There is deliberately no
-             group-wide Condition Monitor and no shared damage anywhere here
-             (criterion 18). -->
-        @if (isNpcRow(p) && isRowPanelExpanded(p)) {
-        <div class="row npc-row-panel py-2 px-3 mb-1" attr.id="npcRow{{i}}">
-          <div class="col">
-            <!-- The old "One Initiative Test for the whole row (Core p. 379); shared
-                 score N" line lived here and was removed (brief Decision 19):
-                 the shared score is already in the row's own header one line
-                 up, and the row badge already says it is a group. -->
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <!-- Which NPCs still owe an action this pass (Decision 18), at a
-                   glance, without expanding anything further. -->
-              <span class="small text-muted npc-row-acted-summary"
-                title="How many of the NPCs still standing in this row have already gone this Initiative Pass">
-                {{ getRowActedSummary(asNpcRow(p)) }}
-              </span>
-              <button type="button" class="btn btn-sm btn-outline-primary ms-auto npc-row-add-member"
-                (click)="btnAddNpcToRow_Click(asNpcRow(p))"
-                title="Add an NPC to this row — it inherits the row's current shared Initiative Score. A wounded arrival's penalty applies to their own tests only; the group's shared score does not move.">
-                Add NPC
-              </button>
-            </div>
-            @if (asNpcRow(p).members.length === 0) {
-            <div class="small text-muted">No NPCs in this row yet.</div>
-            }
-            @for (m of asNpcRow(p).members; track $index; let mi = $index) {
-            <div class="d-flex align-items-center gap-2 flex-wrap mb-1 npc-row-member"
-              attr.id="npcRow{{i}}member{{mi}}" [class.npc-row-member-down]="m.outOfAction"
-              [class.npc-row-member-acted]="isRowMemberActed(m)">
-              <!-- Per-NPC Act control (brief Decisions 18 & 23). The row is
-                   one participant, so the engine's Waiting/Active/Finished
-                   state cannot say which member has gone; this is the
-                   row-member equivalent of an ordinary participant's Act
-                   button. Not yet acted: opens the same Act modal an
-                   ordinary participant gets, scoped to this NPC - the
-                   declared action is logged attributed to it and it is
-                   marked acted on submit. Already acted: one tap un-marks it
-                   (Decision 18's mis-tap correction), no modal, no second log
-                   line. Disabled while not acted unless the row is actually
-                   up (Decision 24: the row must be the current actor and
-                   still have a live Action Phase); the "un-mark" direction is
-                   never gated, so a mis-tap can always be corrected. Hidden
-                   for a downed NPC, which is skipped when the row comes up
-                   anyway (Core p. 379). -->
-              @if (!m.outOfAction) {
-              <button type="button" class="btn btn-sm npc-row-acted"
-                [class.btn-primary]="isRowMemberActed(m)"
-                [class.btn-outline-primary]="!isRowMemberActed(m)"
-                [disabled]="!isRowMemberActed(m) && !canRowMemberAct(asNpcRow(p))"
-                (click)="isRowMemberActed(m)
-                  ? toggleRowMemberActed(m)
-                  : btnRowMemberAct_Click(asNpcRow(p), m, actModalContent)"
-                [attr.title]="isRowMemberActed(m)
-                  ? 'Has acted this pass — click to mark as still to go'
-                  : (canRowMemberAct(asNpcRow(p))
-                    ? 'Declare an action for this NPC'
-                    : 'Not this row current turn, or no live Action Phase at Score 0 or below')">
-                {{ isRowMemberActed(m) ? "Acted" : "Act" }}
-              </button>
-              }
-              <!-- No longer wrapped in its own `.input-group` (spec
-                   correction, second validator round): that wrapper existed
-                   only because the generate button was originally going to
-                   sit inside it beside this input - once the button moved
-                   out (defect 4, first validator round), a single-child
-                   `.input-group` around just this one input was vestigial.
-                   Removing it also removes a CSS specificity tie this input
-                   was silently losing: Bootstrap's `.input-group >
-                   .form-control` (two classes) outranked this component's
-                   own `.npc-row-member-name` (one class) width/flex rule
-                   below, so the box was stretching to fill the input-group
-                   instead of sitting at its intended ~10rem. `form-control-sm`
-                   stays directly on the input, so its `-sm` height/padding
-                   are unaffected - that sizing never depended on an
-                   `.input-group-sm` ancestor. -->
-              <input class="form-control form-control-sm npc-row-member-name"
-                [ngModel]="m.name" (ngModelChange)="m.name = $event; onParticipantUpdated()"
-                placeholder="NPC name">
-              <div class="input-group input-group-sm gm-inline-input-group npc-row-bw-group">
-                <span class="input-group-text gm-stat-chip" title="Body">B</span>
-                <input class="form-control text-center gm-stat-input" type="number" [min]="0"
-                  [ngModel]="m.body" (ngModelChange)="m.body = $event; onParticipantUpdated()">
-                <span class="input-group-text gm-stat-chip" title="Willpower">W</span>
-                <input class="form-control text-center gm-stat-input" type="number" [min]="0"
-                  [ngModel]="m.willpower" (ngModelChange)="m.willpower = $event; onParticipantUpdated()">
-              </div>
-              <!-- Deliberately AFTER the B/W group in the DOM, not beside the
-                   Name box (defect 4, validator round): the brief kept this
-                   same button off the main combat-list row for exactly this
-                   reason - a focusable control between Name and the next
-                   field costs a Tab stop every time a GM fills several NPCs
-                   in a hurry (Decision D2). Placed here, Tab still goes
-                   straight from Name to Body; a keyboard user reaches this
-                   button by continuing to Tab (or Shift+Tab back from
-                   further down the row), so it stays reachable without
-                   sitting in that fast path.
-
-                   D4's second half (second validator round) - visually
-                   detached from the Name box and wearing the same icon as
-                   Roll Initiative (`:340-343`'s `fa-dice`, on the SAME
-                   expanded row, one line up) - is fixed two ways WITHOUT
-                   moving this button in the DOM (which would undo the Tab
-                   fix above): the icon is `fa-shuffle` (also used by the
-                   Add dialog's own generate button, so the name generator
-                   has one consistent icon everywhere), so it cannot be
-                   misread as "roll for this ganger"; and this button is
-                   given `order: 1` in the
-                   stylesheet, while the B/W group above and everything
-                   after it (`.npc-row-bw-group`, `.npc-row-cm`,
-                   `.npc-row-wm`, `.npc-row-damage`, `.npc-row-detach`,
-                   `.npc-row-remove`, `.npc-row-down-badge`) gets `order: 2`
-                   - so this button PAINTS immediately after the Name box,
-                   restoring the visual association D4 asks for, while its
-                   DOM position - and therefore Tab order, which browsers
-                   resolve from DOM position, not CSS `order` - is
-                   completely unchanged from the fix above. -->
-              <button type="button" class="btn btn-sm btn-outline-secondary gm-name-generate-btn"
-                data-testid="row-member-name-generate"
-                (click)="generateRowMemberName(asNpcRow(p), m)"
-                title="Suggest a street handle for this NPC">
-                <i class="fas fa-shuffle"></i>
-              </button>
-              <!-- One combined Physical+Stun track, 8 + ceil(max(B,W)/2) boxes,
-                   no overflow (criterion 7, Core p. 379). -->
-              <span class="npc-row-cm" title="Condition Monitor: 8 + ceil(max(Body, Willpower) / 2), Physical and Stun on one track">
-                CM {{ m.damage }}/{{ m.conditionMonitorBoxes }}
-              </span>
-              <span class="npc-row-wm" title="This NPC's own wound modifier (Core p. 169)">WM -{{ m.wm }}</span>
-              <!-- Damage Value, not just "one more box": Core p. 379 decides a
-                   downed grunt's alive-or-dead from the DV of the final attack
-                   against his Body, so the DV of the hit has to be enterable.
-                   Three buttons share this one DV: P and S apply it as
-                   damage, H (heal) takes that many boxes back off — left at 1
-                   all three behave exactly like the old +1/-1 taps. -->
-              <div class="input-group input-group-sm npc-row-damage gm-inline-input-group">
-                <span class="input-group-text gm-stat-chip"
-                  title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (Core p. 379). The heal button takes back this same number of boxes.">DV</span>
-                <input class="form-control text-center gm-stat-input npc-row-dv" type="number" [min]="1"
-                  [ngModel]="getRowMemberDamageValue(m)"
-                  (ngModelChange)="setRowMemberDamageValue(m, $event)">
-                <button type="button" class="btn btn-sm btn-outline-danger npc-row-hit-physical"
-                  (click)="hitRowMemberPhysical(asNpcRow(p), m)"
-                  title="Apply that DV as Physical damage">P</button>
-                <button type="button" class="btn btn-sm btn-outline-warning npc-row-hit-stun"
-                  (click)="hitRowMemberStun(asNpcRow(p), m)"
-                  title="Apply that DV as Stun damage">S</button>
-                <button type="button" class="btn btn-sm btn-outline-success npc-row-heal"
-                  (click)="healRowMember(asNpcRow(p), m)"
-                  title="Take that many boxes off. Healing a downed NPC below a full Condition Monitor puts it back in the fight (Core p. 379).">H</button>
-              </div>
-              <button type="button" class="btn btn-sm btn-outline-secondary npc-row-detach"
-                (click)="detachRowMember(asNpcRow(p), m)"
-                title="Detach onto its own initiative row — required for Interrupt Actions, astral projection or a Matrix mode change">
-                Detach
-              </button>
-              <button type="button" class="btn btn-sm btn-outline-danger npc-row-remove"
-                (click)="removeRowMember(asNpcRow(p), m)" title="Remove from the row">
-                <i class="fa fa-trash"></i>
-              </button>
-              @if (m.outOfAction) {
-              <span class="npc-row-down-badge"
-                title="Condition Monitor full — out of action for the rest of the fight (Core p. 379). Alive/dead is decided by the final attack (Core p. 379).">
-                out of action — {{ m.finalState }}
-              </span>
-              }
-            </div>
-            }
-          </div>
-        </div>
-        }
         }
       </div>
       <div>
@@ -986,8 +816,8 @@
             (activeIdChange)="onParticipantPanelTabChange($event)">
             <!-- A linked NPC row has no Condition Monitor of its own: the row
                  is a shared Initiative Score, the Condition Monitors belong to
-                 its NPCs one each (criteria 3-4 / 18, Core p. 379) and are edited in
-                 the row's own member panel. Rendering the PC two-track display
+                 its NPCs one each (criteria 3-4 / 18, Core p. 379) and are edited on
+                 the Group tab. Rendering the PC two-track display
                  here showed a phantom 10/10 + 10/10 that, when tapped, benched
                  the entire row. -->
             @if (!isNpcRow(selectedActor)) {
@@ -1082,6 +912,150 @@
                   </div>
                 </div>
                 }
+              </ng-template>
+            </ng-container>
+            }
+            <!-- Group tab (GM screen overhaul 06, GitHub #9): everything the
+                 members panel under a grunt group's row used to hold, with the
+                 same bindings and handlers, so each control does exactly what
+                 it did. The group's NPCs, each with its own Condition Monitor
+                 (brief criteria 3-4, 7, Core p. 379); there is deliberately no
+                 group-wide Condition Monitor and no shared damage anywhere
+                 here (criterion 18). Look (target picture): the summary with
+                 Add NPC on the right, then the members as one bordered list,
+                 each with Act, name and Condition count on its first line and
+                 the damage controls on its second. Body and Willpower, which
+                 the picture doesn't show, take a third line: at laptop width
+                 the panel has no room for them beside the others. -->
+            @if (isNpcRow(selectedActor)) {
+            <ng-container ngbNavItem="group">
+              <button ngbNavLink>Group</button>
+              <ng-template ngbNavContent>
+                <div class="group-tab" data-testid="group-tab">
+                  <!-- The old "One Initiative Test for the whole row (Core p.
+                       379); shared score N" line is gone (brief Decision 19):
+                       the shared score is already on the group's row. -->
+                  <div class="group-tab-head">
+                    <!-- Which NPCs still owe an action this pass (Decision 18). -->
+                    <span class="small text-muted npc-row-acted-summary"
+                      title="How many of the NPCs still standing in this row have already gone this Initiative Pass">
+                      {{ getRowActedSummary(asNpcRow(selectedActor)) }}
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-primary ms-auto npc-row-add-member"
+                      (click)="btnAddNpcToRow_Click(asNpcRow(selectedActor))"
+                      title="Add an NPC to this row — it inherits the row's current shared Initiative Score. A wounded arrival's penalty applies to their own tests only; the group's shared score does not move.">
+                      Add NPC
+                    </button>
+                  </div>
+                  @if (asNpcRow(selectedActor).members.length === 0) {
+                  <div class="small text-muted">No NPCs in this row yet.</div>
+                  }
+                  @else {
+                  <div class="group-members">
+                    @for (m of asNpcRow(selectedActor).members; track $index) {
+                    <!-- Painted as three lines (stylesheet: `order` and
+                         the two line breaks) while the page order - and so
+                         the Tab order - stays Act, Name, Body, Willpower,
+                         suggestion, then the rest, as it always was. -->
+                    <div class="npc-row-member" [class.npc-row-member-down]="m.outOfAction"
+                      [class.npc-row-member-acted]="isRowMemberActed(m)">
+                      <!-- Per-NPC Act control (brief Decisions 18 & 23). Not
+                           yet acted: opens the same Act pop-up an ordinary
+                           participant gets, scoped to this NPC. Already acted:
+                           one tap un-marks it (Decision 18's mis-tap
+                           correction). Disabled while not acted unless the
+                           group is actually up (Decision 24); the un-mark
+                           direction is never gated. Hidden for a downed NPC,
+                           which is skipped when the group comes up anyway
+                           (Core p. 379). -->
+                      @if (!m.outOfAction) {
+                      <button type="button" class="btn btn-sm npc-row-acted"
+                        [class.btn-primary]="isRowMemberActed(m)"
+                        [class.btn-outline-primary]="!isRowMemberActed(m)"
+                        [disabled]="!isRowMemberActed(m) && !canRowMemberAct(asNpcRow(selectedActor))"
+                        (click)="isRowMemberActed(m)
+                          ? toggleRowMemberActed(m)
+                          : btnRowMemberAct_Click(asNpcRow(selectedActor), m, actModalContent)"
+                        [attr.title]="isRowMemberActed(m)
+                          ? 'Has acted this pass — click to mark as still to go'
+                          : (canRowMemberAct(asNpcRow(selectedActor))
+                            ? 'Declare an action for this NPC'
+                            : 'Not this row current turn, or no live Action Phase at Score 0 or below')">
+                        {{ isRowMemberActed(m) ? "Acted" : "Act" }}
+                      </button>
+                      }
+                      <input class="form-control form-control-sm npc-row-member-name"
+                        [ngModel]="m.name" (ngModelChange)="m.name = $event; onParticipantUpdated()"
+                        placeholder="NPC name">
+                      <div class="input-group input-group-sm gm-inline-input-group npc-row-bw-group">
+                        <span class="input-group-text gm-stat-chip" title="Body">B</span>
+                        <input class="form-control text-center gm-stat-input" type="number" [min]="0"
+                          [ngModel]="m.body" (ngModelChange)="m.body = $event; onParticipantUpdated()">
+                        <span class="input-group-text gm-stat-chip" title="Willpower">W</span>
+                        <input class="form-control text-center gm-stat-input" type="number" [min]="0"
+                          [ngModel]="m.willpower" (ngModelChange)="m.willpower = $event; onParticipantUpdated()">
+                      </div>
+                      <!-- After Body/Willpower in the page, so Tab goes
+                           straight from Name to Body when filling several
+                           NPCs in a hurry (Decision D2, defect 4); the
+                           stylesheet paints it right after the Name box. Its
+                           shuffle icon can't be mistaken for Roll
+                           Initiative's dice. -->
+                      <button type="button" class="btn btn-sm btn-outline-secondary gm-name-generate-btn"
+                        data-testid="row-member-name-generate"
+                        (click)="generateRowMemberName(asNpcRow(selectedActor), m)"
+                        title="Suggest a street handle for this NPC">
+                        <i class="fas fa-shuffle"></i>
+                      </button>
+                      <!-- One combined Physical+Stun track, 8 + ceil(max(B,W)/2)
+                           boxes, no overflow (criterion 7, Core p. 379). -->
+                      <span class="npc-row-cm" title="Condition Monitor: 8 + ceil(max(Body, Willpower) / 2), Physical and Stun on one track">
+                        CM {{ m.damage }}/{{ m.conditionMonitorBoxes }}
+                      </span>
+                      <!-- Damage Value, not just "one more box": Core p. 379
+                           decides a downed grunt's alive-or-dead from the DV
+                           of the final attack against his Body. P and S apply
+                           it as damage, H takes that many boxes back off -
+                           left at 1 all three behave like the old +1/-1 taps. -->
+                      <div class="input-group input-group-sm npc-row-damage gm-inline-input-group">
+                        <span class="input-group-text gm-stat-chip"
+                          title="Damage Value of this attack. The DV of the attack that takes a grunt out decides alive or dead against his Body (Core p. 379). The heal button takes back this same number of boxes.">DV</span>
+                        <input class="form-control text-center gm-stat-input npc-row-dv" type="number" [min]="1"
+                          [ngModel]="getRowMemberDamageValue(m)"
+                          (ngModelChange)="setRowMemberDamageValue(m, $event)">
+                        <button type="button" class="btn btn-sm btn-outline-danger npc-row-hit-physical"
+                          (click)="hitRowMemberPhysical(asNpcRow(selectedActor), m)"
+                          title="Apply that DV as Physical damage">P</button>
+                        <button type="button" class="btn btn-sm btn-outline-warning npc-row-hit-stun"
+                          (click)="hitRowMemberStun(asNpcRow(selectedActor), m)"
+                          title="Apply that DV as Stun damage">S</button>
+                        <button type="button" class="btn btn-sm btn-outline-success npc-row-heal"
+                          (click)="healRowMember(asNpcRow(selectedActor), m)"
+                          title="Take that many boxes off. Healing a downed NPC below a full Condition Monitor puts it back in the fight (Core p. 379).">H</button>
+                      </div>
+                      <span class="npc-row-wm" title="This NPC's own wound modifier (Core p. 169)">WM -{{ m.wm }}</span>
+                      <button type="button" class="btn btn-sm btn-outline-secondary npc-row-detach"
+                        (click)="detachRowMember(asNpcRow(selectedActor), m)"
+                        title="Detach onto its own initiative row — required for Interrupt Actions, astral projection or a Matrix mode change">
+                        Detach
+                      </button>
+                      <button type="button" class="btn btn-sm btn-outline-danger npc-row-remove"
+                        (click)="removeRowMember(asNpcRow(selectedActor), m)" title="Remove from the row">
+                        <i class="fa fa-trash"></i>
+                      </button>
+                      <span class="group-member-break group-member-break-1" aria-hidden="true"></span>
+                      <span class="group-member-break group-member-break-2" aria-hidden="true"></span>
+                      @if (m.outOfAction) {
+                      <span class="npc-row-down-badge"
+                        title="Condition Monitor full — out of action for the rest of the fight (Core p. 379). Alive/dead is decided by the final attack (Core p. 379).">
+                        out of action — {{ m.finalState }}
+                      </span>
+                      }
+                    </div>
+                    }
+                  </div>
+                  }
+                </div>
               </ng-template>
             </ng-container>
             }

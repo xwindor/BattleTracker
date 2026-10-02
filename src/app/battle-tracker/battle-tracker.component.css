@@ -286,6 +286,89 @@
   white-space: nowrap;
 }
 
+/* Group tab (GM screen overhaul 06, target picture): the "still to act"
+   summary with Add NPC on the right, then the members as one bordered list
+   (neighbouring borders overlap into one line). Each member is three lines:
+   Act, name, name suggestion and the Condition count on the right; the
+   damage controls with Detach and Remove on the right; then Body and
+   Willpower (and "out of action" for a downed NPC). At laptop width the panel
+   has about 20rem per member, too little for Body and Willpower beside the
+   rest. */
+.group-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+}
+
+.group-tab-head {
+  display: flex;
+  align-items: center;
+  gap: var(--panel-gap);
+}
+
+.group-tab-head .btn {
+  white-space: nowrap;
+}
+
+.group-members {
+  display: flex;
+  flex-direction: column;
+}
+
+.group-members .npc-row-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ui-gap);
+  padding: var(--panel-gap);
+  border: var(--cd-border-thin, 1px) solid var(--cd-line, #16313b);
+}
+
+.group-members .npc-row-member + .npc-row-member {
+  margin-top: calc(-1 * var(--cd-border-thin, 1px));
+}
+
+.group-members .npc-row-member .btn {
+  white-space: nowrap;
+}
+
+/* Ends a line: a full-width, zero-height item in the wrapping box. */
+.group-member-break {
+  flex: 0 0 100%;
+  height: 0;
+}
+
+.group-members .npc-row-member .npc-row-member-name {
+  flex: 1 1 6rem;
+  width: auto;
+  min-width: 4rem;
+}
+
+.group-members .gm-inline-input-group {
+  width: auto;
+  flex-wrap: nowrap;
+}
+
+.npc-row-member .npc-row-acted {
+  min-width: 3.5rem;
+}
+
+/* Which line each part is painted on. `order` only moves where a part is
+   drawn, never the page order the Tab key follows, so Name -> Body stays one
+   Tab (Decision D2, defect 4) while the name suggestion is drawn right after
+   the Name box (defect 4, second validator round) and Body and Willpower on
+   the third line. Act and the Name box keep the default order 0. */
+.npc-row-member .gm-name-generate-btn { order: 1; }
+.npc-row-cm                           { order: 2; margin-left: auto; }
+.group-member-break-1                 { order: 3; }
+.npc-row-damage,
+.npc-row-wm,
+.npc-row-remove                       { order: 4; }
+.npc-row-detach                       { order: 4; margin-left: auto; }
+.group-member-break-2                 { order: 5; }
+.npc-row-bw-group                     { order: 6; }
+.npc-row-down-badge                   { order: 7; margin-left: auto; }
+
 @media (prefers-reduced-motion: reduce) {
   .participant-panel { animation: none; }
 }
@@ -644,39 +727,6 @@
   min-width: var(--ui-icon-btn-w-sm);
   height: var(--ui-control-h-sm);
   min-height: var(--ui-control-h-sm);
-}
-
-/* Defect 4 (second validator round): `.npc-row-member` is a plain flex row
-   (`d-flex`, HTML), so without an explicit `order` every child paints in
-   DOM order - which is exactly the ambiguity D4 flags: the generate button
-   sits, visually, between the B/W group and the CM readout, nowhere near
-   the Name box it acts on. `order` is a paint-order-only property; it does
-   not affect DOM position or keyboard Tab order (which browsers derive from
-   DOM position, not `order`), so this restores the visual adjacency the
-   brief asks for without touching the Tab fix directly above this button in
-   the template (Name -> Body stays a direct Tab; the generate button stays
-   reachable by continuing to Tab past Body/Willpower, exactly as before
-   this rule was added).
-
-   Two buckets are enough: `order: 1` on the generate button paints it right
-   after the (unset-order, so implicitly `0`) Act button and Name box;
-   `order: 2` on every control from the B/W group onward keeps that whole
-   tail in its existing relative sequence (ties within one `order` value are
-   broken by DOM position, which this second selector list preserves
-   unchanged) - it only has to move as a block behind the first bucket, not
-   be individually reordered. */
-.npc-row-member .gm-name-generate-btn {
-  order: 1;
-}
-
-.npc-row-bw-group,
-.npc-row-cm,
-.npc-row-wm,
-.npc-row-damage,
-.npc-row-detach,
-.npc-row-remove,
-.npc-row-down-badge {
-  order: 2;
 }
 
 /* An input-group with a wrapped second line needs its own inline sizing so the
@@ -1198,13 +1248,7 @@
 }
 
 
-/* Linked NPC row (grunt group) panel */
-.npc-row-panel {
-  background: rgba(13, 202, 240, 0.07);
-  border-left: 3px solid #0dcaf0;
-  border-radius: 0 4px 4px 0;
-}
-
+/* A grunt group's NPCs, on the Group tab */
 .npc-row-member-down {
   opacity: 0.55;
 }
@@ -1220,17 +1264,17 @@
 .npc-row-wm {
   font-size: 0.8rem;
   padding: 0.1rem 0.4rem;
-  border-radius: 3px;
   background: rgba(0, 0, 0, 0.06);
   white-space: nowrap;
 }
 
+/* The app's own danger red (target picture's "OUT"): the old dark red was
+   made for a light background and could not be read on the GM screen. */
 .npc-row-down-badge {
   font-size: 0.75rem;
   padding: 0.1rem 0.4rem;
-  border-radius: 3px;
-  background: rgba(220, 53, 69, 0.15);
-  color: #842029;
+  background: rgba(255, 95, 131, 0.12);
+  color: var(--cd-danger, #ff5f83);
   white-space: nowrap;
 }
 
@@ -1527,14 +1571,6 @@
   padding-left: 0;
 }
 
-/* Was style="width: 10rem". Allowed to shrink now so the member line still
-   fits when the group panel is open in the laptop band. */
-.npc-row-member-name {
-  flex: 0 1 10rem;
-  width: 10rem;
-  min-width: 6rem;
-}
-
 /* ── Responsive layout ─────────────────────────────────────────────────────
    One breakpoint family only: Bootstrap's (AC 9). Desktop is the priority, so
    these are corrections at the narrow end, not a mobile-first rebuild. */
@@ -1655,11 +1691,6 @@
   }
 
   .gm-inline-input-group {
-    width: 100%;
-  }
-
-  .npc-row-member-name {
-    flex: 1 1 100%;
     width: 100%;
   }
 }

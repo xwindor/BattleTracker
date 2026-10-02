@@ -2463,8 +2463,8 @@ describe('NPC group initiative - Round 3 Decisions 13-19', () => {
       component.selectActor(row);
       fixture.detectChanges();
 
-      const panel = fixture.nativeElement.querySelector('.npc-row-panel') as HTMLElement;
-      expect(panel).withContext('row panel is open').toBeTruthy();
+      const panel = fixture.nativeElement.querySelector('[data-testid="group-tab"]') as HTMLElement;
+      expect(panel).withContext('Group tab is open').toBeTruthy();
       expect(panel.textContent).not.toContain('One Initiative Test for the whole row');
       expect(panel.textContent).not.toContain('Wounds slow the whole row');
       // The shared score is still on screen, in the row's own header.

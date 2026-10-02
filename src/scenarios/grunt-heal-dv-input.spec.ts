@@ -213,16 +213,17 @@ describe('Grunt heal applies the DV input (briefs/grunt-heal-uses-dv-input.md)',
     expect(grunt.combinedDamage).withContext('7 off in one click, not 1').toBe(0);
   });
 
-  it('Heal-DV6b: the row heal control renders inside the expanded row panel and heals by the DV in its input', () => {
+  it('Heal-DV6b: the row heal control renders on the Group tab and heals by the DV in its input', () => {
     const row = gmRow('Gangers', 7, 8, ['G 1']);
     const g1 = row.members[0];
     component.applyRowMemberDamage(row, g1, 7, 'physical');
     component.setRowMemberDamageValue(g1, 5);
-    component.selectActor(row);
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
     fixture.detectChanges();
 
-    const panel = fixture.nativeElement.querySelector('.npc-row-panel') as HTMLElement;
-    expect(panel).withContext('row panel is open').toBeTruthy();
+    const panel = fixture.nativeElement.querySelector('[data-testid="group-tab"]') as HTMLElement;
+    expect(panel).withContext('Group tab is open').toBeTruthy();
 
     const healBtn = panel.querySelector('.npc-row-heal') as HTMLButtonElement;
     expect(healBtn).withContext('heal button still classed .npc-row-heal').toBeTruthy();

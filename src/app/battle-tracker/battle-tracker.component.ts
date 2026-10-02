@@ -1095,16 +1095,14 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private readonly localLogDecodeTimers = new Map<string, number>();
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
-  /** Which linked NPC rows have their member list open (brief Core p. 379). */
-  expandedRowPanels = new Set<IParticipant>();
   /**
    * The Damage Value the GM is about to apply to each NPC in a row.
    *
    * Needed because Core p. 379 settles a downed grunt's alive-or-dead from the DV of
    * the **final attack** compared against Body — so the tracker has to be told
-   * the attack's real DV, not just "one more box". Purely transient view state
-   * (the same class of thing as `expandedRowPanels`): it holds nothing that
-   * survives applying the damage, and a mis-keyed DV is corrected by editing
+   * the attack's real DV, not just "one more box". Purely transient view
+   * state: it holds nothing that survives applying the damage, and a
+   * mis-keyed DV is corrected by editing
    * this field again before the tap, or by healing afterward.
    */
   private readonly rowMemberDamageValues = new Map<GruntMember, number>();
@@ -1356,7 +1354,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * The tab the participant panel shows. Kept when the panel switches to
    * someone else, as the tab strip always did; a grunt group, which has only
-   * Stats, shows Stats without changing it (`participantPanelTabFor`).
+   * Group and Stats, shows Group in place of any other tab without changing
+   * it, and a character shows Condition in place of Group
+   * (`participantPanelTabFor`).
    */
   participantPanelTab: ParticipantPanelTab = "condition";
 
@@ -1688,9 +1688,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       .join(" · ");
   }
 
-  /** The tab `p`'s panel shows: a grunt group has only Stats. */
+  /**
+   * The tab `p`'s panel shows: a grunt group has only Group and Stats (Group
+   * unless Stats was chosen); everyone else has every tab but Group.
+   */
   participantPanelTabFor(p: IParticipant): ParticipantPanelTab {
-    return isNpcRow(p) ? "stats" : this.participantPanelTab;
+    const tab = this.participantPanelTab;
+    if (isNpcRow(p)) {
+      return tab === "stats" ? "stats" : "group";
+    }
+    return tab === "group" ? "condition" : tab;
   }
 
   onParticipantPanelTabChange(tab: ParticipantPanelTab) {
@@ -6043,7 +6050,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantClaimable.set(row, false);
     this.participantEdgeRatings.set(row, NPC_ROW_EDGE_RATING);
     this.getParticipantId(row);
-    this.expandedRowPanels.add(row);
 
     // Defect D8 (validator round): floor of 1 (a `0` used to create an
     // empty, "formed.", initiative-slot-occupying row for a squad that did
@@ -7942,8 +7948,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /**
    * Which standalone grunts the GM has ticked for a merge.
    *
-   * Transient view state, like `expandedRowPanels`: it holds nothing that
-   * survives the merge. Kept as a `Set` of participants so a mis-tap is one tap
+   * Transient view state: it holds nothing that survives the merge. Kept as
+   * a `Set` of participants so a mis-tap is one tap
    * to correct and nothing is committed until the Merge button is pressed.
    */
   readonly gruntsSelectedForMerge = new Set<IParticipant>();
@@ -8141,7 +8147,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantIntuitions.set(row, this.getParticipantIntuitionValue(first));
     this.participantTieBreakers.set(row, Math.random());
     this.getParticipantId(row);
-    this.expandedRowPanels.add(row);
     // D5: when the merged grunts carry different statblock imprints, the
     // merged row takes the first selected grunt's - mirroring
     // `mergeGruntsIntoRow` itself, which already takes `baseIni`/`dices` from
@@ -8174,7 +8179,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.combatManager.removeParticipant(grunt);
       this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
     }
-    this.selectActor(row);
+    // The new group's members were what the merge used to show, under the
+    // row; they now live on the Group tab (GM screen overhaul 06, #9).
+    this.openParticipantPanel(row, "group");
     this.syncSharedState();
     this.sort();
     return result;
@@ -8465,16 +8472,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     return healed;
   }
 
-  isRowPanelExpanded(p: IParticipant): boolean {
-    return this.expandedRowPanels.has(p);
-  }
-
-  toggleRowPanel(p: IParticipant) {
-    if (this.expandedRowPanels.has(p)) {
-      this.expandedRowPanels.delete(p);
-    } else {
-      this.expandedRowPanels.add(p);
-    }
+  /** Whether `p`'s participant panel is open on the Group tab (lights the row's Group button). */
+  isGroupTabOpen(p: IParticipant): boolean {
+    return this.selectedActor === p && this.participantPanelTabFor(p) === "group";
   }
 
   /**
@@ -8503,7 +8503,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     row.baseIni = this.getParticipantBaseInitiative(row);
     this.participantTieBreakers.set(row, Math.random());
     this.getParticipantId(row);
-    this.expandedRowPanels.add(row);
     // Item 8 fix (fix round 4): not currently wired to any UI control
     // (`commitRowDraft` builds the Grunt Group button's row inline instead,
     // see that method's own comment) - but it is public, and a queue-less add
@@ -9174,7 +9173,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetMapEntry(this.participantLieutenantTeamRowId, p);
     this.forgetMapEntry(this.pendingJoinAnnouncement, p);
     this.forgetMapEntry(this.participantPendingDeltaDice, p);
-    this.forgetSetEntry(this.expandedRowPanels, p);
     if (this.selectedActor === p) {
       this.selectedActor = null;
     }

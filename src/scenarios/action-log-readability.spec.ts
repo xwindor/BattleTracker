@@ -664,6 +664,9 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
     it('the Add-NPC button title carries the "own tests only" sentence', () => {
       gmRow('Gangers');
       fixture.detectChanges();
+      // Add NPC is on the group's Group tab (GM screen overhaul 06, #9).
+      (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
 
       const btn = fixture.nativeElement.querySelector('.npc-row-add-member') as HTMLElement;
       expect(btn.title).toContain('own tests only');
@@ -946,7 +949,10 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
       expect(joinLines.length).toBe(1);
       expect(row.getCurrentInitiative()).toBe(scoreBefore); // Score-neutral join
 
-      // The GM hovers Add NPC and reads the answer off the tooltip.
+      // The GM opens the group's Group tab, hovers Add NPC and reads the
+      // answer off the tooltip.
+      fixture.detectChanges();
+      (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
       fixture.detectChanges();
       const addBtn = fixture.nativeElement.querySelector('.npc-row-add-member') as HTMLElement;
       expect(addBtn.title).toContain('own tests only');

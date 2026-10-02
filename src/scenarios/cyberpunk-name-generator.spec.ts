@@ -414,6 +414,9 @@ describe('Cyberpunk name generator: GM component wiring (Part 1)', () => {
     const row = component.addNpcRow(false);
     const m = row.addMember(new GruntMember('Original', 3, 3));
     fixture.detectChanges();
+    // The members are on the group's Group tab (GM screen overhaul 06, #9).
+    (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
 
     const generateBtn = fixture.nativeElement.querySelector('[data-testid="row-member-name-generate"]') as HTMLButtonElement;
     expect(generateBtn).withContext('rendered generate button').toBeTruthy();
@@ -580,8 +583,11 @@ describe('Cyberpunk name generator: GM component wiring (Part 1)', () => {
   //    Name and Body ───────────────────────────────────────────────────────
 
   it('defect 4 (validator round): the row-member generate button sits after Body/Willpower in the DOM, not between Name and Body', () => {
-    const row = component.addNpcRow(false); // starts with its panel already expanded
+    const row = component.addNpcRow(false);
     row.addMember(new GruntMember('Ganger', 3, 3));
+    fixture.detectChanges();
+    // The members are on the group's Group tab (GM screen overhaul 06, #9).
+    (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
     fixture.detectChanges();
 
     const memberRow = fixture.debugElement.query(By.css('.npc-row-member')).nativeElement as HTMLElement;
@@ -611,6 +617,8 @@ describe('Cyberpunk name generator: GM component wiring (Part 1)', () => {
   it('defect 4 (second validator round): the row-member generate button does not reuse the Roll Initiative icon', () => {
     const row = component.addNpcRow(false);
     row.addMember(new GruntMember('Ganger', 3, 3));
+    fixture.detectChanges();
+    (fixture.nativeElement.querySelector('[data-testid="group-btn"]') as HTMLButtonElement).click();
     fixture.detectChanges();
 
     const rowGenerateIcon = fixture.nativeElement.querySelector(

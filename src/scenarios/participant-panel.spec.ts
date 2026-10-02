@@ -242,7 +242,7 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
     expect(tabLabels()).toEqual(['Condition', 'Stats', 'Deck', 'Awakened']);
   });
 
-  it('a grunt group\'s panel has no Condition tab', () => {
+  it('a grunt group\'s panel has no Condition tab, only Group and Stats', () => {
     const row = component.addNpcRow(false);
     row.name = 'Halloweeners';
     component.addNpcToRow(row, 'Ganger 1');
@@ -250,7 +250,7 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
     clickName(row);
 
     expect(panelName()).toBe('Halloweeners');
-    expect(tabLabels()).toEqual(['Stats']);
+    expect(tabLabels()).toEqual(['Group', 'Stats']);
   });
 
   // ── the Condition tab still records damage exactly as before ───────────
