@@ -601,10 +601,12 @@
                    fits one line. Each keeps its `title` for the tooltip and its
                    filled/outline variant for state, so nothing is lost but the
                    word. -->
+              <!-- Opens the participant panel on the Deck tab (GM screen
+                   overhaul 04, GitHub #7); filled while that tab is showing. -->
               <button type="button" class="btn gm-trailing-icon"
-                [class.btn-secondary]="isDeckPanelExpanded(p)"
-                [class.btn-outline-secondary]="!isDeckPanelExpanded(p)"
-                (click)="toggleDeckPanel(p)"
+                [class.btn-secondary]="isDeckTabOpen(p)"
+                [class.btn-outline-secondary]="!isDeckTabOpen(p)"
+                (click)="openParticipantPanel(p, 'deck')"
                 data-testid="deck-btn"
                 title="Deck — cyberdeck configuration">
                 <i class="fas fa-microchip fa-lg" aria-hidden="true"></i>
@@ -882,111 +884,6 @@
             </div>
             }
           </div>
-        </div>
-        }
-        @if (!isNpcRow(p) && isDeckPanelExpanded(p)) {
-        <div class="row deck-panel py-2 px-3 mb-1">
-          @if (!isMatrix(p)) {
-          <!-- Phase 0: No deck -->
-          <div class="col d-flex align-items-center gap-2">
-            <span class="small text-muted">No deck configured.</span>
-            <button type="button" class="btn btn-sm btn-outline-primary" (click)="enableDeck(p)">
-              Enable Deck
-            </button>
-          </div>
-          }
-          @else {
-          <div class="col">
-            <!-- Deck stats + Remove Deck — always visible when deck is active -->
-            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-              <div class="input-group input-group-sm gm-inline-input-group">
-                <span class="input-group-text gm-stat-chip gm-chip-dp" title="Data Processing">DP</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="getMatrixDataProcessingDisplayValue(p)" placeholder="not set"
-                  (ngModelChange)="onMatrixDPChanged(p, $event)" [min]="0" title="Data Processing">
-                <span class="input-group-text gm-stat-chip" title="Attack">A</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).attack"
-                  (ngModelChange)="onDeckStatChanged(p, 'attack', $event)" [min]="0">
-                <span class="input-group-text gm-stat-chip" title="Sleaze">S</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).sleaze"
-                  (ngModelChange)="onDeckStatChanged(p, 'sleaze', $event)" [min]="0">
-                <span class="input-group-text gm-stat-chip" title="Firewall">F</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).firewall"
-                  (ngModelChange)="onDeckStatChanged(p, 'firewall', $event)" [min]="0">
-                <span class="input-group-text gm-stat-chip" title="Device Rating">DR</span>
-                <input class="form-control text-center gm-stat-input" type="number"
-                  [ngModel]="asMatrix(p).deviceRating"
-                  (ngModelChange)="onDeckStatChanged(p, 'deviceRating', $event)" [min]="0">
-              </div>
-              <button type="button" class="btn btn-sm btn-outline-danger" (click)="removeDeck(p)">
-                Remove Deck
-              </button>
-            </div>
-            @if (!asMatrix(p).jackedIn) {
-            <!-- Phase 1.5: Deck active, not jacked in -->
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="small text-muted">Jack in as:</span>
-              <div class="btn-group btn-group-sm">
-                <button type="button" class="btn"
-                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
-                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
-                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
-                <button type="button" class="btn"
-                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
-                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
-                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
-                <button type="button" class="btn"
-                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
-                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
-                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
-              </div>
-              <button type="button" class="btn btn-sm btn-primary" (click)="gmJackIn(p)">Jack In</button>
-            </div>
-            } @else {
-            <!-- Phase 2: Jacked in -->
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <span class="small text-muted">
-                Mode:
-                <span class="fw-semibold"
-                  [class.text-secondary]="asMatrix(p).vrMode === VRMode.AR"
-                  [class.text-info]="asMatrix(p).vrMode === VRMode.ColdSim"
-                  [class.text-danger]="asMatrix(p).vrMode === VRMode.HotSim">
-                  {{ asMatrix(p).vrMode === VRMode.ColdSim ? 'Cold Sim' : asMatrix(p).vrMode === VRMode.HotSim ? 'Hot Sim' : 'AR' }}
-                </span>
-                &nbsp;Switch to:
-              </span>
-              <div class="btn-group btn-group-sm">
-                <button type="button" class="btn"
-                  [class.btn-secondary]="getPendingVrMode(p) === VRMode.AR"
-                  [class.btn-outline-secondary]="getPendingVrMode(p) !== VRMode.AR"
-                  (click)="setPendingVrMode(p, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
-                <button type="button" class="btn"
-                  [class.btn-info]="getPendingVrMode(p) === VRMode.ColdSim"
-                  [class.btn-outline-info]="getPendingVrMode(p) !== VRMode.ColdSim"
-                  (click)="setPendingVrMode(p, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
-                <button type="button" class="btn"
-                  [class.btn-danger]="getPendingVrMode(p) === VRMode.HotSim"
-                  [class.btn-outline-danger]="getPendingVrMode(p) !== VRMode.HotSim"
-                  (click)="setPendingVrMode(p, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
-              </div>
-              <button type="button" class="btn btn-sm btn-primary"
-                (click)="gmJackIn(p)"
-                [disabled]="getPendingVrMode(p) === asMatrix(p).vrMode">Switch Mode</button>
-              <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(p)">Jack Out</button>
-            </div>
-            <div class="mt-1">
-              <app-matrix-participant-badge
-                [participant]="$any(p)"
-                (osAdjust)="onOsAdjust(p, $event)"
-                (osResetClick)="onOsResetClick(p)">
-              </app-matrix-participant-badge>
-            </div>
-            }
-          </div>
-          }
         </div>
         }
         @if (isAstralPanelExpanded(p)) {
@@ -1324,6 +1221,118 @@
                 </div>
               </ng-template>
             </ng-container>
+            <!-- Deck tab (GM screen overhaul 04, GitHub #7): everything the
+                 Deck panel under the row used to hold, with the same bindings
+                 and handlers, so each control does exactly what it did. A
+                 grunt group is a shared Initiative Score, not a character, so
+                 it cannot carry a deck (same rule as the row's Deck button). -->
+            @if (!isNpcRow(selectedActor)) {
+            <ng-container ngbNavItem="deck">
+              <button ngbNavLink>Deck</button>
+              <ng-template ngbNavContent>
+                <div class="deck-tab" data-testid="deck-tab">
+                  @if (!isMatrix(selectedActor)) {
+                  <span class="small text-muted">No deck configured.</span>
+                  <div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" (click)="enableDeck(selectedActor)">
+                      Enable Deck
+                    </button>
+                  </div>
+                  }
+                  @else {
+                  <!-- The deck stats in one even row of boxes, each label
+                       above its box (target picture). -->
+                  <div class="deck-stats-grid">
+                    <div class="panel-stat">
+                      <label for="panel-deck-dp-input" title="Data Processing">DP</label>
+                      <input id="panel-deck-dp-input" class="form-control form-control-sm text-center" type="number"
+                        [ngModel]="getMatrixDataProcessingDisplayValue(selectedActor)" placeholder="not set"
+                        (ngModelChange)="onMatrixDPChanged(selectedActor, $event)" [min]="0" title="Data Processing">
+                    </div>
+                    <div class="panel-stat">
+                      <label for="panel-deck-attack-input" title="Attack">A</label>
+                      <input id="panel-deck-attack-input" class="form-control form-control-sm text-center" type="number"
+                        [ngModel]="asMatrix(selectedActor).attack"
+                        (ngModelChange)="onDeckStatChanged(selectedActor, 'attack', $event)" [min]="0" title="Attack">
+                    </div>
+                    <div class="panel-stat">
+                      <label for="panel-deck-sleaze-input" title="Sleaze">S</label>
+                      <input id="panel-deck-sleaze-input" class="form-control form-control-sm text-center" type="number"
+                        [ngModel]="asMatrix(selectedActor).sleaze"
+                        (ngModelChange)="onDeckStatChanged(selectedActor, 'sleaze', $event)" [min]="0" title="Sleaze">
+                    </div>
+                    <div class="panel-stat">
+                      <label for="panel-deck-firewall-input" title="Firewall">F</label>
+                      <input id="panel-deck-firewall-input" class="form-control form-control-sm text-center" type="number"
+                        [ngModel]="asMatrix(selectedActor).firewall"
+                        (ngModelChange)="onDeckStatChanged(selectedActor, 'firewall', $event)" [min]="0" title="Firewall">
+                    </div>
+                    <div class="panel-stat">
+                      <label for="panel-deck-dr-input" title="Device Rating">DR</label>
+                      <input id="panel-deck-dr-input" class="form-control form-control-sm text-center" type="number"
+                        [ngModel]="asMatrix(selectedActor).deviceRating"
+                        (ngModelChange)="onDeckStatChanged(selectedActor, 'deviceRating', $event)" [min]="0" title="Device Rating">
+                    </div>
+                  </div>
+                  <!-- AR / Cold Sim / Hot Sim as one joined set of buttons:
+                       the mode to jack in as, or to switch to once in. -->
+                  <span class="small text-muted">
+                    @if (!asMatrix(selectedActor).jackedIn) {
+                    Jack in as:
+                    } @else {
+                    Mode:
+                    <span class="fw-semibold"
+                      [class.text-secondary]="asMatrix(selectedActor).vrMode === VRMode.AR"
+                      [class.text-info]="asMatrix(selectedActor).vrMode === VRMode.ColdSim"
+                      [class.text-danger]="asMatrix(selectedActor).vrMode === VRMode.HotSim">
+                      {{ asMatrix(selectedActor).vrMode === VRMode.ColdSim ? 'Cold Sim' : asMatrix(selectedActor).vrMode === VRMode.HotSim ? 'Hot Sim' : 'AR' }}
+                    </span>
+                    &nbsp;Switch to:
+                    }
+                  </span>
+                  <div class="btn-group btn-group-sm deck-mode-group">
+                    <button type="button" class="btn"
+                      [class.btn-secondary]="getPendingVrMode(selectedActor) === VRMode.AR"
+                      [class.btn-outline-secondary]="getPendingVrMode(selectedActor) !== VRMode.AR"
+                      (click)="setPendingVrMode(selectedActor, VRMode.AR)" title="AR — REA+INT+1d6">AR</button>
+                    <button type="button" class="btn"
+                      [class.btn-info]="getPendingVrMode(selectedActor) === VRMode.ColdSim"
+                      [class.btn-outline-info]="getPendingVrMode(selectedActor) !== VRMode.ColdSim"
+                      (click)="setPendingVrMode(selectedActor, VRMode.ColdSim)" title="Cold-Sim VR — DP+INT+3d6">Cold Sim</button>
+                    <button type="button" class="btn"
+                      [class.btn-danger]="getPendingVrMode(selectedActor) === VRMode.HotSim"
+                      [class.btn-outline-danger]="getPendingVrMode(selectedActor) !== VRMode.HotSim"
+                      (click)="setPendingVrMode(selectedActor, VRMode.HotSim)" title="Hot-Sim VR — DP+INT+4d6">Hot Sim</button>
+                  </div>
+                  <!-- Jack In (or Switch Mode and Jack Out) and Remove Deck on
+                       one line, Remove Deck kept apart at the far end. -->
+                  <div class="deck-actions">
+                    @if (!asMatrix(selectedActor).jackedIn) {
+                    <button type="button" class="btn btn-sm btn-primary" (click)="gmJackIn(selectedActor)">Jack In</button>
+                    } @else {
+                    <button type="button" class="btn btn-sm btn-primary"
+                      (click)="gmJackIn(selectedActor)"
+                      [disabled]="getPendingVrMode(selectedActor) === asMatrix(selectedActor).vrMode">Switch Mode</button>
+                    <button type="button" class="btn btn-sm btn-warning" (click)="gmJackOut(selectedActor)">Jack Out</button>
+                    }
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto" (click)="removeDeck(selectedActor)">
+                      Remove Deck
+                    </button>
+                  </div>
+                  @if (asMatrix(selectedActor).jackedIn) {
+                  <div>
+                    <app-matrix-participant-badge
+                      [participant]="$any(selectedActor)"
+                      (osAdjust)="onOsAdjust(selectedActor, $event)"
+                      (osResetClick)="onOsResetClick(selectedActor)">
+                    </app-matrix-participant-badge>
+                  </div>
+                  }
+                  }
+                </div>
+              </ng-template>
+            </ng-container>
+            }
           </nav>
           <div [ngbNavOutlet]="nav" class="mt-2"></div>
         </div>

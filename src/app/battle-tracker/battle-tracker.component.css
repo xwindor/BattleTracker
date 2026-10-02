@@ -226,6 +226,46 @@
   opacity: 0.85;
 }
 
+/* Deck tab (GM screen overhaul 04, target picture): the deck stats in one
+   even row of five boxes, AR / Cold Sim / Hot Sim as one joined set, then
+   Jack In and Remove Deck on one line. */
+.deck-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--panel-gap);
+}
+
+.deck-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--panel-gap);
+  align-self: stretch;
+}
+
+.deck-stats-grid .panel-stat > :first-child {
+  text-align: center;
+}
+
+.deck-stats-grid input::placeholder {
+  font-size: 0.7rem;
+}
+
+.deck-mode-group .btn {
+  white-space: nowrap;
+}
+
+.deck-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--panel-gap);
+  align-self: stretch;
+}
+
+.deck-actions .btn {
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .participant-panel { animation: none; }
 }
@@ -1137,13 +1177,6 @@
   font-weight: inherit;
 }
 
-
-/* Deck panel -------------------------------------------------------- */
-.deck-panel {
-  background: rgba(253, 126, 20, 0.06);
-  border-left: 3px solid #fd7e14;
-  border-radius: 0 4px 4px 0;
-}
 
 /* Linked NPC row (grunt group) panel */
 .npc-row-panel {

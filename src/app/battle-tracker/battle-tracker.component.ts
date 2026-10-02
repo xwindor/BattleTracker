@@ -1095,7 +1095,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   private readonly localLogDecodeTimers = new Map<string, number>();
   private readonly localLogDecodeText = new Map<string, string>();
   private observedLocalLogCount = 0;
-  expandedDeckPanels = new Set<IParticipant>();
   expandedAstralPanels = new Set<IParticipant>();
   /** Which linked NPC rows have their member list open (brief Core p. 379). */
   expandedRowPanels = new Set<IParticipant>();
@@ -9177,7 +9176,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.forgetMapEntry(this.pendingJoinAnnouncement, p);
     this.forgetMapEntry(this.participantPendingDeltaDice, p);
     this.forgetSetEntry(this.expandedRowPanels, p);
-    this.forgetSetEntry(this.expandedDeckPanels, p);
     this.forgetSetEntry(this.expandedAstralPanels, p);
     if (this.selectedActor === p) {
       this.selectedActor = null;
@@ -9208,16 +9206,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     set.delete(key);
   }
 
-  isDeckPanelExpanded(p: IParticipant): boolean {
-    return this.expandedDeckPanels.has(p);
-  }
-
-  toggleDeckPanel(p: IParticipant) {
-    if (this.expandedDeckPanels.has(p)) {
-      this.expandedDeckPanels.delete(p);
-    } else {
-      this.expandedDeckPanels.add(p);
-    }
+  /** Whether `p`'s participant panel is open on the Deck tab (lights the row's Deck button). */
+  isDeckTabOpen(p: IParticipant): boolean {
+    return this.selectedActor === p && this.participantPanelTabFor(p) === "deck";
   }
 
   enableDeck(p: IParticipant) {
@@ -9495,10 +9486,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantStatblocks.delete(p);
     this.participantLieutenantTeamRowId.delete(p);
     this.pendingJoinAnnouncement.delete(p);
-    if (this.expandedDeckPanels.has(p)) {
-      this.expandedDeckPanels.delete(p);
-      this.expandedDeckPanels.add(mp);
-    }
     // Carried across the type swap: enabling a deck replaces the participant
     // instance, so an open participant panel must follow it.
     if (this.selectedActor === p) this.selectedActor = mp;
@@ -9579,7 +9566,6 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.participantStatblocks.delete(mp);
     this.participantLieutenantTeamRowId.delete(mp);
     this.pendingJoinAnnouncement.delete(mp);
-    this.expandedDeckPanels.delete(mp);
     // Same instance-swap carry-over as promoteToMatrixParticipant, in reverse.
     if (this.selectedActor === mp) this.selectedActor = p;
     if (this.actModalParticipant === mp) this.actModalParticipant = p;

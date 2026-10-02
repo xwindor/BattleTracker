@@ -173,8 +173,9 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
     expect(panel()).toBeNull();
 
     // Panel open on Razor: clicking a trailing icon on Kestrel's row keeps it on Razor.
+    // (The lock icon: the Deck icon now opens Kestrel's Deck tab on purpose, #7.)
     clickRow(razor);
-    (rowOf(kestrel).querySelector('.gm-trailing-icon') as HTMLButtonElement).click();
+    (rowOf(kestrel).querySelector('[data-testid="claimable-btn"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(panelName()).toBe('Razor');
   });
@@ -233,12 +234,12 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
 
   // ── tabs ───────────────────────────────────────────────────────────────
 
-  it('a character\'s panel has Condition and Stats tabs', () => {
+  it('a character\'s panel has Condition, Stats and Deck tabs', () => {
     const razor = scored('Razor', 10, 5);
     fixture.detectChanges();
     clickName(razor);
 
-    expect(tabLabels()).toEqual(['Condition', 'Stats']);
+    expect(tabLabels()).toEqual(['Condition', 'Stats', 'Deck']);
   });
 
   it('a grunt group\'s panel has no Condition tab', () => {
