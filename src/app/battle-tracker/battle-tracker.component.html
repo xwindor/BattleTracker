@@ -233,49 +233,48 @@
         <button type="button" class="os-reminder-dismiss" (click)="dismissOsReminder($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
-      <!-- Header cells must line up with the participant-row cells beneath them
-           at every width (AC 10). Both use the SAME breakpoint family as the
-           player view (lg) — the GM view used to use xl, so between 992 and
-           1200px the row split into two 12-column lines while the header
-           described only the first, and the trailing cell — which had no
-           col-* class in force below xl — drew an empty full-width strip under
-           the labels. Below md the row cells stack full width, so the header
-           describes nothing and is hidden rather than drawn as three orphaned
-           labels. -->
-      <!-- At lg and up the cells below are sized by `.gm-col-*` (see the
-           `min-width: 992px` block in battle-tracker.component.css), NOT by the
-           `col-lg-*` twelfths they used to carry. The grid could not express
-           what this row needs: a twelfth is ~77px at 1280px, so "Ini" — a
-           two-digit number — was as wide as the whole rolled-Initiative
-           control, while the Actions cell was starved at the same 77px unit and
-           wrapped to two lines. Xavier: "the ini column could be much narrower,
-           its very wide for just a two digit number". `col-12`/`col-md-*` are
-           kept: below lg the twelfths are still exactly right. -->
-      <div class="row bg-dark text-light d-none d-md-flex">
+      <!-- Below md the row cells stack full width, so the header describes
+           nothing and is hidden rather than drawn as orphaned labels. -->
+      <!-- GM screen overhaul 08 (GitHub #11): five columns in the target
+           picture's order - Ini, Name, Roll, Actions, Details. At lg and up
+           the header and every row are one shared grid (`.gm-list-grid`), so
+           each label sits over its column at every width. -->
+      <div class="row bg-dark text-light d-none d-md-flex d-lg-grid gm-list-grid" data-testid="initiative-list-headings">
+        <div class="col-md-2 gm-col-ini">
+          <span class="gm-col-header">Ini</span>
+        </div>
         <div class="col-md-7 gm-col-name">
           <span class="gm-col-header">Name</span>
         </div>
-        <div class="col-md-2 text-center gm-col-ini">
-          <span class="gm-col-header">Ini</span>
-        </div>
-        <!-- The rolled Initiative total's column. With the E/R/I/D column gone
-             (moved to the participant panel's Stats tab), Name + Ini + Roll
-             fill the row's first 12-column line from md up, so the label shows
-             from md. Sized to its own content, so the long label is abbreviated
-             to "Roll" with the full wording in the tooltip. -->
-        <div class="d-none d-md-block col-md-3 text-center gm-col-rolled">
+        <div class="col-md-3 gm-col-rolled">
           <span class="gm-col-header" title="Rolled Initiative">Roll</span>
         </div>
-        <!-- Spacer over the unlabelled Actions + Trailing cells. Sized to the
-             sum of those two `.gm-col-*` widths so the labels above stay over
-             the columns they describe. -->
-        <div class="d-none d-lg-block gm-col-spacer"></div>
+        <div class="d-none d-lg-block gm-col-actions">
+          <span class="gm-col-header">Actions</span>
+        </div>
+        <div class="d-none d-lg-block gm-col-trailing text-end">
+          <span class="gm-col-header">Details</span>
+        </div>
       </div>
 
       <div cdkDropList (cdkDropListDropped)="drop($event)">
         @for(p of combatManager.participants.items; track $index; let i = $index; let last = $last) {
-        <div class="row participant" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
+        <div class="row participant gm-list-grid" attr.id="participant{{i}}" [attr.data-indexnr]="i" [attr.data.participant]="p"
           (click)="onParticipantRowClick(p, $event)" [class]="getParticipantStyles(p)" cdkDrag>
+          <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
+            <!-- Not rolled yet: a dimmed dash, as in the target picture, so the
+                 narrow Ini column stays one line (GM screen overhaul 08,
+                 GitHub #11). The words are still there for a screen reader
+                 and in the tooltip. -->
+            <span class="control-label lblIni" data-testid="gm-initiative-score">
+              @if (isInitiativeNotRolled(p)) {
+              <span class="gm-ini-unrolled" title="Not rolled" aria-hidden="true">—</span><span class="visually-hidden">not rolled</span>
+              }
+              @else {
+              {{ getInitiativeScoreDisplay(p) }}
+              }
+            </span>
+          </div>
           <div class="col-12 col-md-7 gm-col-name d-flex align-items-center gap-1">
             <!-- Merge tick (addendum Decision 10): only a standalone grunt can
                  be folded into a group, so only a grunt gets the box. -->
@@ -333,13 +332,13 @@
               }
             }
           </div>
-          <div class="col-12 col-md-2 gm-col-ini text-center d-flex align-items-center justify-content-center">
-            <span class="control-label lblIni" data-testid="gm-initiative-score">{{ getInitiativeScoreDisplay(p) }}</span>
-          </div>
-          <!-- Rolled Initiative: its own column (header "Roll" above). The input
-               and the roll-die button are one input-group so they stay adjacent
-               and the same height. -->
-          <div class="col-12 col-md-3 gm-col-rolled text-center gm-rolled-ini-col d-flex align-items-center">
+          <!-- Rolled Initiative: its own column (header "Roll" above): the
+               rolled-total box, the roll button (a small pip die, as in the
+               target picture) and, where it can do something, the ask button,
+               all on one line. The Needs roll / Asked tags moved to the Actions
+               column (GM screen overhaul 08, GitHub #11): someone owing a roll
+               can't act anyway, and it keeps the row one line tall. -->
+          <div class="col-12 col-md-3 gm-col-rolled gm-rolled-ini-col d-flex align-items-center">
             <div class="input-group gm-rolled-ini-group">
               <!-- One-way binding + explicit handler (same shape as the Stats
                    tab's Initiative Dice box): the typed value must be clamped *before* it reaches
@@ -353,119 +352,64 @@
                 [max]="getParticipantInitiativeRollMax(p)">
               <div class="input-group-append">
                 <button type="button" class="btn btn-dark p-0 gm-roll-btn" (click)="btnRollInitiative_Click(p)"
-                  [disabled]="p.diceIni !== 0" data-toggle="tooltip" data-placement="bottom" title="Roll Initiative">
-                  <i class="fas fa-dice fa-lg"></i>
+                  [disabled]="p.diceIni !== 0" data-toggle="tooltip" data-placement="bottom"
+                  title="Roll Initiative" aria-label="Roll Initiative">
+                  <span class="gm-pip-die" aria-hidden="true">
+                    <span class="gm-pip gm-pip-tl"></span>
+                    <span class="gm-pip gm-pip-tr"></span>
+                    <span class="gm-pip gm-pip-c"></span>
+                    <span class="gm-pip gm-pip-bl"></span>
+                    <span class="gm-pip gm-pip-br"></span>
+                  </span>
                 </button>
               </div>
             </div>
-            <!-- QA fix round 3 (Xavier hands-on test): the ask button and the
-                 two roll-status markers used to live inside/next to the
-                 rolled-total input-group, all on one line in a column pinned
-                 to 5rem wide at desktop widths - they squeezed against the
-                 input and each other. Moved to their own row directly under
-                 the input-group (same column, so the ask button stays
-                 visually grouped with the dice button per Xavier's note), and
-                 the two markers collapsed into one slot: "Asked to roll"
-                 (`participantAskedToRoll`) can only be true while the roll is
-                 still pending (`isAskedToRoll` requires `pendingRoll`), so
-                 whenever it is true "Needs Initiative roll" would always also
-                 be true and add nothing - showing both stacked was pure
-                 repetition of the same fact. Asked takes priority; the plain
-                 "needs a roll, nobody has asked yet" state falls back to the
-                 other badge. Compact badges, not sentences, so the row's
-                 height stays roughly constant either way. -->
-            @if(canAskParticipantToRoll(p) || participantNeedsInitiativeRoll(p) || participantAskedToRoll(p)) {
-            <div class="gm-roll-status-row" data-testid="roll-status-row">
-              <!-- Item A's new per-row control: asks only THIS player to
-                   roll, unlike "Request Player Rolls" (every currently
-                   pending player at once). Visible only where it can
-                   actually do something. -->
-              @if(canAskParticipantToRoll(p)) {
-              <button type="button" class="btn btn-outline-info p-0 gm-ask-roll-btn"
-                data-testid="ask-player-to-roll-btn"
-                (click)="btnAskPlayerToRoll_Click(p)"
-                data-toggle="tooltip" data-placement="bottom" title="Ask this player to roll">
-                <i class="fas fa-comment-dots"></i>
-              </button>
-              }
-              <!-- Item 7 (round 3): "who has been asked", on the row itself -
-                   pre-combat or mid-combat alike. Takes priority over the
-                   plain "needs a roll" badge below (see comment above). -->
-              @if(participantAskedToRoll(p)) {
-              <span class="badge gm-roll-badge gm-roll-badge-asked" data-testid="asked-to-roll-indicator"
-                title="Asked to roll">
-                <i class="fas fa-comment-dots" aria-hidden="true"></i> Asked
-              </span>
-              }
-              <!-- Item B: a visual marker only - never an interruption - for
-                   anyone still owing an Initiative roll mid-combat who has
-                   not been asked yet. -->
-              @if(!participantAskedToRoll(p) && participantNeedsInitiativeRoll(p)) {
-              <span class="badge gm-roll-badge gm-roll-badge-needed" data-testid="needs-initiative-roll-indicator"
-                title="Needs Initiative roll">
-                <i class="fas fa-dice" aria-hidden="true"></i> Needs roll
-              </span>
-              }
-            </div>
-            }
-          </div>
-          <!-- Was a Bootstrap `.btn-group`: a connected, single-line button
-               bar. Up to four buttons appear here depending on combat state
-               (Seize Initiative / Act / Delay / Interrupts) and a `.btn-group`
-               does not wrap - confirmed to overflow this column and paint
-               over the trailing Deck/Awakened/Private column at every width
-               from 1024 to 1920px whenever more than two buttons were
-               present. `.gm-action-buttons` (below) wraps instead. `role`
-               kept for the same grouping semantics. -->
-          <div class="col-12 col-md-7 gm-col-actions gm-action-buttons" role="group">
-            <!-- Seize the Initiative (Core p. 160, "Initiative and Edge";
-                 one point of Edge, Core p. 56). Table ruling R1
-                 (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's
-                 rulings, 2026-09-21" - "you cannot seize initiative until
-                 you have rolled"): the control is unavailable, not merely
-                 warned against, until this participant has completed this
-                 Combat Turn's Initiative Test (`participantHasRolledThisTurn(p)`,
-                 reading the single canonical `hasRolledThisTurn()` predicate -
-                 round-6 defect 5). Table ruling
-                 R2 (same spec): once rolled, Seize may be declared at any
-                 point for the rest of the Combat Turn - not only between
-                 passes and not only above some Score threshold, unlike this
-                 control's condition before 2026-09-21 - because Seize is an
-                 Edge Effect with no procedural anchor (Core has one for a
-                 Delayed Action, Step 3A, Core p. 161, but none for Seize), never
-                 an Interrupt Action (Core p. 167) gated on remaining Score.
-                 `!p.edge` alone still hides it once already seized: only one
-                 Edge point per test/action (Core p. 56), and Seize cannot be
-                 re-purchased mid-turn. -->
-            @if (!p.edge && participantHasRolledThisTurn(p))
-            {
-            <button type="button" class="btn btn-primary" data-testid="seize-initiative-btn"
-              (click)="btnEdge_Click(p)">
-              Seize Initiative
+            <!-- Item A's per-row control: asks only THIS player to roll,
+                 unlike "Request Player Rolls" (every currently pending player
+                 at once). Visible only where it can actually do something;
+                 kept beside the dice button per Xavier's note. -->
+            @if(canAskParticipantToRoll(p)) {
+            <button type="button" class="btn btn-outline-info p-0 gm-ask-roll-btn"
+              data-testid="ask-player-to-roll-btn"
+              (click)="btnAskPlayerToRoll_Click(p)"
+              data-toggle="tooltip" data-placement="bottom" title="Ask this player to roll">
+              <i class="fas fa-comment-dots"></i>
             </button>
             }
+          </div>
+          <!-- Actions column (GM screen overhaul 08, GitHub #11). During combat
+               Act, Delay and Defend each have a fixed-width slot that is drawn
+               even when its button isn't, so the three line up from row to row
+               (the target picture's tidiness rule). Seize the Initiative moved
+               to the row menu. The Needs roll / Asked tag follows the slots. -->
+          <div class="col-12 col-md-7 gm-col-actions gm-action-buttons" role="group">
+            @if (combatManager.started) {
             <!-- A grunt row has no whole-row Act button (brief "NPC Group
                  Initiative" Decision 22): a group does not take one action -
                  its members each take their own, from the per-member Act
-                 control in the row panel below (Decision 23). Ordinary
+                 control on the Group tab (Decision 23). Ordinary
                  participants keep this button unchanged. -->
-            @if(combatManager.started && (p.status === 1 || p.status === 2) && !isNpcRow(p))
-            {
-            <button type="button" class="btn btn-primary" (click)="btnAct_Click(p, actModalContent)">
-              Act
-            </button>
-            }
+            <span class="gm-action-slot gm-action-slot-act">
+              @if((p.status === 1 || p.status === 2) && !isNpcRow(p))
+              {
+              <button type="button" class="btn btn-primary" (click)="btnAct_Click(p, actModalContent)">
+                Act
+              </button>
+              }
+            </span>
             <!-- Delay is kept for a row, unlike Act (Decision 22): delaying
                  moves the row's single shared slot in the order later, which
                  is coherent for the group as a whole - it does not need to
                  pick which member's action that is, the way an "Act" tap
                  would. -->
-            @if (combatManager.started && p.status === 1)
-            {
-            <button type="button" class="btn btn-warning" (click)="btnDelay_Click(p)">
-              Delay
-            </button>
-            }
+            <span class="gm-action-slot gm-action-slot-delay">
+              @if (p.status === 1)
+              {
+              <button type="button" class="btn btn-warning" (click)="btnDelay_Click(p)">
+                Delay
+              </button>
+              }
+            </span>
             <!-- The dropdown stays visible at any Initiative Score, including 0
                  or below: a character down there can still defend/dodge and
                  still has a Free Action per pass (brief criterion 5, Core p. 160).
@@ -478,7 +422,8 @@
                  one member to pay a cost out of a score the whole row shares.
                  The dropdown is simply hidden - no explanatory label, which was
                  overflowing into the next column. -->
-            @if (combatManager.started && !isNpcRow(p)) {
+            <span class="gm-action-slot gm-action-slot-defend">
+            @if (!isNpcRow(p)) {
             <div class="btn-group p-0" #interruptDropdown ngbDropdown autoClose="outside">
               <button ngbDropdownToggle id="interruptDropdownButton" type="button" class="btn btn-secondary"
                 dropdownToggle>
@@ -546,32 +491,46 @@
               </div>
             </div>
             }
+            </span>
+            }
+            <!-- "Who has been asked" (Item 7, round 3), pre-combat or
+                 mid-combat alike, and otherwise the plain "needs a roll"
+                 marker (Item B: a visual marker only, never an interruption).
+                 One slot: Asked can only be true while the roll is still
+                 pending, so it takes priority and the two never stack. -->
+            @if(participantAskedToRoll(p)) {
+            <span class="badge gm-roll-badge gm-roll-badge-asked" data-testid="asked-to-roll-indicator"
+              title="Asked to roll">
+              <i class="fas fa-comment-dots" aria-hidden="true"></i> Asked
+            </span>
+            }
+            @else if(participantNeedsInitiativeRoll(p)) {
+            <span class="badge gm-roll-badge gm-roll-badge-needed" data-testid="needs-initiative-roll-indicator"
+              title="Needs Initiative roll">
+              <i class="fas fa-dice" aria-hidden="true"></i> Needs roll
+            </span>
+            }
           </div>
-          <!-- `text-right` was a Bootstrap 4 class; this app is on Bootstrap 5
-               (`text-end`), so it was a dead no-op - the actual right-alignment
-               comes from `justify-content: flex-end` on `.gm-trailing-actions`
-               below. Dropped rather than fixed to `text-end`, since there is no
-               text content directly in this column to align. -->
-          <!-- Sized at lg to the six icon buttons plus their gaps (~196px), so
-               the strip sits on one line instead of the two it wrapped to at
-               every width, 1024px included. -->
+          <!-- Details column (GM screen overhaul 08, GitHub #11): Claimed ×,
+               the Deck / Awakened (or Group) buttons, and the row menu (⋯).
+               Duplicate, Enter/Leave combat, the claim setting and Delete
+               moved into the menu; release-claim stays on the row (user
+               story 20). -->
           <div class="col-12 col-md-5 gm-col-trailing">
-            <!-- Deck(or Group)/Awakened/Claimable/Claimed/Duplicate/Enter-or-
-                 Leave/Delete: ONE wrapping flex row, not two hard-stacked rows
-                 (text buttons above, icon buttons below). The two-row split was
-                 presentational only and forced a participant row to be at least
-                 2-3 button-lines tall even when a later button (e.g. an icon
-                 button) had room to sit at the end of an earlier line. Xavier:
-                 "i dont like how tall each initiative participant is... because
-                 of the deck, awakened, private, copy, leave, and delete buttons
-                 all stacked ontop of eachother." `.gm-trailing-actions`
-                 (battle-tracker.component.css) right-aligns via
-                 `justify-content: flex-end` and, like `.gm-action-buttons`
-                 beside it, is capped to the column's own width so a line that
-                 doesn't fit wraps instead of overflowing LEFTWARD over the
-                 Actions column (confirmed at every width from 1024 to 1920px
-                 in the prior pass that introduced this column). -->
             <div class="gm-trailing-actions">
+              <!-- A claim can outlive the client that made it (a player who
+                   reloaded during a server restart comes back with a new
+                   token). Without this the character is stuck: nobody holds
+                   the claim and no player can re-take it. One tap, reversible
+                   by re-claiming. -->
+              @if (isParticipantClaimed(p)) {
+              <button type="button" class="btn btn-outline-secondary gm-release-claim-btn"
+                data-testid="release-claim-btn"
+                [attr.title]="getClaimOwnerHint(p)"
+                (click)="btnReleaseClaim_Click(p)">
+                Claimed ×
+              </button>
+              }
               @if (isNpcRow(p)) {
               <!-- The word "Group" is gone but the count deliberately is NOT:
                    it says how many of the row's NPCs still owe an action this
@@ -580,7 +539,7 @@
                    this is the one trailing control that is icon + text rather
                    than icon-only, and `.gm-trailing-icon` is deliberately not
                    applied - it would clamp the button to a square and clip the
-                   count. It still drops from ~95px to ~60px. -->
+                   count. -->
               <!-- Opens the participant panel on the Group tab (GM screen
                    overhaul 06, GitHub #9); filled while that tab is showing. -->
               <button type="button" class="btn gm-group-btn"
@@ -595,16 +554,10 @@
               </button>
               }
               @else {
-              <!-- Icon-only (Xavier: keep clone/delete as buttons, compact the
-                   rest). "Deck"/"Awakened"/"Private" were ~230px of text
-                   buttons in a `col-lg-2` that is ~296px wide even at 1920px,
-                   which is why this column wrapped to two lines at EVERY width.
-                   As icons the same three controls are ~90px and the column
-                   fits one line. Each keeps its `title` for the tooltip and its
-                   filled/outline variant for state, so nothing is lost but the
-                   word. -->
-              <!-- Opens the participant panel on the Deck tab (GM screen
-                   overhaul 04, GitHub #7); filled while that tab is showing. -->
+              <!-- Icon-only: each keeps its `title` for the tooltip and its
+                   filled/outline variant for state. Opens the participant
+                   panel on the Deck tab (GM screen overhaul 04, GitHub #7);
+                   filled while that tab is showing. -->
               <button type="button" class="btn gm-trailing-icon"
                 [class.btn-secondary]="isDeckTabOpen(p)"
                 [class.btn-outline-secondary]="!isDeckTabOpen(p)"
@@ -614,14 +567,12 @@
                 <i class="fas fa-microchip fa-lg" aria-hidden="true"></i>
                 <span class="visually-hidden">Deck</span>
               </button>
-              }
               <!-- Opens the participant panel on the Awakened tab (GM screen
-                   overhaul 05, GitHub #8); filled while that tab is showing. -->
-              <!-- A row is a group, not a character: it cannot project or jack
-                   in. An NPC in the row that changes Initiative type must be
-                   detached onto its own row first (criterion 13, Core pp. 159-160)
-                   - the Detach control on the Group tab. -->
-              @if (!isNpcRow(p)) {
+                   overhaul 05, GitHub #8); filled while that tab is showing.
+                   A grunt group has none: a row is a group, not a character,
+                   so it cannot project or jack in. An NPC in the row that
+                   changes Initiative type must be detached onto its own row
+                   first (criterion 13, Core pp. 159-160). -->
               <button type="button" class="btn gm-trailing-icon"
                 [class.btn-warning]="isAwakenedTabOpen(p)"
                 [class.btn-outline-warning]="!isAwakenedTabOpen(p) && isAstral(p)"
@@ -633,73 +584,72 @@
                 <span class="visually-hidden">Awakened</span>
               </button>
               }
-              <!-- Lock / open-lock rather than a generic glyph: the icon itself
-                   carries the Private-vs-Claimable state, so dropping the word
-                   costs no legibility here. -->
-              <button type="button"
-                class="btn gm-trailing-icon"
-                [class.btn-outline-info]="!isParticipantClaimable(p)"
-                [class.btn-info]="isParticipantClaimable(p)"
-                data-testid="claimable-btn"
-                [attr.title]="isParticipantClaimable(p) ? 'Claimable — character can be claimed by players' : 'Private — character cannot be claimed by players'"
-                (click)="btnToggleClaimable_Click(p)">
-                <i class="fas fa-lg" [class.fa-lock-open]="isParticipantClaimable(p)"
-                  [class.fa-lock]="!isParticipantClaimable(p)" aria-hidden="true"></i>
-                <span class="visually-hidden">{{ isParticipantClaimable(p) ? "Claimable" : "Private" }}</span>
-              </button>
-              <!-- A claim can outlive the client that made it (a player who
-                   reloaded during a server restart comes back with a new
-                   token). Without this the character is stuck: nobody holds
-                   the claim and no player can re-take it. One tap, reversible
-                   by re-claiming. -->
-              @if (isParticipantClaimed(p)) {
-              <button type="button" class="btn btn-outline-warning"
-                data-testid="release-claim-btn"
-                [attr.title]="getClaimOwnerHint(p)"
-                (click)="btnReleaseClaim_Click(p)">
-                Claimed <i class="fas fa-unlock"></i>
-              </button>
-              }
-              <!-- These three were already icon-only but sized themselves off
-                   `.btn`'s text padding, so they sat wider than the icon needed
-                   and wider than the three above. `.gm-trailing-icon` makes all
-                   six the same square, off the same `--ui-icon-btn-w` token as
-                   the roll-die button, so the whole trailing strip reads as one
-                   even row of icons. -->
-              <button type="button" class="btn btn-primary gm-trailing-icon" (click)="btnDuplicate_Click(p)"
-                title="Duplicate this participant">
-                <i class="fas fa-clone fa-lg fa-flip-vertical"></i>
-              </button>
-              @if(p.ooc){
-              <button type="button" class="btn btn-success gm-trailing-icon" (click)="btnEnterCombat_Click(p)"
-                title="Enter combat">
-                <i class="fa fa-sign-in-alt fa-lg fa-inverse"></i>
-              </button>
-              }
-              @else {
-              <button type="button" class="btn btn-warning gm-trailing-icon" (click)="btnLeaveCombat_Click(p)"
-                title="Leave combat">
-                <i class="fa fa-sign-out-alt fa-lg fa-inverse"></i>
-              </button>
-              }
-              <!-- Item 1 fix (fix round 3): the round-2 `(mousedown)`
-                   focus-steal suppression that used to live here is removed
-                   - it existed only to stop a native mousedown's default
-                   focus/blur shift from committing a Tab-added row's
-                   deferred join line an instant before Delete removed the
-                   participant it named. There is no blur-triggered
-                   commit any more at all (RULINGS.md 2026-08-30, "A
-                   combatant is announced when they enter the initiative
-                   order, not when a name box loses focus") - the join line
-                   now only ever fires the first time a combatant has a
-                   rolled Initiative Score, so deleting an unrolled,
-                   Tab-added row (with or without a focus-steal in between)
-                   is never announced regardless of focus. -->
-              <button type="button" class="btn btn-danger gm-trailing-icon"
-                (click)="btnDelete_Click(p)"
-                title="Delete this participant">
-                <i class="fa fa-trash fa-lg"></i>
-              </button>
+              <!-- The row menu (⋯, GM screen overhaul 08, GitHub #11; user
+                   stories 25-30): the occasional actions, off the row. Each
+                   item calls the same handler its old row button did, under
+                   the same show/hide rule. Picking an item closes the menu
+                   first - by mouse or keyboard alike (the drop-down's own
+                   auto-close only reacts to a mouse press); Escape and a click
+                   elsewhere close it too, and Escape then leaves the participant panel
+                   open (`onEscapeKey` defers to an open menu). -->
+              <div class="gm-row-menu" ngbDropdown #rowMenu="ngbDropdown" placement="bottom-end" data-testid="row-menu">
+                <button type="button" ngbDropdownToggle class="btn gm-trailing-icon gm-row-menu-btn"
+                  data-testid="row-menu-btn" aria-label="Row menu"
+                  title="Row menu">
+                  <i class="fas fa-ellipsis" aria-hidden="true"></i>
+                </button>
+                <div ngbDropdownMenu class="gm-row-menu-list">
+                  <!-- Seize the Initiative (Core p. 160, "Initiative and Edge";
+                       one point of Edge, Core p. 56). Table ruling R1
+                       (`briefs/seize-initiative-spec.md`, "RESOLVED - Xavier's
+                       rulings, 2026-09-21" - "you cannot seize initiative until
+                       you have rolled"): the item is unavailable, not merely
+                       warned against, until this participant has completed this
+                       Combat Turn's Initiative Test (`participantHasRolledThisTurn(p)`,
+                       reading the single canonical `hasRolledThisTurn()` predicate -
+                       round-6 defect 5). Table ruling R2 (same spec): once
+                       rolled, Seize may be declared at any point for the rest of
+                       the Combat Turn - because Seize is an Edge Effect with no
+                       procedural anchor (Core has one for a Delayed Action, Step
+                       3A, Core p. 161, but none for Seize), never an Interrupt
+                       Action (Core p. 167) gated on remaining Score. `!p.edge`
+                       alone still hides it once already seized: only one Edge
+                       point per test/action (Core p. 56), and Seize cannot be
+                       re-purchased mid-turn. -->
+                  @if (!p.edge && participantHasRolledThisTurn(p)) {
+                  <button type="button" ngbDropdownItem class="gm-row-menu-seize"
+                    data-testid="seize-initiative-btn"
+                    (click)="rowMenu.close(); btnEdge_Click(p)">Seize the Initiative (Edge)</button>
+                  <div class="dropdown-divider"></div>
+                  }
+                  <button type="button" ngbDropdownItem data-testid="duplicate-btn"
+                    title="Duplicate this participant"
+                    (click)="rowMenu.close(); btnDuplicate_Click(p)">Duplicate</button>
+                  @if (p.ooc) {
+                  <button type="button" ngbDropdownItem data-testid="enter-combat-btn"
+                    title="Enter combat"
+                    (click)="rowMenu.close(); btnEnterCombat_Click(p)">Enter combat</button>
+                  }
+                  @else {
+                  <button type="button" ngbDropdownItem data-testid="leave-combat-btn"
+                    title="Leave combat"
+                    (click)="rowMenu.close(); btnLeaveCombat_Click(p)">Leave combat</button>
+                  }
+                  <!-- Was a lock / open-lock icon on the row. -->
+                  <button type="button" ngbDropdownItem data-testid="claimable-btn"
+                    [attr.title]="isParticipantClaimable(p) ? 'Claimable — character can be claimed by players' : 'Private — character cannot be claimed by players'"
+                    (click)="rowMenu.close(); btnToggleClaimable_Click(p)">Players can claim: {{ isParticipantClaimable(p) ? "on" : "off" }}</button>
+                  <div class="dropdown-divider"></div>
+                  <!-- No focus-steal suppression here (Item 1 fix, fix round
+                       3): there is no blur-triggered join line left to protect
+                       against (RULINGS.md 2026-08-30), so deleting an unrolled
+                       row is never announced regardless of focus. -->
+                  <button type="button" ngbDropdownItem class="gm-row-menu-delete"
+                    data-testid="delete-btn"
+                    title="Delete this participant"
+                    (click)="rowMenu.close(); btnDelete_Click(p)">Delete…</button>
+                </div>
+              </div>
             </div>
           </div>
           @if (p.actionHistory.length > 0) {

@@ -632,12 +632,13 @@ describe('Cyberpunk name generator: GM component wiring (Part 1)', () => {
       .withContext('uses a distinct icon instead')
       .toBeTrue();
 
-    // Roll Initiative's own button, one line up on the same expanded row,
-    // still uses fa-dice - proving the two are now visually distinguishable
-    // rather than asserting on a hard-coded class alone.
-    const rollBtn = fixture.nativeElement.querySelector('.gm-roll-btn i') as HTMLElement;
-    expect(rollBtn).withContext('Roll Initiative icon still present').toBeTruthy();
-    expect(rollBtn.classList.contains('fa-dice')).toBeTrue();
+    // Roll Initiative's own button on the row shows a small pip die (GM
+    // screen overhaul 08, #11) - still nothing like the shuffle icon, so the
+    // two stay visually distinguishable.
+    const rollBtn = fixture.nativeElement.querySelector('.gm-roll-btn') as HTMLElement;
+    expect(rollBtn).withContext('Roll Initiative button still present').toBeTruthy();
+    expect(rollBtn.querySelector('.gm-pip-die')).withContext('a pip die').not.toBeNull();
+    expect(rollBtn.querySelector('.fa-shuffle')).toBeNull();
   });
 
   // Defect 4 (second validator round)'s visual-order fix (`order: 1`/`order:

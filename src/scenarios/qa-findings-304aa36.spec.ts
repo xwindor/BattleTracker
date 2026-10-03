@@ -350,6 +350,8 @@ describe('QA items 3, 4, 5, 6 (GM flow)', () => {
       fixture.detectChanges();
       const row = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="gm-initiative-score"]')) as HTMLElement[];
       expect(row.some(el => el.textContent?.includes('not rolled'))).toBeTrue();
+      // What the GM sees there is a dash, never a number (GM screen overhaul 08, #11).
+      expect(row.some(el => el.querySelector('.gm-ini-unrolled')?.textContent?.trim() === '—')).toBeTrue();
 
       command('roll_submission', 'pl-hero', {
         participantId: component['getParticipantId'](hero), roll: 14, diceValues: [6, 6, 2], diceSum: 14

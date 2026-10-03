@@ -1089,7 +1089,10 @@ describe('Grunt naming on add, and grunts from CRB statblocks (briefs/grunt-nami
     fixture.detectChanges();
     const index = component.combatManager.participants.items.indexOf(p);
     const row = fixture.nativeElement.querySelector('#participant' + index) as HTMLElement;
-    const deleteBtn = row.querySelector('button.btn-danger.gm-trailing-icon') as HTMLButtonElement;
+    // Delete lives in the row menu (GM screen overhaul 08, #11).
+    (row.querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const deleteBtn = row.querySelector('[data-testid="delete-btn"]') as HTMLButtonElement;
 
     // The workaround's own suppression is gone: a mousedown on Delete is no
     // longer prevented (nothing left needing that suppression).

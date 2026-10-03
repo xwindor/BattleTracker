@@ -172,9 +172,12 @@ describe('Participant panel (GM screen overhaul 01, #4)', () => {
     fixture.detectChanges();
     expect(panel()).toBeNull();
 
-    // Panel open on Razor: clicking a trailing icon on Kestrel's row keeps it on Razor.
-    // (The lock icon: the Deck icon now opens Kestrel's Deck tab on purpose, #7.)
+    // Panel open on Razor: using Kestrel's row menu keeps it on Razor.
+    // (The claim setting, in the row menu since #11: the Deck icon now opens
+    // Kestrel's Deck tab on purpose, #7.)
     clickRow(razor);
+    (rowOf(kestrel).querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
     (rowOf(kestrel).querySelector('[data-testid="claimable-btn"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(panelName()).toBe('Razor');

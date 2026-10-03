@@ -1706,14 +1706,15 @@ describe('Round 3 item 7: "who has been asked" display', () => {
     expect(askedBadge).not.toBeNull();
     expect(fixture.nativeElement.querySelector('[data-testid="needs-initiative-roll-indicator"]')).toBeNull();
 
-    // The badge and the ask button (still visible - the roll is still
-    // outstanding) share one status-row container, directly under the
-    // rolled-total input-group, so the ask button stays visually grouped
-    // with the dice-roll button beside it.
-    const statusRow: Element | null = askedBadge!.closest('[data-testid="roll-status-row"]');
-    expect(statusRow).withContext('badge and ask button share one status row').not.toBeNull();
-    expect(statusRow!.querySelector('[data-testid="ask-player-to-roll-btn"]')).not.toBeNull();
-    const rolledCol: Element | null = statusRow!.closest('.gm-rolled-ini-col');
+    // The ask button (still visible - the roll is still outstanding) stays
+    // beside the dice-roll button in the Roll column, so the two read as a
+    // pair. The badge sits on the same row, in the Actions column (GM screen
+    // overhaul 08, #11), so the row stays one line tall.
+    const row: Element | null = askedBadge!.closest('.participant');
+    expect(askedBadge!.closest('.gm-col-actions')).withContext('badge in the Actions column').not.toBeNull();
+    const askBtn: Element | null = row!.querySelector('[data-testid="ask-player-to-roll-btn"]');
+    expect(askBtn).withContext('ask button on the same row').not.toBeNull();
+    const rolledCol: Element | null = askBtn!.closest('.gm-rolled-ini-col');
     expect(rolledCol?.querySelector('.gm-roll-btn')).withContext('same column as the dice-roll button').not.toBeNull();
   });
 
@@ -2771,6 +2772,12 @@ describe('Seize the Initiative - R1: requires a rolled Initiative Score', () => 
     return CombatManager.participants.items.indexOf(p);
   }
 
+  /** Open a row's row menu (⋯), the way the GM reaches Seize the Initiative. */
+  function openRowMenu(row: HTMLElement): void {
+    (row.querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+  }
+
   it('the Seize control (button) is not rendered for a participant who has not rolled this Combat Turn', () => {
     const rolled = makeScored('Rolled', 7, 5);
     component.btnStartRound_Click();
@@ -2779,7 +2786,8 @@ describe('Seize the Initiative - R1: requires a rolled Initiative Score', () => 
 
     const row = fixture.nativeElement.querySelector(`#participant${rowIndexOf(unrolled)}`);
     expect(row).toBeTruthy();
-    expect(row.querySelector('[data-testid="seize-initiative-btn"]')).toBeNull();
+    openRowMenu(row); // Seize lives in the row menu (GM screen overhaul 08, #11)
+    expect(row.querySelector('.dropdown-menu.show [data-testid="seize-initiative-btn"]')).toBeNull();
     void rolled;
   });
 
@@ -2791,7 +2799,8 @@ describe('Seize the Initiative - R1: requires a rolled Initiative Score', () => 
     fixture.detectChanges();
 
     const row = fixture.nativeElement.querySelector(`#participant${rowIndexOf(late)}`);
-    expect(row.querySelector('[data-testid="seize-initiative-btn"]')).not.toBeNull();
+    openRowMenu(row);
+    expect(row.querySelector('.dropdown-menu.show [data-testid="seize-initiative-btn"]')).not.toBeNull();
     void rolled;
   });
 
@@ -2901,6 +2910,12 @@ describe('Seize the Initiative - R2: timing is unrestricted once rolled, and Sei
     return CombatManager.participants.items.indexOf(p);
   }
 
+  /** Open a row's row menu (⋯), the way the GM reaches Seize the Initiative. */
+  function openRowMenu(row: HTMLElement): void {
+    (row.querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+  }
+
   it('a rolled participant can seize mid-pass, well outside their own Action Phase - not only between passes or above some Score threshold', async () => {
     // Before 2026-09-21 the Seize button's own template condition also
     // required `combatManager.passEnded && p.getCurrentInitiative() > 10` -
@@ -2940,7 +2955,8 @@ describe('Seize the Initiative - R2: timing is unrestricted once rolled, and Sei
 
     const row = fixture.nativeElement.querySelector(`#participant${rowIndexOf(b)}`);
     expect(row).toBeTruthy();
-    expect(row.querySelector('[data-testid="seize-initiative-btn"]')).not.toBeNull();
+    openRowMenu(row);
+    expect(row.querySelector('.dropdown-menu.show [data-testid="seize-initiative-btn"]')).not.toBeNull();
     void a;
   });
 

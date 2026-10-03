@@ -4035,10 +4035,15 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * only decides what text a row *shows*.
    */
   getInitiativeScoreDisplay(p: IParticipant): string {
-    if (this.combatManager.started && !hasRolledThisTurn(p)) {
+    if (this.isInitiativeNotRolled(p)) {
       return NOT_ROLLED_DISPLAY;
     }
     return String(p.getCurrentInitiative());
+  }
+
+  /** True while `p` has no Initiative Score yet this Combat Turn (the "not rolled" display). */
+  isInitiativeNotRolled(p: IParticipant): boolean {
+    return this.combatManager.started && !hasRolledThisTurn(p);
   }
 
   private syncSharedState() {

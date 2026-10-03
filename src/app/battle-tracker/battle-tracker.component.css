@@ -742,40 +742,19 @@
   padding-right: 0.2rem;
 }
 
-/* Rolled Initiative column. Its input-group holds only the rolled-total input
-   and the roll-die button, so it neither needs to
-   wrap nor to stretch to the full column width. Stacked column, not row
-   (overriding the template's `d-flex align-items-center`, which is a row by
-   default): the ask-to-roll button and the roll-status badge (QA fix round 3)
-   sit in their own row below the input-group rather than squeezed onto the
-   same line, so the column's fixed width at desktop (`.gm-col-rolled`,
-   `>= 992px`) never has to hold three side-by-side controls plus a marker
-   sentence. `align-items: center` (from the template's own `align-items-
-   center` class) still centres both rows horizontally in a column layout. */
+/* Rolled Initiative column: the rolled-total box, the roll die and (where it
+   can do something) the ask button, on one line. The Needs roll / Asked tags
+   that used to sit on a second line under them are in the Actions column now
+   (GM screen overhaul 08, GitHub #11). */
 .gm-rolled-ini-col {
   min-width: 0;
-  flex-direction: column;
-  row-gap: 0.2rem;
+  gap: var(--ui-gap);
 }
 
 .gm-rolled-ini-group {
   width: auto;
   flex-wrap: nowrap;
   justify-content: center;
-}
-
-/* QA fix round 3: the ask-to-roll button and the roll-status badge, on their
-   own row directly under the rolled-total input-group so the ask button
-   stays visually grouped with the dice-roll button beside it above (Xavier:
-   "keep the ask button visually grouped with the existing dice button").
-   Wraps rather than overflows if both the button and a badge are present at
-   once in the narrow desktop column. */
-.gm-roll-status-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
 }
 
 /* Same square-icon-button shape as `.gm-roll-btn` above, from the same
@@ -809,19 +788,19 @@
   pointer-events: none;
 }
 
-/* Same amber as `.participant-badge-lieutenant` - a state the GM needs to
+/* Amber outline tag, as in the target picture - a state the GM needs to
    notice, not yet acted on. */
 .gm-roll-badge-needed {
-  background: rgba(255, 193, 7, 0.18);
-  color: #997404;
-  border: 1px solid rgba(255, 193, 7, 0.55);
+  background: transparent;
+  color: var(--cd-amber, #ffc35d);
+  border: 1px solid currentColor;
 }
 
-/* Same cyan as `.participant-badge-group` - informational, already handled. */
+/* Cyan outline tag - informational, already handled. */
 .gm-roll-badge-asked {
-  background: rgba(13, 202, 240, 0.18);
-  color: #087990;
-  border: 1px solid rgba(13, 202, 240, 0.45);
+  background: transparent;
+  color: var(--cd-cyan, #38d8ff);
+  border: 1px solid currentColor;
 }
 
 /* Narrowed from min 3.5rem / max 5rem (Xavier: "the rolled initiative column
@@ -1575,88 +1554,74 @@
    One breakpoint family only: Bootstrap's (AC 9). Desktop is the priority, so
    these are corrections at the narrow end, not a mobile-first rebuild. */
 
-/* The ONE min-width query in this file, and the reason for the exception:
-   these six widths must apply at lg and up and nowhere else, and the file's
-   desktop-first convention would mean declaring them unconditionally and then
-   undoing six flex/width pairs inside the 991.98px block below — far more
-   fragile than a single guard.
+/* The initiative list's columns at lg and up (GM screen overhaul 08, GitHub
+   #11): the heading row and every participant row are one five-column grid -
+   Ini, Name, Roll, Actions, Details, as in the target picture - so each
+   heading sits over its column and every row lines up with the next. Below
+   lg the rows fall back to Bootstrap's twelfths (two lines a row), which is
+   why the grid is guarded with a min-width query.
 
-   Why explicit widths instead of `col-lg-*`: Bootstrap's twelfths could not
-   express this row. One twelfth is ~77px at 1280px, so "Ini" — a two-digit
-   number — was allotted as much room as the entire rolled-Initiative control,
-   while Actions was starved at that same unit and wrapped its buttons to a
-   second line, which is what made every acting row double height (Xavier: "the
-   ini column could be much narrower, its very wide for just a two digit
-   number... the rolled initiative column could be much narrower too").
-
-   Only Name flexes (up to a cap). Everything else is pinned to the width its
-   content actually needs, and the trailing icon strip stays pinned to the
-   right edge. The header cells above carry these same classes, so labels stay
-   over the columns they describe (AC 10). The row's E/R/I/D column is gone:
-   those stats live in the participant panel's Stats tab (GM screen overhaul
-   01).
-
-   The widths are content measurements, not round numbers:
-     ini      2 digits, centred
-     rolled   2.9rem input + a square roll button + the group's borders
-     actions  the worst real case, Seize Initiative + Interrupts (~161px),
-              which is just wider than Act + Delay + Interrupts (~155px)
-     trailing six square icon buttons + five gaps (~196px) */
+   Only Name flexes: on a big monitor it takes the extra width, and every
+   other column keeps its laptop width. The widths are content measurements:
+     ini      a negative two-digit Score plus the `.edged` marker ("-15e")
+     rolled   2.9rem box + the square roll die + the square ask button
+     actions  Act, Delay and Defend slots (below) + a Needs roll / Asked tag
+     details  "Claimed ×" + Deck + Awakened + the row menu button
+   At 1366px with the participant panel open that leaves Name about 15rem,
+   enough for the name box and a badge on one line. */
 @media (min-width: 992px) {
-  /* Basis was 8rem. Cut 25% (Xavier: "the name input box could be reduced by
-     about 25% and i think everything will fit great") - and that is exactly
-     right: this basis is the width the Name cell refuses to shrink below, so
-     it was the last 32px standing between the 1024px row and a single line. */
-  /* Name grows but is capped, so it doesn't swallow every spare pixel and
-     leave a lake of empty space beside the input (Xavier: "the name input is
-     still a bit long and the other columns dont flow to take that space").
-     18.25rem = the 14.25rem input cap plus 4rem of badge room. */
-  .gm-col-name {
-    flex: 1 1 5.75rem;
-    width: auto;
-    max-width: 18.25rem;
-    min-width: 0;
+  /* Both selectors spelled out so this outranks the heading row's own
+     side-padding rule above, keeping the headings over their columns. */
+  .row.bg-dark.text-light.gm-list-grid,
+  .row.participant.gm-list-grid {
+    --gm-col-gap: 0.75rem;
+    display: grid;
+    grid-template-columns: 3rem minmax(0, 1fr) 7rem 16.25rem 11.5rem;
+    column-gap: var(--gm-col-gap);
+    align-items: center;
+    /* The grid's gap replaces Bootstrap's gutters and the row's negative
+       margins, so the cells sit exactly on the grid lines. */
+    --bs-gutter-x: 0;
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
   }
 
-  /* 3.25rem left the six cells 4px wider than the 738px list at 1024px with the
-     old details column open, which wrapped the whole trailing strip to a second line
-     and doubled every row there. 3rem leaves 36px of content box, comfortable
-     for the widest value this ever holds: a negative two-digit Score plus the
-     `.edged` marker ("-15e", ~30px). */
+  /* Bootstrap's column classes still set a percentage width and a flex
+     basis; inside the grid each cell is just its grid area. */
+  .gm-list-grid > [class*="col-"] {
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    margin-left: 0;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  /* No divider lines between cells (the target picture has none); the
+     shared skin draws one on every cell of the old Bootstrap row. */
+  .row.gm-list-grid > [class*="col-"] {
+    border-right: none;
+  }
+
+  /* The Interrupt Actions and "Astral projecting" lines still sit under the
+     row until they move beside the name (GM screen overhaul 07). */
+  .gm-list-grid > .interrupt-badges,
+  .gm-list-grid > .astral-info-row {
+    grid-column: 1 / -1;
+  }
+
   .gm-col-ini {
-    flex: 0 0 3rem;
-    width: 3rem;
+    justify-content: flex-start !important;
   }
 
   .gm-col-rolled {
-    flex: 0 0 5rem;
-    width: 5rem;
-  }
-
-  /* `margin-left: auto` absorbs whatever is still free once Name has hit its
-     cap, which pins Actions + Trailing to the row's right edge. Without it
-     that leftover trails off the right-hand end at wide viewports and the icon
-     strip drifts away from the edge. Auto margins only take free space AFTER
-     flex-grow has had it, so this never competes with Name growing — at 1024px, where there is no free space at all, it resolves to
-     zero and changes nothing. */
-  .gm-col-actions {
-    flex: 0 0 11rem;
-    width: 11rem;
-    margin-left: auto;
+    justify-content: flex-start;
   }
 
   .gm-col-trailing {
-    flex: 0 0 13rem;
-    width: 13rem;
-  }
-
-  /* Header spacer: the sum of the two unlabelled cells it stands over, and the
-     same `margin-left: auto` they are pushed right by, so the header strip
-     tracks the row beneath it exactly. */
-  .gm-col-spacer {
-    flex: 0 0 24rem;
-    width: 24rem;
-    margin-left: auto;
+    justify-self: stretch;
   }
 
   /* The participant panel's fixed width beside the list (the list column is
@@ -1705,5 +1670,137 @@
 
   .participant .btn-group {
     flex-wrap: wrap;
+  }
+}
+
+/* ── Initiative row, GM screen overhaul 08 (GitHub #11) ─────────────────── */
+
+/* The name box gives way first when the row is tight (the participant panel
+   open on a laptop), so the badge beside it never pushes onto a second line. */
+.gm-col-name .gm-name-input {
+  flex: 1 1 auto;
+  min-width: 4rem;
+}
+
+.gm-col-name .participant-badge {
+  flex: 0 0 auto;
+}
+
+/* Act, Delay and Defend each get a fixed-width slot, drawn even when its
+   button isn't, so the three line up from row to row and every button in
+   the group is the same height. */
+.gm-action-slot {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.gm-action-slot-act { width: 3.25rem; }
+.gm-action-slot-delay { width: 3.75rem; }
+.gm-action-slot-defend { width: 3.5rem; }
+
+.gm-action-slot > .btn,
+.gm-action-slot > .btn-group,
+.gm-action-slot > .btn-group > .btn {
+  width: 100%;
+}
+
+@media (min-width: 992px) {
+  .gm-action-buttons {
+    flex-wrap: nowrap;
+    align-items: center;
+    align-self: center;
+  }
+
+  .gm-trailing-actions {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+}
+
+/* The roll button's face: a small die showing five, with real pips (the
+   spec's Look rules), in the dice roller's own colours. */
+.gm-pip-die {
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 1px solid var(--dice-border, #94a3b8);
+  border-radius: 3px;
+  background: var(--dice-bg, #ffffff);
+}
+
+.gm-pip {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--dice-fg, #1f2937);
+  place-self: center;
+}
+
+.gm-pip-tl { grid-column: 1; grid-row: 1; }
+.gm-pip-tr { grid-column: 3; grid-row: 1; }
+.gm-pip-c  { grid-column: 2; grid-row: 2; }
+.gm-pip-bl { grid-column: 1; grid-row: 3; }
+.gm-pip-br { grid-column: 3; grid-row: 3; }
+
+.gm-roll-btn .gm-pip-die {
+  margin: auto;
+}
+
+/* "Claimed ×": a word-sized button at the row's control height. */
+.gm-release-claim-btn {
+  flex: 0 0 auto;
+  height: var(--ui-control-h);
+  white-space: nowrap;
+}
+
+/* The row menu (⋯). The toggle is a plain square icon button: the
+   drop-down's own caret is hidden. */
+.gm-row-menu {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.gm-row-menu-btn::after {
+  display: none;
+}
+
+.gm-row-menu-list {
+  min-width: 15rem;
+  border-radius: 0;
+  border-color: var(--cd-line-strong, #2bf4c8);
+}
+
+.gm-row-menu-list .dropdown-divider {
+  margin: 0.25rem 0;
+  border-top-color: var(--cd-line, #16313b);
+  opacity: 1;
+}
+
+.gm-row-menu-list .dropdown-item {
+  white-space: nowrap;
+}
+
+.gm-row-menu-list .gm-row-menu-seize {
+  color: var(--cd-amber, #ffc35d);
+}
+
+.gm-row-menu-list .gm-row-menu-delete {
+  color: var(--cd-danger, #dc3545);
+}
+
+.gm-ini-unrolled {
+  opacity: 0.5;
+}
+
+/* A row's state tint (acting, delaying, finished, out of combat...) is
+   painted on the row and, by the shared skin, again on each cell. On the
+   grid the gaps between cells then show a different shade, so at lg the
+   row alone carries the tint. */
+@media (min-width: 992px) {
+  .row.participant.gm-list-grid > [class*="col-"] {
+    background: transparent !important;
   }
 }

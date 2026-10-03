@@ -149,8 +149,11 @@ describe('Participant panel extras (GM screen overhaul 02, #5)', () => {
     fixture.detectChanges();
   }
 
+  /** A row menu item (GM screen overhaul 08, #11), found by its tooltip after opening the menu. */
   function rowButton(p: Participant | unknown, title: string): HTMLButtonElement {
-    const b = rowOf(p).querySelector(`button[title="${title}"]`) as HTMLButtonElement | null;
+    (rowOf(p).querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const b = rowOf(p).querySelector(`.dropdown-menu.show button[title="${title}"]`) as HTMLButtonElement | null;
     expect(b).withContext(title + ' button').toBeTruthy();
     return b!;
   }
