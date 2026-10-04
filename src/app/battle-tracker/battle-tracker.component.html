@@ -4,93 +4,139 @@
        the left, the room controls on the right, all on one line. It sticks
        to the top of the window, as the bottom strip sticks to the bottom.
        Every button here calls the same handler, under the same show/hide
-       rule, as it did in the old session bar and button row. -->
-  <header class="gm-top-bar" data-testid="top-bar">
-    <div class="gm-top-bar-status" data-testid="top-bar-status" [attr.title]="topBarStatusTitle()">
-      @if (combatManager.started) {
-      <span class="gm-top-bar-kicker">Combat running</span>
-      <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }} · Pass {{ combatManager.initiativePass }} · Ini {{ combatManager.currentInitiative }}</span>
-      }
-      @else {
-      <span class="gm-top-bar-kicker">Between Combat Turns</span>
-      <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }}</span>
-      }
-    </div>
-    <div class="gm-top-bar-round">
-      @if(!combatManager.started)
-      {
-      <button type="button" class="btn btn-primary" (click)="btnStartRound_Click()">Start Combat Turn</button>
-      }
-      @if(combatManager.started && combatManager.passEnded)
-      {
-      <button type="button" class="btn btn-primary" (click)="btnNextPass_Click()">{{ combatManager.hasMoreIniPasses() ? "Next Initiative Pass" : "End Combat Turn" }}</button>
-      }
-      <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">End Combat</button>
-    </div>
-    <!-- Opens the Matrix panel, or closes it (GM screen overhaul 10,
-         GitHub #13). -->
-    <button type="button" class="btn btn-outline-info gm-matrix-btn" data-testid="matrix-btn"
-      [class.active]="matrixPanelOpen" [attr.aria-pressed]="matrixPanelOpen"
-      [title]="matrixPanelOpen ? 'Close the Matrix panel' : 'Open the Matrix panel'" (click)="toggleMatrixPanel()">
-      <i class="fas fa-microchip" aria-hidden="true"></i>Matrix
-    </button>
-    <div class="gm-top-bar-room">
-      @if (!shareRoomCode || roomJoinOpen) {
-      <!-- No room open, or "Join another room…" picked from the room menu:
-           Create and Join, as the old session bar had them. -->
-      @if (!shareRoomCode) {
-      <span class="gm-top-bar-label">No room</span>
-      <button type="button" class="btn" data-testid="create-room-btn"
-        title="Open a room the players can join from their own screens"
-        (click)="roomJoinOpen = false; btnCreateShareSession_Click()">Create room</button>
-      }
-      <input type="text" class="form-control gm-top-bar-code-input" data-testid="join-room-input"
-        placeholder="Room code" aria-label="Room code to join" [(ngModel)]="shareJoinCode">
-      <button type="button" class="btn" data-testid="join-room-btn" (click)="btnTopBarJoin_Click()">Join room</button>
-      @if (shareRoomCode) {
-      <button type="button" class="btn btn-ghost" data-testid="join-room-cancel" (click)="roomJoinOpen = false">Cancel</button>
-      }
-      }
-      @else {
-      <span class="gm-top-bar-label">Room</span>
-      <!-- The code is the player link: it opens the player view in a new
-           tab, as the full link under the old session bar did. -->
-      <a class="gm-top-bar-room-code" data-testid="room-code" [href]="shareUrl" target="_blank" rel="noopener noreferrer"
-        [attr.title]="'Open the player view in a new tab: ' + shareUrl">{{ shareRoomCode }}</a>
-      <button type="button" class="btn btn-ghost" data-testid="copy-player-link-btn"
-        [attr.title]="'Copy the player link: ' + shareUrl" (click)="btnCopyShareUrl_Click()">
-        <i class="fas fa-link" aria-hidden="true"></i>Copy player link
-      </button>
-      <!-- The room menu (⋯): the room actions a GM must not hit by accident
-           mid-fight (user story 4). Each item calls the same handler its old
-           session-bar button did. Like the row menu, picking an item closes
-           the menu first, and Escape closes it without closing a panel. -->
-      <div class="gm-room-menu" ngbDropdown #roomMenu="ngbDropdown" placement="bottom-end" data-testid="room-menu">
-        <button type="button" ngbDropdownToggle class="btn btn-ghost gm-room-menu-btn"
-          data-testid="room-menu-btn" aria-label="Room menu" title="Room menu">
-          <i class="fas fa-ellipsis" aria-hidden="true"></i>
-        </button>
-        <div ngbDropdownMenu class="gm-room-menu-list">
-          <button type="button" ngbDropdownItem data-testid="join-another-room-btn"
-            title="Join a different room by its code"
-            (click)="roomMenu.close(); roomJoinOpen = true">Join another room…</button>
-          <!-- Kept from the old session bar, where Create sat beside Join
-               even with a room open; it still asks first. -->
-          <button type="button" ngbDropdownItem data-testid="create-new-room-btn"
-            title="Open a new room for this encounter"
-            (click)="roomMenu.close(); btnCreateShareSession_Click()">Create a new room…</button>
-          <button type="button" ngbDropdownItem data-testid="close-room-btn"
-            title="Leave this room. It stays saved and you can rejoin the same code later."
-            (click)="roomMenu.close(); btnCloseShareSession_Click()">Close room</button>
-          <div class="dropdown-divider"></div>
-          <button type="button" ngbDropdownItem class="gm-room-menu-end" data-testid="end-room-btn"
-            title="Permanently delete this room and its saved encounter."
-            (click)="roomMenu.close(); btnEndShareSession_Click()">End room</button>
-        </div>
+       rule, as it did in the old session bar and button row. The bar and the
+       warning area under it stick to the top together, as one block. -->
+  <div class="gm-top-block" data-testid="gm-top-block" #gmTopBlock>
+    <header class="gm-top-bar" data-testid="top-bar">
+      <div class="gm-top-bar-status" data-testid="top-bar-status" [attr.title]="topBarStatusTitle()">
+        @if (combatManager.started) {
+        <span class="gm-top-bar-kicker">Combat running</span>
+        <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }} · Pass {{ combatManager.initiativePass }} · Ini {{ combatManager.currentInitiative }}</span>
+        }
+        @else {
+        <span class="gm-top-bar-kicker">Between Combat Turns</span>
+        <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }}</span>
+        }
       </div>
+      <div class="gm-top-bar-round">
+        @if(!combatManager.started)
+        {
+        <button type="button" class="btn btn-primary" (click)="btnStartRound_Click()">Start Combat Turn</button>
+        }
+        @if(combatManager.started && combatManager.passEnded)
+        {
+        <button type="button" class="btn btn-primary" (click)="btnNextPass_Click()">{{ combatManager.hasMoreIniPasses() ? "Next Initiative Pass" : "End Combat Turn" }}</button>
+        }
+        <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">End Combat</button>
+      </div>
+      <!-- Opens the Matrix panel, or closes it (GM screen overhaul 10,
+           GitHub #13). -->
+      <button type="button" class="btn btn-outline-info gm-matrix-btn" data-testid="matrix-btn"
+        [class.active]="matrixPanelOpen" [attr.aria-pressed]="matrixPanelOpen"
+        [title]="matrixPanelOpen ? 'Close the Matrix panel' : 'Open the Matrix panel'" (click)="toggleMatrixPanel()">
+        <i class="fas fa-microchip" aria-hidden="true"></i>Matrix
+      </button>
+      <div class="gm-top-bar-room">
+        @if (!shareRoomCode || roomJoinOpen) {
+        <!-- No room open, or "Join another room…" picked from the room menu:
+             Create and Join, as the old session bar had them. -->
+        @if (!shareRoomCode) {
+        <span class="gm-top-bar-label">No room</span>
+        <button type="button" class="btn" data-testid="create-room-btn"
+          title="Open a room the players can join from their own screens"
+          (click)="roomJoinOpen = false; btnCreateShareSession_Click()">Create room</button>
+        }
+        <input type="text" class="form-control gm-top-bar-code-input" data-testid="join-room-input"
+          placeholder="Room code" aria-label="Room code to join" [(ngModel)]="shareJoinCode">
+        <button type="button" class="btn" data-testid="join-room-btn" (click)="btnTopBarJoin_Click()">Join room</button>
+        @if (shareRoomCode) {
+        <button type="button" class="btn btn-ghost" data-testid="join-room-cancel" (click)="roomJoinOpen = false">Cancel</button>
+        }
+        }
+        @else {
+        <span class="gm-top-bar-label">Room</span>
+        <!-- The code is the player link: it opens the player view in a new
+             tab, as the full link under the old session bar did. -->
+        <a class="gm-top-bar-room-code" data-testid="room-code" [href]="shareUrl" target="_blank" rel="noopener noreferrer"
+          [attr.title]="'Open the player view in a new tab: ' + shareUrl">{{ shareRoomCode }}</a>
+        <button type="button" class="btn btn-ghost" data-testid="copy-player-link-btn"
+          [attr.title]="'Copy the player link: ' + shareUrl" (click)="btnCopyShareUrl_Click()">
+          <i class="fas fa-link" aria-hidden="true"></i>Copy player link
+        </button>
+        <!-- The room menu (⋯): the room actions a GM must not hit by accident
+             mid-fight (user story 4). Each item calls the same handler its old
+             session-bar button did. Like the row menu, picking an item closes
+             the menu first, and Escape closes it without closing a panel. -->
+        <div class="gm-room-menu" ngbDropdown #roomMenu="ngbDropdown" placement="bottom-end" data-testid="room-menu">
+          <button type="button" ngbDropdownToggle class="btn btn-ghost gm-room-menu-btn"
+            data-testid="room-menu-btn" aria-label="Room menu" title="Room menu">
+            <i class="fas fa-ellipsis" aria-hidden="true"></i>
+          </button>
+          <div ngbDropdownMenu class="gm-room-menu-list">
+            <button type="button" ngbDropdownItem data-testid="join-another-room-btn"
+              title="Join a different room by its code"
+              (click)="roomMenu.close(); roomJoinOpen = true">Join another room…</button>
+            <!-- Kept from the old session bar, where Create sat beside Join
+                 even with a room open; it still asks first. -->
+            <button type="button" ngbDropdownItem data-testid="create-new-room-btn"
+              title="Open a new room for this encounter"
+              (click)="roomMenu.close(); btnCreateShareSession_Click()">Create a new room…</button>
+            <button type="button" ngbDropdownItem data-testid="close-room-btn"
+              title="Leave this room. It stays saved and you can rejoin the same code later."
+              (click)="roomMenu.close(); btnCloseShareSession_Click()">Close room</button>
+            <div class="dropdown-divider"></div>
+            <button type="button" ngbDropdownItem class="gm-room-menu-end" data-testid="end-room-btn"
+              title="Permanently delete this room and its saved encounter."
+              (click)="roomMenu.close(); btnEndShareSession_Click()">End room</button>
+          </div>
+        </div>
+        }
+      </div>
+    </header>
+    <!-- Warning area (CONTEXT.md; GM screen overhaul 13, GitHub #16; user
+         stories 7-8): the roll and turn warning lines, stacked directly under
+         the top bar and sticking to the top of the window with it, so anything
+         stopping someone from acting stays in view. Each line shows under
+         exactly the condition it did before the move, with the same words and
+         colour; with no line to show the area is not there at all. -->
+    @let passEndNotice = pendingPassEndRollNotice();
+    @let nobodyCanActNotice = nobodyCanActRollNotice();
+    @if (passEndNotice || nobodyCanActNotice || rollStatusText || actModalClosedReason) {
+    <div class="gm-warning-area" data-testid="warning-area">
+      <!-- Item 1 (round 3): a state-driven, non-blocking notice - never a
+           dialog, never sent to a player - replacing the round-2 per-click
+           Act/Delay confirm dialogs. True whenever the participant now due
+           to act is the last one able to act this Initiative Pass and
+           someone still owes an Initiative roll; recomputed on every render
+           from the order's own state, so it also covers a player's own
+           Act/Delay, a grunt row's last member, and a spent NPC row dropped
+           automatically. -->
+      @if (passEndNotice) {
+      <div class="gm-warning gm-warning-amber" data-testid="pass-end-roll-notice"><span class="gm-warning-marker" aria-hidden="true"></span>{{ passEndNotice }}</div>
+      }
+      <!-- Round 4 item 7: nobody can be handed a turn this pass because
+           everyone remaining still owes an Initiative roll (round 3 item 2's
+           ruling); the pass would otherwise end silently with no Action
+           Phase handed out and nothing on screen explaining why. GM-only,
+           state-driven, same as the notice above - never sent to a player. -->
+      @if (nobodyCanActNotice) {
+      <div class="gm-warning gm-warning-danger" data-testid="nobody-can-act-notice"><span class="gm-warning-marker" aria-hidden="true"></span>{{ nobodyCanActNotice }}</div>
+      }
+      <!-- Round 4 item 3: the roll-status line's own slot, separate from the
+           session banner (`shareInfo`) - see `rollStatusText`'s own doc
+           comment for why the two used to compete for the same one. -->
+      @if (rollStatusText) {
+      <div class="gm-warning gm-warning-info" data-testid="roll-status-line"><span class="gm-warning-marker" aria-hidden="true"></span>{{ rollStatusText }}</div>
+      }
+      <!-- Round 5 item 3: the Act window closes itself, rather than staying
+           open and silently refusing Submit, when the participant it targets
+           stops being due to act while it is open. -->
+      @if (actModalClosedReason) {
+      <div class="gm-warning gm-warning-amber" data-testid="act-modal-closed-reason"><span class="gm-warning-marker" aria-hidden="true"></span>{{ actModalClosedReason }}</div>
       }
     </div>
-  </header>
+    }
+  </div>
   <!-- The room's own messages (connection lost, a restore warning, errors
        and confirmations), under the bar where they sat under the old
        session bar. -->
@@ -118,37 +164,6 @@
   </div>
   <div class="row">
     <div class="col-12">
-      <!-- Item 1 (round 3): a state-driven, non-blocking notice - never a
-           dialog, never sent to a player - replacing the round-2 per-click
-           Act/Delay confirm dialogs. True whenever the participant now due
-           to act is the last one able to act this Initiative Pass and
-           someone still owes an Initiative roll; recomputed on every render
-           from the order's own state, so it also covers a player's own
-           Act/Delay, a grunt row's last member, and a spent NPC row dropped
-           automatically. -->
-      @if(pendingPassEndRollNotice(); as passEndNotice) {
-      <div class="small text-warning mt-1" data-testid="pass-end-roll-notice">{{ passEndNotice }}</div>
-      }
-      <!-- Round 4 item 7: nobody can be handed a turn this pass because
-           everyone remaining still owes an Initiative roll (round 3 item 2's
-           ruling); the pass would otherwise end silently with no Action
-           Phase handed out and nothing on screen explaining why. GM-only,
-           state-driven, same as the notice above - never sent to a player. -->
-      @if(nobodyCanActRollNotice(); as nobodyCanActNotice) {
-      <div class="small text-danger mt-1" data-testid="nobody-can-act-notice">{{ nobodyCanActNotice }}</div>
-      }
-      <!-- Round 4 item 3: the roll-status line's own slot, separate from the
-           session banner (`shareInfo`) above - see `rollStatusText`'s own
-           doc comment for why the two used to compete for the same one. -->
-      @if(rollStatusText) {
-      <div class="small text-info mt-1" data-testid="roll-status-line">{{ rollStatusText }}</div>
-      }
-      <!-- Round 5 item 3: the Act window closes itself, rather than staying
-           open and silently refusing Submit, when the participant it targets
-           stops being due to act while it is open. -->
-      @if(actModalClosedReason) {
-      <div class="small text-warning mt-1" data-testid="act-modal-closed-reason">{{ actModalClosedReason }}</div>
-      }
       @if(!combatManager.started && initiativePrepActive) {
       <div class="card mt-2 mb-2">
         <div class="card-header">Initiative Prep</div>

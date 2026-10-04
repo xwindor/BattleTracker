@@ -968,10 +968,11 @@
   }
 
   /* MATRIX and its × stay in view while the GM scrolls a long panel, just
-     under the top bar. */
+     under the top bar and any warning lines (their combined height is kept
+     up to date by the screen as the warning area grows and shrinks). */
   .gm-matrix-panel-header {
     position: sticky;
-    top: var(--gm-top-bar-height);
+    top: var(--gm-top-block-height, var(--gm-top-bar-height));
     z-index: 1;
     background: var(--cd-bg-elev, #0a1118);
   }
@@ -1703,20 +1704,25 @@
 
 /* ── Classes replacing template inline styles ──────────────────────────── */
 
-/* Top bar (CONTEXT.md; GM screen overhaul 12, target picture): one line,
-   where the fight is on the left, then the round buttons and the Matrix
-   button, and the room controls pushed to the right. It sticks to the top of
-   the window while the page scrolls, the way the bottom strip sticks to the
-   bottom, and reaches out to the same edges. */
-.gm-top-bar {
+/* The top bar and the warning area under it, as one block that sticks to
+   the top of the window while the page scrolls (GM screen overhaul 13), the
+   way the bottom strip sticks to the bottom, and reaches out to the same
+   edges. */
+.gm-top-block {
   position: sticky;
   top: 0;
   z-index: 30;
+  margin-inline: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+}
+
+/* Top bar (CONTEXT.md; GM screen overhaul 12, target picture): one line,
+   where the fight is on the left, then the round buttons and the Matrix
+   button, and the room controls pushed to the right. */
+.gm-top-bar {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   height: var(--gm-top-bar-height);
-  margin-inline: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
   padding: 0 1rem;
   background: var(--cd-bg-elev, #0a1118);
   border-bottom: 1px solid var(--cd-line, #16313b);
@@ -1787,6 +1793,49 @@
   width: 8rem;
   height: var(--ui-control-h);
   text-transform: uppercase;
+}
+
+/* Warning area (CONTEXT.md; GM screen overhaul 13, target picture): the
+   roll and turn warning lines stacked under the top bar, each one short line
+   led by a small square marker in the line's own colour. It is only on the
+   page while there is something to show. */
+.gm-warning-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  background: var(--cd-bg-panel, #0b151c);
+  border-bottom: 1px solid var(--cd-line, #16313b);
+}
+
+.gm-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--cd-font-sm, 0.82rem);
+  line-height: 1.3;
+  color: var(--gm-warning-colour);
+}
+
+.gm-warning-marker {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--gm-warning-colour);
+}
+
+/* Each line keeps the kind of colour it had before the move (amber,
+   pink-red or cyan), in the app's own shade of it. */
+.gm-warning-amber {
+  --gm-warning-colour: var(--cd-amber, #ffc35d);
+}
+
+.gm-warning-danger {
+  --gm-warning-colour: var(--cd-danger, #ff5f83);
+}
+
+.gm-warning-info {
+  --gm-warning-colour: var(--cd-cyan, #38d8ff);
 }
 
 /* Quiet buttons (Copy player link, the ⋯, Cancel): no box until hovered. */

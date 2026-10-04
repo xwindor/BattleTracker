@@ -554,6 +554,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   @ViewChild("gmLogListContainer") gmLogListContainer?: ElementRef<HTMLElement>;
   /** The GM's dice roller, so its sticky "Roll as" state can be reset (Core p. 44). */
   @ViewChild("gmDiceRoller") gmDiceRoller?: DiceRollerComponent;
+  /**
+   * The top bar and the warning area under it, which stick to the top of the
+   * window as one block (GM screen overhaul 13, GitHub #16). The block grows
+   * and shrinks as warning lines come and go, so its current height is kept
+   * in `--gm-top-block-height` on the GM screen for the Matrix panel's title bar to stick just
+   * below it instead of sliding under a warning.
+   */
+  @ViewChild("gmTopBlock") set gmTopBlock(ref: ElementRef<HTMLElement> | undefined) {
+    this.gmTopBlockResizeObserver?.disconnect();
+    this.gmTopBlockResizeObserver = null;
+    const block = ref?.nativeElement;
+    if (!block || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    this.gmTopBlockResizeObserver = new ResizeObserver(() => {
+      block.closest<HTMLElement>(".gm-screen")?.style.setProperty("--gm-top-block-height", `${block.offsetHeight}px`);
+    });
+    this.gmTopBlockResizeObserver.observe(block);
+  }
+  private gmTopBlockResizeObserver: ResizeObserver | null = null;
   combatManager = CombatManager
   indexToSelect = -1;
   logHandler = LogHandler;
@@ -1616,6 +1636,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.clearLocalLogDecodeAnimations();
     this.sessionSync.disconnect();
     this.osThresholdSub?.unsubscribe();
+    this.gmTopBlockResizeObserver?.disconnect();
     // The CombatManager is a singleton and outlives this component; leaving a
     // callback into a destroyed component registered would log spent rows
     // into a tracker that is no longer on screen.
