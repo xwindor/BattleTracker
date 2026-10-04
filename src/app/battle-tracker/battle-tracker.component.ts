@@ -1313,7 +1313,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   @ViewChild("addDraftModalTpl") private addDraftModalTpl!: TemplateRef<unknown>;
 
   /**
-   * Transient "you owe Overwatch Score" reminders shown to the GM.
+   * Transient "you owe Overwatch Score" reminders shown to the GM, filed under
+   * the decker who owes: shown in that decker's Deck tab just above the
+   * Overwatch Score buttons, and counted on their row's Deck button (GitHub
+   * #14; Xavier, 2026-10-04).
    *
    * These are rules-correct and stay: for any Attack or Sleaze action, "your OS
    * increases by the number of hits the target gets on its defense test"
@@ -1322,7 +1325,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * "IC Alert", which wrongly implied an OS-driven alert threshold; SR5 has no
    * Overwatch threshold below convergence at 40.
    */
-  osReminders: string[] = [];
+  private readonly osReminders = new WeakMap<IParticipant, string[]>();
   convergenceAlertDecker: string | null = null;
   convergenceAlertOs = 0;
   private convergenceModalRef: NgbModalRef | null = null;
@@ -1523,8 +1526,26 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.changeDetector.detectChanges();
   }
 
-  dismissOsReminder(index: number): void {
-    this.osReminders.splice(index, 1);
+  /** The Overwatch reminders waiting for this participant, oldest first. */
+  osRemindersFor(p: IParticipant): readonly string[] {
+    return this.osReminders.get(p) ?? [];
+  }
+
+  /** The row's Deck button hover text, naming any Overwatch reminders waiting (GitHub #14). */
+  deckButtonTitle(p: IParticipant): string {
+    const n = this.osRemindersFor(p).length;
+    return n === 0
+      ? "Deck — cyberdeck configuration"
+      : `Deck — ${n} Overwatch reminder${n === 1 ? "" : "s"} waiting`;
+  }
+
+  /** Remind the GM that `p` owes Overwatch Score for these illegal actions. */
+  private addOsReminder(p: IParticipant, illegalActions: readonly string[]): void {
+    this.osReminders.set(p, [...this.osRemindersFor(p), `${illegalActions.join(", ")} — add OS after resolving defense`]);
+  }
+
+  dismissOsReminder(p: IParticipant, index: number): void {
+    this.osReminders.set(p, this.osRemindersFor(p).filter((_, i) => i !== index));
   }
 
   dismissConvergenceAlert(): void {
@@ -3879,7 +3900,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       }
       this.performAct(target, declaredAction, target.name || "Player");
       if (illegalActions.length > 0) {
-        this.osReminders.push(`${target.name}: ${illegalActions.join(", ")} — add OS after resolving defense`);
+        this.addOsReminder(target, illegalActions);
       }
       return;
     }
@@ -6402,8 +6423,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       this.performAct(actor, this.buildDeclaredActionLog(actor));
     }
     if (illegalActions.length > 0) {
-      const names = illegalActions.join(", ");
-      this.osReminders.push(`${actor.name}: ${names} — add OS after resolving defense`);
+      this.addOsReminder(actor, illegalActions);
     }
     this.clearDeclaredActionSelection(actor);
     if (this.actModalRef) {

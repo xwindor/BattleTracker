@@ -202,21 +202,12 @@
     </div>
   </div>
   <br>
-  <div class="row gm-slot-row" [class.gm-matrix-open]="matrixPanelOpen">
+  <div class="row gm-slot-row" [class.gm-matrix-open]="matrixPanelOpen"
+    [class.gm-participant-open]="selectedActor !== null && selectedActor !== undefined">
     <!-- The initiative list takes whatever width the participant panel
          (below) leaves. With the panel closed it takes the full width. The
          Matrix panel instead lies over it, so the list never reflows. -->
     <div class="col-12 col-lg gm-list-col">
-      <!-- Overwatch reminders. OS rises by the DEFENDER's hits on any Attack
-           or Sleaze action (Core p. 232), which this app does not roll - so the GM
-           is reminded to apply it. Not an alert threshold: SR5 has no
-           Overwatch threshold below convergence at 40. -->
-      @for (msg of osReminders; track $index) {
-      <div class="os-reminder-strip" role="alert">
-        <span class="os-reminder-text"><strong>&#9888; Overwatch owed</strong> — {{ msg }}</span>
-        <button type="button" class="os-reminder-dismiss" (click)="dismissOsReminder($index)" aria-label="Dismiss">&#215;</button>
-      </div>
-      }
       <!-- Merge two or more standalone grunts into one linked row
            (Decision 10). Shown only while picking, which starts from a lone
            grunt's row menu (GM screen overhaul 09, #12): one line at the top
@@ -593,15 +584,21 @@
               <!-- Icon-only: each keeps its `title` for the tooltip and its
                    filled/outline variant for state. Opens the participant
                    panel on the Deck tab (GM screen overhaul 04, GitHub #7);
-                   filled while that tab is showing. -->
-              <button type="button" class="btn gm-trailing-icon"
+                   filled while that tab is showing. While this participant
+                   owes Overwatch Score it carries the number of reminders
+                   waiting in its corner; the reminders themselves are in the
+                   Deck tab (GitHub #14). -->
+              <button type="button" class="btn gm-trailing-icon gm-deck-btn"
                 [class.btn-secondary]="isDeckTabOpen(p)"
                 [class.btn-outline-secondary]="!isDeckTabOpen(p)"
                 (click)="openParticipantPanel(p, 'deck')"
                 data-testid="deck-btn"
-                title="Deck — cyberdeck configuration">
+                [title]="deckButtonTitle(p)">
                 <i class="fas fa-microchip fa-lg" aria-hidden="true"></i>
                 <span class="visually-hidden">Deck</span>
+                @if (osRemindersFor(p).length > 0) {
+                <span class="gm-os-count" data-testid="deck-btn-os-count">{{ osRemindersFor(p).length }}</span>
+                }
               </button>
               <!-- Opens the participant panel on the Awakened tab (GM screen
                    overhaul 05, GitHub #8); filled while that tab is showing.
@@ -1230,15 +1227,37 @@
                       Remove Deck
                     </button>
                   </div>
-                  @if (asMatrix(selectedActor).jackedIn) {
-                  <div>
+                  }
+                  <!-- Overwatch reminders (GitHub #14; Xavier, 2026-10-04):
+                       this decker's own, one bar each with its own × to
+                       dismiss, just above the Overwatch Score buttons where
+                       the score is added. OS rises by the DEFENDER's hits on
+                       any Attack or Sleaze action (Core p. 232), which this
+                       app does not roll - so the GM is reminded to apply it.
+                       Not an alert threshold: SR5 has no Overwatch threshold
+                       below convergence at 40. A new reminder never opens
+                       this panel; the count on the row's Deck button says one
+                       is waiting. -->
+                  @if (osRemindersFor(selectedActor).length > 0) {
+                  <div class="gm-os-reminders">
+                    @for (msg of osRemindersFor(selectedActor); track $index) {
+                    <div class="os-reminder-strip" role="alert" data-testid="overwatch-reminder">
+                      <span class="os-reminder-tag">Overwatch owed</span>
+                      <span class="os-reminder-text">{{ msg }}</span>
+                      <button type="button" class="os-reminder-dismiss" (click)="dismissOsReminder(selectedActor, $index)"
+                        aria-label="Dismiss this reminder" title="Dismiss">&#215;</button>
+                    </div>
+                    }
+                  </div>
+                  }
+                  @if (isMatrix(selectedActor) && asMatrix(selectedActor).jackedIn) {
+                  <div data-testid="deck-tab-os">
                     <app-matrix-participant-badge
                       [participant]="$any(selectedActor)"
                       (osAdjust)="onOsAdjust(selectedActor, $event)"
                       (osResetClick)="onOsResetClick(selectedActor)">
                     </app-matrix-participant-badge>
                   </div>
-                  }
                   }
                 </div>
               </ng-template>
