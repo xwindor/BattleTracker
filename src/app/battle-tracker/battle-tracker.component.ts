@@ -29,7 +29,7 @@ import {
   readRememberedParticipantPanel, rememberParticipantPanel,
   readRememberedBottomStripShrunk, rememberBottomStripShrunk
 } from "app/battle-tracker/gm-screen-memory";
-import { OsTrackingService } from "app/services/os-tracking.service";
+import { OsBand, osBandFor, OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, DATA_PROCESSING_UNSET } from "Matrix";
 import { AstralParticipant, ASTRAL_PROJECTION_DICE_DELTA } from "Magic";
 import {
@@ -40,11 +40,10 @@ import {
   instantiateStandaloneFromStatblock, instantiateRowFromStatblock
 } from "Grunts";
 import type { GruntDamageType, GruntMergeResult, GruntStatblock } from "Grunts";
-import { MatrixParticipantBadgeComponent } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
+import { MatrixParticipantBadgeComponent, vrModeTagLabel } from "app/matrix/matrix-participant-badge/matrix-participant-badge.component";
 import { MatrixRunPanelComponent } from "app/matrix/matrix-run-panel/matrix-run-panel.component";
-import { AstralBadgeComponent } from "app/magic/astral-badge/astral-badge.component";
 import { ALL_MATRIX_ACTION_NAMES, CYBERDECK_REQUIRED_ACTIONS, DECLARED_ACTIONS, DECLARED_ACTION_DESCRIPTIONS, DeclaredActionCategoryId, DeclaredActionItem, ILLEGAL_OS_ACTIONS } from "app/shared/declared-actions";
-import { getInterruptLabel, getInterruptDescription, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
+import { getInterruptLabel, getInterruptDescription, getInterruptTag, getInterruptVerbPhrase } from "app/shared/interrupt-actions";
 import { DeclaredActionEngine, DeclaredActionSelection, NO_DECLARED_ACTION_PHRASE } from "app/shared/declared-action-engine";
 import {
   formatLogText, getLogTextClass,
@@ -547,8 +546,7 @@ interface LatestLogLine {
     ConditionMonitorComponent,
     DiceRollerComponent,
     MatrixParticipantBadgeComponent,
-    MatrixRunPanelComponent,
-    AstralBadgeComponent
+    MatrixRunPanelComponent
   ]
 })
 export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewChecked {
@@ -1464,6 +1462,24 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   /** Safe cast — only call inside an `@if (isMatrix(p))` guard. */
   asMatrix(p: IParticipant): MatrixParticipant {
     return p as MatrixParticipant;
+  }
+
+  /** Whether the row shows any status tag beside the name (GM screen overhaul 07). */
+  hasStatusTags(p: IParticipant): boolean {
+    return p.actionHistory.length > 0
+      || (this.isAstral(p) && p.astralProjecting)
+      || (this.isMatrix(p) && p.jackedIn);
+  }
+
+  /** The VR mode word on a jacked-in decker's tag beside the name: HOT, COLD or AR. */
+  getVrModeTagLabel(p: MatrixParticipant): string {
+    return vrModeTagLabel(p.vrMode);
+  }
+
+  /** Colour band of the Overwatch Score tag beside the name (display only,
+   *  RULINGS.md 2026-08-29: only 40 is a printed threshold, Core p. 232). */
+  getOsBand(p: MatrixParticipant): OsBand {
+    return osBandFor(p.overwatch ?? 0);
   }
 
   isAstral(p: IParticipant): p is AstralParticipant {
@@ -7097,6 +7113,16 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   getActionTooltip(action: Action): string {
     const description = getInterruptDescription(action.key) || "No description available.";
     return `${description} Initiative cost: ${action.iniMod}`;
+  }
+
+  /** The short word on an Interrupt Action's status tag beside the name. */
+  getActionTag(action: Action): string {
+    return getInterruptTag(action.key);
+  }
+
+  /** The tag is abbreviated, so its hover text leads with the full name and cost. */
+  getActionTagTooltip(action: Action): string {
+    return `${this.getActionLabel(action)} (${action.iniMod}) — ${this.getActionTooltip(action)}`;
   }
 
   getActionDetails(action: Action): string {

@@ -285,7 +285,7 @@ describe('Deck tab (GM screen overhaul 04, #7)', () => {
     expect(deckButton('Switch Mode').disabled)
       .withContext('Switch Mode is off while the chosen mode is the current one').toBeTrue();
     expect(deckTab().querySelector('app-matrix-participant-badge'))
-      .withContext('the VR and OS chips').toBeTruthy();
+      .withContext('the Overwatch chip and its adjuster (VR mode moved beside the name, #10)').toBeTruthy();
 
     press('Cold Sim');
     expect(deckButton('Switch Mode').disabled).toBeFalse();

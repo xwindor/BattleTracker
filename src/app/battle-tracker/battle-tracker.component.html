@@ -331,6 +331,36 @@
                 title="Grunt: one combined Physical + Stun Condition Monitor, no overflow (Core p. 379)">GRUNT</span>
               }
             }
+            <!-- Status tags beside the name (GM screen overhaul 07, GitHub #10;
+                 user story 19): what this participant is doing right now, on
+                 the name's own line instead of a second line under the row.
+                 No VR CATATONIC tag: Hot or Cold Sim already says the body is
+                 out of action (Xavier, 2026-10-04).
+                 The name box gives way first ("…") and the tags only wrap
+                 among themselves, so the row's buttons never move. Display
+                 only: the Overwatch Score is adjusted in the Deck tab
+                 (Xavier, 2026-10-03). -->
+            @if (hasStatusTags(p)) {
+            <span class="gm-status-tags">
+              @for (action of p.actionHistory; track $index) {
+              <span class="gm-status-tag gm-status-tag-interrupt" data-testid="status-tag-interrupt"
+                [class.gm-status-tag-persistent]="action.persist"
+                [title]="getActionTagTooltip(action)">{{ getActionTag(action) }}</span>
+              }
+              @if (isAstral(p) && asAstral(p).astralProjecting) {
+              <span class="gm-status-tag gm-status-tag-astral" data-testid="status-tag-astral"
+                title="Astral projecting">ASTRAL</span>
+              }
+              @if (isMatrix(p) && asMatrix(p).jackedIn) {
+              <span data-testid="status-tag-vr"
+                [class]="'gm-status-tag gm-status-tag-vr-' + getVrModeTagLabel(asMatrix(p)).toLowerCase()"
+                [title]="'VR mode: ' + getVrModeTagLabel(asMatrix(p))">{{ getVrModeTagLabel(asMatrix(p)) }}</span>
+              <span data-testid="status-tag-os"
+                [class]="'gm-status-tag gm-status-tag-os-' + getOsBand(asMatrix(p))"
+                [title]="'Overwatch Score ' + asMatrix(p).overwatch + ' — adjust it in the Deck tab'">OS&nbsp;{{ asMatrix(p).overwatch }}</span>
+              }
+            </span>
+            }
           </div>
           <!-- Rolled Initiative: its own column (header "Roll" above): the
                rolled-total box, the roll button (a small pip die, as in the
@@ -652,21 +682,6 @@
               </div>
             </div>
           </div>
-          @if (p.actionHistory.length > 0) {
-          <div class="col-12 interrupt-badges">
-            @for (action of p.actionHistory; track $index) {
-            <span class="interrupt-badge" [class.interrupt-badge-persistent]="action.persist"
-              [title]="getActionTooltip(action)">
-              {{ getActionLabel(action) }} ({{ action.iniMod }})
-            </span>
-            }
-          </div>
-          }
-          @if (isAstral(p) && asAstral(p).astralProjecting) {
-          <div class="col-12 astral-info-row">
-            <app-astral-badge [participant]="asAstral(p)"></app-astral-badge>
-          </div>
-          }
         </div>
         }
       </div>

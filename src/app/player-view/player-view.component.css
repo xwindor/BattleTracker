@@ -484,8 +484,9 @@
 
 /* ── Classes replacing template inline styles ──────────────────────────── */
 
-/* Was style="background-color:#6f42c1" — the same purple the astral badge
-   component uses for its chip. */
+/* Was style="background-color:#6f42c1" — the purple the GM screen's old
+   astral badge used (that badge became the ASTRAL tag beside the name, GM
+   screen overhaul 07). */
 .astral-projecting-chip {
   background-color: #6f42c1;
 }

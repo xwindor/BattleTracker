@@ -1612,20 +1612,3 @@ body .form-check-input {
   background: rgba(12, 27, 37, 0.92) !important;
 }
 
-:root body .interrupt-badges {
-  border-left-color: rgba(255, 95, 131, 0.45);
-  background: rgba(255, 95, 131, 0.05);
-}
-
-:root body .interrupt-badge {
-  background: rgba(255, 95, 131, 0.12);
-  color: var(--cd-danger);
-  border-color: rgba(255, 95, 131, 0.35);
-}
-
-:root body .interrupt-badge-persistent {
-  background: rgba(255, 95, 131, 0.22);
-  border-color: rgba(255, 95, 131, 0.6);
-  color: #ffb3c6;
-  box-shadow: 0 0 0.4rem rgba(255, 95, 131, 0.3);
-}

@@ -5,36 +5,6 @@
    by hoisting either copy into styles.scss without re-deciding Open Decision 4
    — that changes encapsulation and specificity and leaks into the other view. */
 
-.interrupt-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  align-items: center;
-  padding: 0.25rem 0.5rem;
-  margin-top: 0;
-  border-left: 3px solid rgba(220, 38, 38, 0.3);
-  background: rgba(220, 38, 38, 0.04);
-}
-
-.interrupt-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.1;
-  border-radius: 0.6rem;
-  background: rgba(220, 38, 38, 0.12);
-  color: #991b1b;
-  border: 1px solid rgba(220, 38, 38, 0.35);
-  white-space: nowrap;
-}
-
-.interrupt-badge-persistent {
-  background: rgba(220, 38, 38, 0.22);
-  border-color: rgba(220, 38, 38, 0.55);
-}
-
 /* Seize Initiative / Act / Delay / Interrupts: up to four controls that used
    to share a Bootstrap `.btn-group`, which assumes one line and does not
    wrap. At any width from 1024 to 1920px, whenever more than two of these
@@ -1407,17 +1377,6 @@
   color: #78350f;
 }
 
-.astral-info-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.2rem 0.5rem;
-  border-top: 1px solid rgba(111, 66, 193, 0.2);
-  background: rgba(111, 66, 193, 0.04);
-  font-size: 0.78rem;
-  flex-wrap: wrap;
-}
-
 /* ── Combat log readability ─────────────────────────────────────────────── */
 
 /* DUPLICATED (Open Decision 4) — keep byte-identical with
@@ -1605,13 +1564,6 @@
     border-right: none;
   }
 
-  /* The Interrupt Actions and "Astral projecting" lines still sit under the
-     row until they move beside the name (GM screen overhaul 07). */
-  .gm-list-grid > .interrupt-badges,
-  .gm-list-grid > .astral-info-row {
-    grid-column: 1 / -1;
-  }
-
   .gm-col-ini {
     justify-content: flex-start !important;
   }
@@ -1678,12 +1630,79 @@
 /* The name box gives way first when the row is tight (the participant panel
    open on a laptop), so the badge beside it never pushes onto a second line. */
 .gm-col-name .gm-name-input {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 4rem;
+  text-overflow: ellipsis;
 }
 
 .gm-col-name .participant-badge {
   flex: 0 0 auto;
+}
+
+/* Status tags beside the name (GM screen overhaul 07, GitHub #10): small
+   square outlined tags in the target picture's look, coloured by what they
+   say - magenta for an Interrupt Action, cyan for ASTRAL, the Matrix ones in
+   cyan / amber / red. The name box shrinks first (and shows "…"); only when
+   it is down to its minimum do the tags wrap among themselves, inside the
+   name's column, so the row's buttons never get pushed. */
+.gm-col-name {
+  min-width: 0;
+}
+
+/* The name box's starting width is zero, so the tags (and any GROUP /
+   GRUNT badge) take their full width first and the name fills what is
+   left, down to its 4rem minimum. Only past that do the tags shrink, by
+   wrapping among themselves. */
+.gm-status-tags {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.gm-status-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  border-radius: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+  text-transform: uppercase;
+  cursor: default;
+}
+
+.gm-status-tag-interrupt { color: var(--cd-magenta, #ff4dc8); }
+
+/* An Interrupt Action that holds for the rest of the turn (Full Defense)
+   keeps its stronger look, as on the old line under the row. */
+.gm-status-tag-persistent {
+  background: rgba(255, 77, 200, 0.16);
+  box-shadow: 0 0 0.35rem rgba(255, 77, 200, 0.3);
+}
+
+.gm-status-tag-astral { color: var(--cd-cyan, #38d8ff); }
+
+.gm-status-tag-vr-ar { color: var(--cd-text-muted, #79bda8); }
+.gm-status-tag-vr-cold { color: var(--cd-cyan, #38d8ff); }
+.gm-status-tag-vr-hot { color: var(--cd-danger, #ff5f83); }
+
+/* Overwatch colour bands: display only (RULINGS.md 2026-08-29); the cut
+   points live in `osBandFor()` alone. */
+.gm-status-tag-os-low { color: var(--cd-text-muted, #79bda8); }
+.gm-status-tag-os-building { color: var(--cd-cyan, #38d8ff); }
+.gm-status-tag-os-high { color: var(--cd-amber, #ffc35d); }
+.gm-status-tag-os-convergence {
+  color: #fff;
+  background: var(--cd-danger, #ff5f83);
+  border-color: var(--cd-danger, #ff5f83);
 }
 
 /* Act, Delay and Defend each get a fixed-width slot, drawn even when its

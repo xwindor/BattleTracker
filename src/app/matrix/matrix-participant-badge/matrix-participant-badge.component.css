@@ -1,7 +1,6 @@
-/* DUPLICATED, deliberately (same reasoning as Open Decision 4): this chip
-   idiom also exists in magic/astral-badge/astral-badge.component.css. Emulated
-   view encapsulation means neither component can see the other's copy, so the
-   two are kept byte-identical by hand rather than hoisted to styles.scss. */
+/* The Overwatch chip and its adjuster, in the Deck tab. The VR mode chip
+   that sat beside it moved to the initiative row as a tag beside the name
+   (GM screen overhaul 07, GitHub #10); VR CATATONIC was dropped. */
 .matrix-badge {
   display: inline-flex;
   align-items: center;
@@ -11,25 +10,6 @@
   vertical-align: middle;
   /* Do not add position:relative here — the absolute editor must escape
      this element so it isn't clipped by any overflow on the row. */
-}
-
-/* VR mode chip --------------------------------------------------- */
-.vr-chip {
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  color: #fff;
-  line-height: 1.5;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
-  white-space: nowrap;
-}
-
-.vr-mode-ar   { background-color: #6c757d; }
-.vr-mode-cold { background-color: #2b6cb0; }
-.vr-mode-hot  {
-  background-color: #c0392b;
-  box-shadow: 0 0 4px rgba(192, 57, 43, 0.7);
 }
 
 /* OS chip + absolute editor wrapper ------------------------------ */
@@ -140,19 +120,6 @@
 .os-adj-reset:hover {
   background: rgba(231, 76, 60, 0.18);
   color: #ff6b5b;
-}
-
-/* VR catatonic badge ---------------------------------------------- */
-.vr-catatonic {
-  background-color: #1f1f1f;
-  color: #f1c40f;
-  border: 1px dashed #f1c40f;
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-  line-height: 1.5;
 }
 
 @keyframes matrix-badge-pulse {

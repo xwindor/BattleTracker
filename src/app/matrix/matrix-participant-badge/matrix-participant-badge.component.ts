@@ -3,6 +3,20 @@ import { CommonModule } from "@angular/common";
 import { MatrixParticipant, VRMode } from "Matrix";
 import { OsBand, osBandFor } from "app/services/os-tracking.service";
 
+/**
+ * The short VR mode word a jacked-in decker's tag shows beside their name on
+ * the initiative row (GM screen overhaul 07, GitHub #10): HOT, COLD or AR.
+ * Lived on this badge's own VR chip until that chip moved to the row.
+ */
+export function vrModeTagLabel(mode: VRMode | undefined): string {
+  switch (mode) {
+    case VRMode.HotSim:  return "HOT";
+    case VRMode.ColdSim: return "COLD";
+    case VRMode.AR:
+    default:             return "AR";
+  }
+}
+
 @Component({
   standalone: true,
   selector: "app-matrix-participant-badge",
@@ -21,24 +35,6 @@ export class MatrixParticipantBadgeComponent {
 
   osEditorOpen = false;
 
-  get vrModeLabel(): string {
-    switch (this.participant?.vrMode) {
-      case VRMode.HotSim:  return "HOT";
-      case VRMode.ColdSim: return "COLD";
-      case VRMode.AR:
-      default:             return "AR";
-    }
-  }
-
-  get vrModeClass(): string {
-    switch (this.participant?.vrMode) {
-      case VRMode.HotSim:  return "vr-mode-hot";
-      case VRMode.ColdSim: return "vr-mode-cold";
-      case VRMode.AR:
-      default:             return "vr-mode-ar";
-    }
-  }
-
   /**
    * Colour band for the OS chip.
    *
@@ -53,10 +49,6 @@ export class MatrixParticipantBadgeComponent {
    */
   get osTier(): OsBand {
     return osBandFor(this.participant?.overwatch ?? 0);
-  }
-
-  get blocksPhysical(): boolean {
-    return !!this.participant?.blocksPhysicalActions;
   }
 
   onOsChipClick(event: MouseEvent): void {

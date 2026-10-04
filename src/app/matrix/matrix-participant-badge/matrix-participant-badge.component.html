@@ -1,6 +1,8 @@
+<!-- The VR mode chip moved to the initiative row, beside the name (GM screen
+     overhaul 07, GitHub #10); the VR CATATONIC chip was dropped, since Hot or
+     Cold Sim already says the body is out of action (Xavier, 2026-10-04). The
+     Overwatch adjuster stays here, in the Deck tab (Xavier, 2026-10-03). -->
 <div class="matrix-badge" *ngIf="participant">
-  <span class="vr-chip" [ngClass]="vrModeClass" [title]="'VR mode: ' + vrModeLabel">{{ vrModeLabel }}</span>
-
   <span class="os-chip-wrap">
     <button
       type="button"
@@ -18,9 +20,5 @@
       <button type="button" class="os-adj-btn os-adj-pos" (click)="onOsAdjust(5, $event)" title="+5 OS">+5</button>
       <button type="button" class="os-adj-btn os-adj-reset" (click)="onOsResetClick($event)" title="Reset OS to 0">Reset</button>
     </span>
-  </span>
-
-  <span *ngIf="blocksPhysical" class="vr-catatonic" title="Decker is in VR — physically catatonic, Matrix actions only">
-    VR CATATONIC
   </span>
 </div>
