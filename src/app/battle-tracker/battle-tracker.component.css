@@ -840,6 +840,7 @@
 .gm-screen {
   --bottom-strip-height: 16rem;
   --bottom-strip-tab-height: 1.6rem;
+  --gm-top-bar-height: 3.25rem;
   /* At least a window tall (less the page's own top bar), with the strip
      pushed to the end: on a short list the strip still rests on the window's
      bottom edge instead of floating under the last row. */
@@ -966,10 +967,11 @@
     box-shadow: -1.5rem 0 2.5rem rgba(0, 0, 0, 0.6);
   }
 
-  /* MATRIX and its × stay in view while the GM scrolls a long panel. */
+  /* MATRIX and its × stay in view while the GM scrolls a long panel, just
+     under the top bar. */
   .gm-matrix-panel-header {
     position: sticky;
-    top: 0;
+    top: var(--gm-top-bar-height);
     z-index: 1;
     background: var(--cd-bg-elev, #0a1118);
   }
@@ -1701,13 +1703,119 @@
 
 /* ── Classes replacing template inline styles ──────────────────────────── */
 
-/* The toolbar column: the round buttons, then the Matrix button beside them
-   (GM screen overhaul 10). The padding was once an inline style. */
-.gm-toolbar-col {
-  padding-left: 0;
+/* Top bar (CONTEXT.md; GM screen overhaul 12, target picture): one line,
+   where the fight is on the left, then the round buttons and the Matrix
+   button, and the room controls pushed to the right. It sticks to the top of
+   the window while the page scrolls, the way the bottom strip sticks to the
+   bottom, and reaches out to the same edges. */
+.gm-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  height: var(--gm-top-bar-height);
+  margin-inline: calc(var(--bs-gutter-x, 1.5rem) * -0.5);
+  padding: 0 1rem;
+  background: var(--cd-bg-elev, #0a1118);
+  border-bottom: 1px solid var(--cd-line, #16313b);
+  white-space: nowrap;
+}
+
+.gm-top-bar .btn {
+  height: var(--ui-control-h);
+  white-space: nowrap;
+}
+
+.gm-top-bar-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.gm-top-bar-kicker,
+.gm-top-bar-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cd-text-muted, #79bda8);
+}
+
+.gm-top-bar-line {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cd-primary, #2bf4c8);
+}
+
+.gm-top-bar-round {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1rem;
+}
+
+.gm-top-bar-room {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* The room code, boxed and in the Matrix colour as in the target picture.
+   It is also the player link. */
+.gm-top-bar-room-code {
+  padding: 0.125rem 0.5rem;
+  background: #000;
+  border: 1px solid var(--cd-line, #16313b);
+  color: var(--cd-cyan, #38d8ff);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+}
+
+.gm-top-bar-room-code:hover {
+  border-color: var(--cd-cyan, #38d8ff);
+  color: var(--cd-cyan, #38d8ff);
+}
+
+.gm-top-bar-code-input {
+  width: 8rem;
+  height: var(--ui-control-h);
+  text-transform: uppercase;
+}
+
+/* Quiet buttons (Copy player link, the ⋯, Cancel): no box until hovered. */
+.gm-top-bar .btn.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--cd-text-muted, #79bda8);
+  box-shadow: none;
+}
+
+.gm-top-bar .btn.btn-ghost:hover,
+.gm-top-bar .btn.btn-ghost.show {
+  border-color: var(--cd-line, #16313b);
+  color: var(--cd-text, #d5ffe9);
+}
+
+/* The room menu (⋯): a square icon button, its list drawn like the row
+   menu's (shared rules further down), and End room in the danger colour. */
+.gm-room-menu {
+  display: inline-flex;
+}
+
+.gm-room-menu-btn {
+  width: var(--ui-control-h);
+  padding: 0;
+}
+
+.gm-room-menu-list .gm-room-menu-end {
+  color: var(--cd-danger, #dc3545);
 }
 
 /* The Matrix button in the Matrix colour, lit while its panel is open (the
@@ -2021,17 +2129,21 @@
   display: inline-flex;
 }
 
-.gm-row-menu-btn::after {
+/* The room menu in the top bar (GM screen overhaul 12) is drawn the same. */
+.gm-row-menu-btn::after,
+.gm-room-menu-btn::after {
   display: none;
 }
 
-.gm-row-menu-list {
+.gm-row-menu-list,
+.gm-room-menu-list {
   min-width: 15rem;
   border-radius: 0;
   border-color: var(--cd-line-strong, #2bf4c8);
 }
 
-.gm-row-menu-list .dropdown-divider {
+.gm-row-menu-list .dropdown-divider,
+.gm-room-menu-list .dropdown-divider {
   margin: 0.25rem 0;
   border-top-color: var(--cd-line, #16313b);
   opacity: 1;

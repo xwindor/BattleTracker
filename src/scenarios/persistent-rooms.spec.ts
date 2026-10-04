@@ -2037,8 +2037,13 @@ describe('Durable rooms - GM client (AC 1, 2, 4, 5, 9, 10, 12, 15, 17; S1, S2, S
       component.shareRoomCode = 'ABC123';
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.querySelector('[data-testid="close-room-btn"]')).not.toBeNull();
-      expect(fixture.nativeElement.querySelector('[data-testid="end-room-btn"]')).not.toBeNull();
+      // Both sit in the top bar's room menu (GM screen overhaul 12, #15).
+      const menu = fixture.nativeElement.querySelector('[data-testid="top-bar"] [data-testid="room-menu"]');
+      expect(menu).not.toBeNull();
+      (menu.querySelector('[data-testid="room-menu-btn"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(menu.querySelector('.dropdown-menu.show [data-testid="close-room-btn"]')).not.toBeNull();
+      expect(menu.querySelector('.dropdown-menu.show [data-testid="end-room-btn"]')).not.toBeNull();
     });
   });
 

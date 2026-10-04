@@ -1,19 +1,101 @@
 <div class="container-fluid gm-screen" [class.gm-screen-strip-shrunk]="bottomStripShrunk">
-  <div class="row mb-2">
-    <div class="col-12">
-      <div class="input-group">
-        <button type="button" class="btn btn-outline-primary" (click)="btnCreateShareSession_Click()">Create Player Session</button>
-        <input type="text" class="form-control" placeholder="Join room code" [(ngModel)]="shareJoinCode">
-        <button type="button" class="btn btn-outline-secondary" (click)="btnJoinShareSession_Click()">Join Session</button>
-        @if (shareRoomCode) {
-        <button type="button" class="btn btn-outline-secondary" data-testid="close-room-btn"
-          title="Leave this room. It stays saved and you can rejoin the same code later."
-          (click)="btnCloseShareSession_Click()">Close Room</button>
-        <button type="button" class="btn btn-outline-danger" data-testid="end-room-btn"
-          title="Permanently delete this room and its saved encounter."
-          (click)="btnEndShareSession_Click()">End Room</button>
-        }
+  <!-- Top bar (CONTEXT.md; GM screen overhaul 12, GitHub #15; user stories
+       1-5): where the fight is, the round buttons and the Matrix button on
+       the left, the room controls on the right, all on one line. It sticks
+       to the top of the window, as the bottom strip sticks to the bottom.
+       Every button here calls the same handler, under the same show/hide
+       rule, as it did in the old session bar and button row. -->
+  <header class="gm-top-bar" data-testid="top-bar">
+    <div class="gm-top-bar-status" data-testid="top-bar-status" [attr.title]="topBarStatusTitle()">
+      @if (combatManager.started) {
+      <span class="gm-top-bar-kicker">Combat running</span>
+      <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }} · Pass {{ combatManager.initiativePass }} · Ini {{ combatManager.currentInitiative }}</span>
+      }
+      @else {
+      <span class="gm-top-bar-kicker">Between Combat Turns</span>
+      <span class="gm-top-bar-line">Turn {{ combatManager.combatTurn }}</span>
+      }
+    </div>
+    <div class="gm-top-bar-round">
+      @if(!combatManager.started)
+      {
+      <button type="button" class="btn btn-primary" (click)="btnStartRound_Click()">Start Combat Turn</button>
+      }
+      @if(combatManager.started && combatManager.passEnded)
+      {
+      <button type="button" class="btn btn-primary" (click)="btnNextPass_Click()">{{ combatManager.hasMoreIniPasses() ? "Next Initiative Pass" : "End Combat Turn" }}</button>
+      }
+      <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">End Combat</button>
+    </div>
+    <!-- Opens the Matrix panel, or closes it (GM screen overhaul 10,
+         GitHub #13). -->
+    <button type="button" class="btn btn-outline-info gm-matrix-btn" data-testid="matrix-btn"
+      [class.active]="matrixPanelOpen" [attr.aria-pressed]="matrixPanelOpen"
+      [title]="matrixPanelOpen ? 'Close the Matrix panel' : 'Open the Matrix panel'" (click)="toggleMatrixPanel()">
+      <i class="fas fa-microchip" aria-hidden="true"></i>Matrix
+    </button>
+    <div class="gm-top-bar-room">
+      @if (!shareRoomCode || roomJoinOpen) {
+      <!-- No room open, or "Join another room…" picked from the room menu:
+           Create and Join, as the old session bar had them. -->
+      @if (!shareRoomCode) {
+      <span class="gm-top-bar-label">No room</span>
+      <button type="button" class="btn" data-testid="create-room-btn"
+        title="Open a room the players can join from their own screens"
+        (click)="roomJoinOpen = false; btnCreateShareSession_Click()">Create room</button>
+      }
+      <input type="text" class="form-control gm-top-bar-code-input" data-testid="join-room-input"
+        placeholder="Room code" aria-label="Room code to join" [(ngModel)]="shareJoinCode">
+      <button type="button" class="btn" data-testid="join-room-btn" (click)="btnTopBarJoin_Click()">Join room</button>
+      @if (shareRoomCode) {
+      <button type="button" class="btn btn-ghost" data-testid="join-room-cancel" (click)="roomJoinOpen = false">Cancel</button>
+      }
+      }
+      @else {
+      <span class="gm-top-bar-label">Room</span>
+      <!-- The code is the player link: it opens the player view in a new
+           tab, as the full link under the old session bar did. -->
+      <a class="gm-top-bar-room-code" data-testid="room-code" [href]="shareUrl" target="_blank" rel="noopener noreferrer"
+        [attr.title]="'Open the player view in a new tab: ' + shareUrl">{{ shareRoomCode }}</a>
+      <button type="button" class="btn btn-ghost" data-testid="copy-player-link-btn"
+        [attr.title]="'Copy the player link: ' + shareUrl" (click)="btnCopyShareUrl_Click()">
+        <i class="fas fa-link" aria-hidden="true"></i>Copy player link
+      </button>
+      <!-- The room menu (⋯): the room actions a GM must not hit by accident
+           mid-fight (user story 4). Each item calls the same handler its old
+           session-bar button did. Like the row menu, picking an item closes
+           the menu first, and Escape closes it without closing a panel. -->
+      <div class="gm-room-menu" ngbDropdown #roomMenu="ngbDropdown" placement="bottom-end" data-testid="room-menu">
+        <button type="button" ngbDropdownToggle class="btn btn-ghost gm-room-menu-btn"
+          data-testid="room-menu-btn" aria-label="Room menu" title="Room menu">
+          <i class="fas fa-ellipsis" aria-hidden="true"></i>
+        </button>
+        <div ngbDropdownMenu class="gm-room-menu-list">
+          <button type="button" ngbDropdownItem data-testid="join-another-room-btn"
+            title="Join a different room by its code"
+            (click)="roomMenu.close(); roomJoinOpen = true">Join another room…</button>
+          <!-- Kept from the old session bar, where Create sat beside Join
+               even with a room open; it still asks first. -->
+          <button type="button" ngbDropdownItem data-testid="create-new-room-btn"
+            title="Open a new room for this encounter"
+            (click)="roomMenu.close(); btnCreateShareSession_Click()">Create a new room…</button>
+          <button type="button" ngbDropdownItem data-testid="close-room-btn"
+            title="Leave this room. It stays saved and you can rejoin the same code later."
+            (click)="roomMenu.close(); btnCloseShareSession_Click()">Close room</button>
+          <div class="dropdown-divider"></div>
+          <button type="button" ngbDropdownItem class="gm-room-menu-end" data-testid="end-room-btn"
+            title="Permanently delete this room and its saved encounter."
+            (click)="roomMenu.close(); btnEndShareSession_Click()">End room</button>
+        </div>
       </div>
+      }
+    </div>
+  </header>
+  <!-- The room's own messages (connection lost, a restore warning, errors
+       and confirmations), under the bar where they sat under the old
+       session bar. -->
+  <div class="row">
+    <div class="col-12">
       @if (shareConnectionLost) {
       <div class="small text-warning mt-1" data-testid="share-connection-lost">
         Session server unreachable - players are NOT receiving updates.
@@ -26,16 +108,6 @@
           (click)="dismissRestoreWarning()">Dismiss</button>
       </div>
       }
-      @if (shareRoomCode) {
-      <div class="small text-success mt-1">
-        Room {{ shareRoomCode }}
-        | Player link:
-        <a [href]="shareUrl" target="_blank" rel="noopener noreferrer">{{ shareUrl }}</a>
-        <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" (click)="btnCopyShareUrl_Click()">
-          Copy
-        </button>
-      </div>
-      }
       @if (shareError) {
       <div class="small text-danger mt-1">{{ shareError }}</div>
       }
@@ -46,34 +118,6 @@
   </div>
   <div class="row">
     <div class="col-12">
-      <div class="row">
-        <div class="col-12 gm-toolbar-col">
-          <div class="btn-group" role="group">
-            @if(!combatManager.started)
-            {
-            <button type="button" class="btn btn-primary" (click)="btnStartRound_Click()">
-              Start Combat Turn
-            </button>
-            }
-            @if(combatManager.started && combatManager.passEnded)
-            {
-            <button type="button" class="btn btn-primary" (click)="btnNextPass_Click()">
-              {{ combatManager.hasMoreIniPasses() ? "Next Initiative Pass" : "End Combat Turn" }}
-            </button>
-            }
-            <button type="button" class="btn btn-outline-danger" (click)="btnReset_Click()">
-              End Combat
-            </button>
-          </div>
-          <!-- Opens the Matrix panel, or closes it (GM screen overhaul 10,
-               GitHub #13). -->
-          <button type="button" class="btn btn-outline-info gm-matrix-btn" data-testid="matrix-btn"
-            [class.active]="matrixPanelOpen" [attr.aria-pressed]="matrixPanelOpen"
-            [title]="matrixPanelOpen ? 'Close the Matrix panel' : 'Open the Matrix panel'" (click)="toggleMatrixPanel()">
-            <i class="fas fa-microchip me-1"></i>Matrix
-          </button>
-        </div>
-      </div>
       <!-- Item 1 (round 3): a state-driven, non-blocking notice - never a
            dialog, never sent to a player - replacing the round-2 per-click
            Act/Delay confirm dialogs. True whenever the participant now due
@@ -725,20 +769,6 @@
              the list, so it clearing itself never makes the list jump. -->
         @if (mergeMessage) {
         <div class="small mt-1 merge-grunts-message" data-testid="merge-grunts-message">{{ mergeMessage }}</div>
-        }
-      </div>
-      <div>
-        @if (combatManager.started)
-        {
-        <div colspan="8">Combat Turn
-          {{ combatManager.combatTurn }},
-          Pass {{ combatManager.initiativePass }}, Initiative
-          {{ combatManager.currentInitiative }}
-        </div>
-        }
-        @else
-        {
-        Combat Turn {{ combatManager.combatTurn }}
         }
       </div>
     </div>

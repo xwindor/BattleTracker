@@ -3191,9 +3191,11 @@ describe('Round 6 defects 2 and 3: the header Initiative number and the shared-l
     expect(CombatManager.currentInitiative).toBe(6); // the seizer's own Score, not Bystander's 22
     const latest = broadcasts[broadcasts.length - 1];
     expect(latest.currentInitiative).toBe(6);
-    const headerText = ((fixture.nativeElement as HTMLElement).textContent || '').replace(/\s+/g, ' ');
-    expect(headerText).toContain('Initiative 6');
-    expect(headerText).not.toContain('Initiative 22');
+    // The round status now sits in the top bar (GM screen overhaul 12, #15).
+    const status = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="top-bar-status"]');
+    const statusText = (status?.textContent || '').replace(/\s+/g, ' ');
+    expect(statusText).toContain('Ini 6');
+    expect(statusText).not.toContain('Ini 22');
     void bystander;
   });
 

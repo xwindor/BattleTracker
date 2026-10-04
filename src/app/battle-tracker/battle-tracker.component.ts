@@ -2943,6 +2943,34 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     }
   }
 
+  /**
+   * True while the GM, with a room already open, has picked "Join another
+   * room…" from the top bar's room menu (GM screen overhaul 12, GitHub #15):
+   * the bar shows the code box in place of the room code. With no room open
+   * the box is always there.
+   */
+  roomJoinOpen = false;
+
+  /**
+   * The top bar's Join room: the same join as the old session bar's Join
+   * Session. A join that worked puts the bar back to the room code; one that
+   * didn't keeps the code box up beside its error.
+   */
+  async btnTopBarJoin_Click() {
+    await this.btnJoinShareSession_Click();
+    if (!this.shareError) {
+      this.roomJoinOpen = false;
+    }
+  }
+
+  /** The top bar's round status, spelt out in full for its hover text. */
+  topBarStatusTitle(): string {
+    const cm = this.combatManager;
+    return cm.started
+      ? `Combat Turn ${cm.combatTurn}, Initiative Pass ${cm.initiativePass}, current Initiative ${cm.currentInitiative}`
+      : `Combat Turn ${cm.combatTurn}`;
+  }
+
   async btnCopyShareUrl_Click() {
     if (!this.shareUrl) {
       return;
