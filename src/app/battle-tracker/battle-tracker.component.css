@@ -1281,6 +1281,7 @@
   flex: 0 0 auto;
   width: var(--ui-check-size);
   height: var(--ui-check-size);
+  margin: 0;
   cursor: pointer;
 }
 
@@ -1290,6 +1291,52 @@
   border: 1px solid #ffe69c;
   border-radius: 4px;
   padding: 0.25rem 0.5rem;
+}
+
+/* Merge picking bar (GM screen overhaul 09, #12): one line at the top of the
+   initiative list, magenta as in the target picture - count, a hint, then
+   Merge and Cancel at the right. */
+.gm-merge-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  margin-bottom: 0.25rem;
+  background: rgba(255, 77, 200, 0.08);
+  border: 1px solid var(--cd-magenta, #ff4dc8);
+}
+
+.gm-merge-bar-title {
+  color: var(--cd-magenta, #ff4dc8);
+  font-size: var(--cd-font-sm, 0.8rem);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.gm-merge-bar-hint {
+  color: var(--cd-text-muted, #79bda8);
+  font-size: var(--cd-font-sm, 0.8rem);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-merge-bar-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.gm-merge-bar-buttons .btn {
+  min-width: 5rem;
+}
+
+.gm-merge-bar .gm-merge-bar-merge {
+  border-color: var(--cd-magenta, #ff4dc8);
+  color: var(--cd-magenta, #ff4dc8);
 }
 
 
@@ -1804,6 +1851,10 @@
 
 .gm-row-menu-list .gm-row-menu-seize {
   color: var(--cd-amber, #ffc35d);
+}
+
+.gm-row-menu-list .gm-row-menu-merge {
+  color: var(--cd-magenta, #ff4dc8);
 }
 
 .gm-row-menu-list .gm-row-menu-delete {

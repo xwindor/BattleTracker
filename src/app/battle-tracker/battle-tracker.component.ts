@@ -8061,10 +8061,71 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     this.setMergeMessage("");
   }
 
-  /** Untick everything. A mis-tap costs one tap to correct, not an undo. */
-  clearMergeSelection(): void {
+  /**
+   * Is the GM picking grunts to merge (GM screen overhaul 09, #12)? The tick
+   * boxes and the Merge / Cancel bar exist only while this is on; outside it
+   * no grunt row carries a box. Started from a lone grunt's row menu, ended
+   * by Cancel or a merge that goes through. A refused merge keeps it on, so
+   * the GM can untick the grunt the refusal names. Read it through
+   * `isMergePicking()`, which also ends picking once nothing is ticked.
+   */
+  private mergePicking = false;
+
+  /**
+   * Picking, with at least one grunt still ticked. Unticking the last one, or
+   * deleting every ticked grunt, ends picking - as the old merge bar hid
+   * itself once nothing was ticked - so no empty "Merge 0" bar is left up.
+   */
+  isMergePicking(): boolean {
+    return this.mergePicking && this.getMergeSelectionCount() > 0;
+  }
+
+  /** "Merge into a group…" in a lone grunt's row menu: start with `p` ticked. */
+  startMergePicking(p: IParticipant): void {
     this.gruntsSelectedForMerge.clear();
+    this.gruntsSelectedForMerge.add(p);
+    this.mergePicking = true;
     this.setMergeMessage("");
+  }
+
+  /** Cancel on the merge bar: untick everything and stop picking. */
+  cancelMergePicking(): void {
+    this.endMergePicking();
+    this.setMergeMessage("");
+  }
+
+  /** Untick everything and stop picking: Cancel, or a merge that went through. */
+  private endMergePicking(): void {
+    this.gruntsSelectedForMerge.clear();
+    this.mergePicking = false;
+  }
+
+  /** Does this row get a tick box right now? Lone grunts, while picking. */
+  showsMergeTickBox(p: IParticipant): boolean {
+    return this.isMergePicking() && this.isOfferedForMerge(p);
+  }
+
+  /** Does this row's menu offer "Merge into a group…"? Lone grunts, when not picking. */
+  offersMergeFromRowMenu(p: IParticipant): boolean {
+    return !this.isMergePicking() && this.isOfferedForMerge(p);
+  }
+
+  /**
+   * A lone grunt picking can offer: never a lieutenant, which the merge would
+   * only refuse (Xavier, 2026-10-04). A grunt that has already rolled is still
+   * offered - its refusal tells the GM to re-group between Combat Turns.
+   */
+  private isOfferedForMerge(p: IParticipant): boolean {
+    return this.isMergeableGruntCandidate(p) && !this.isMergeLieutenant(p);
+  }
+
+  /**
+   * Made from a lieutenant template, or linked to a group as its lieutenant.
+   * Either way he has his own attributes (Core p. 380) and his own Initiative
+   * Test (Core p. 381), so he can't share a group's single Score.
+   */
+  private isMergeLieutenant(p: IParticipant): boolean {
+    return this.isLieutenantImprintedStatblock(p) || this.participantLieutenantTeamRowId.has(p);
   }
 
   /** The ticked grunts, in initiative-list order, still in the encounter. */
@@ -8137,9 +8198,10 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     // Initiative Test the same way a templated lieutenant does - merging him
     // away would fold that into a shared Score exactly the same way, and
     // silently drop the link with no warning (item 6's second half).
-    const lieutenantsInSelection = selected.filter(g =>
-      this.isLieutenantImprintedStatblock(g) || this.participantLieutenantTeamRowId.has(g)
-    );
+    //
+    // Picking no longer offers a lieutenant (#12), so this is now a backstop:
+    // a grunt linked as a lieutenant after he was ticked still reaches here.
+    const lieutenantsInSelection = selected.filter(g => this.isMergeLieutenant(g));
     if (lieutenantsInSelection.length > 0) {
       const names = lieutenantsInSelection.map(g => g.name || "unnamed grunt").join(", ");
       const reason = `Cannot merge: ${names} ${lieutenantsInSelection.length === 1 ? "was" : "were"} `
@@ -8208,8 +8270,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
       // warning about it after the fact.
       this.forgetParticipant(grunt);
       this.combatManager.removeParticipant(grunt);
-      this.forgetSetEntry(this.gruntsSelectedForMerge, grunt);
     }
+    // The merge went through, so picking is over (#12).
+    this.endMergePicking();
     // The new group's members were what the merge used to show, under the
     // row; they now live on the Group tab (GM screen overhaul 06, #9).
     this.openParticipantPanel(row, "group");

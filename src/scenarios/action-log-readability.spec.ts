@@ -651,9 +651,15 @@ describe('Action Log readability (briefs/action-log-readability-spec.md)', () =>
   describe('AC26 - tooltips carry the prose moved out of the log', () => {
     it('the merge button title carries the carried-damage/house-rule sentence', () => {
       const a = component.addGrunt('A');
-      const b = component.addGrunt('B');
-      component.toggleMergeSelection(a);
-      component.toggleMergeSelection(b);
+      component.addGrunt('B');
+      fixture.detectChanges();
+      // The merge bar shows while picking, started from a lone grunt's row
+      // menu (GM screen overhaul 09, #12).
+      const i = component.combatManager.participants.items.indexOf(a);
+      const row = fixture.nativeElement.querySelector('#participant' + i) as HTMLElement;
+      (row.querySelector('[data-testid="row-menu-btn"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      (row.querySelector('[data-testid="merge-start-btn"]') as HTMLButtonElement).click();
       fixture.detectChanges();
 
       const btn = fixture.nativeElement.querySelector('[data-testid="merge-grunts-btn"]') as HTMLElement;

@@ -233,6 +233,26 @@
         <button type="button" class="os-reminder-dismiss" (click)="dismissOsReminder($index)" aria-label="Dismiss">&#215;</button>
       </div>
       }
+      <!-- Merge two or more standalone grunts into one linked row
+           (Decision 10). Shown only while picking, which starts from a lone
+           grunt's row menu (GM screen overhaul 09, #12): one line at the top
+           of the list with the count, Merge and Cancel. Merge stays disabled
+           until enough grunts are ticked; a refusal is still reported out
+           loud rather than hidden. -->
+      @if (isMergePicking()) {
+      <div class="gm-merge-bar" data-testid="merge-grunts-bar">
+        <span class="gm-merge-bar-title">Merge {{ getMergeSelectionCount() }} into a Grunt Group</span>
+        <span class="gm-merge-bar-hint">Tick the lone grunts to merge.</span>
+        <div class="gm-merge-bar-buttons">
+          <button type="button" class="btn btn-sm gm-merge-bar-merge" data-testid="merge-grunts-btn"
+            [disabled]="!canMergeSelectedGrunts()"
+            (click)="btnMergeSelectedGrunts_Click()"
+            title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn. Their Condition Monitor damage carries over; no wound penalty is applied to the group for damage taken before the merge (house rule).">Merge</button>
+          <button type="button" class="btn btn-sm" data-testid="merge-grunts-cancel"
+            (click)="cancelMergePicking()">Cancel</button>
+        </div>
+      </div>
+      }
       <!-- Below md the row cells stack full width, so the header describes
            nothing and is hidden rather than drawn as orphaned labels. -->
       <!-- GM screen overhaul 08 (GitHub #11): five columns in the target
@@ -277,8 +297,10 @@
           </div>
           <div class="col-12 col-md-7 gm-col-name d-flex align-items-center gap-1">
             <!-- Merge tick (addendum Decision 10): only a standalone grunt can
-                 be folded into a group, so only a grunt gets the box. -->
-            @if (isMergeableGruntCandidate(p)) {
+                 be folded into a group, so only a grunt gets the box - and
+                 only while the GM is picking, started from the row menu
+                 (GM screen overhaul 09, #12). -->
+            @if (showsMergeTickBox(p)) {
             <input type="checkbox" class="form-check-input mt-0 merge-select-box"
               data-testid="merge-select-box"
               [checked]="isSelectedForMerge(p)"
@@ -669,6 +691,15 @@
                   <button type="button" ngbDropdownItem data-testid="claimable-btn"
                     [attr.title]="isParticipantClaimable(p) ? 'Claimable — character can be claimed by players' : 'Private — character cannot be claimed by players'"
                     (click)="rowMenu.close(); btnToggleClaimable_Click(p)">Players can claim: {{ isParticipantClaimable(p) ? "on" : "off" }}</button>
+                  <!-- Starts merge picking (GM screen overhaul 09, #12): tick
+                       boxes on lone grunts, this one already ticked, and the
+                       merge bar at the top of the list. -->
+                  @if (offersMergeFromRowMenu(p)) {
+                  <button type="button" ngbDropdownItem class="gm-row-menu-merge"
+                    data-testid="merge-start-btn"
+                    title="Pick lone grunts to merge into one Grunt Group, starting with this one"
+                    (click)="rowMenu.close(); startMergePicking(p)">Merge into a group…</button>
+                  }
                   <div class="dropdown-divider"></div>
                   <!-- No focus-steal suppression here (Item 1 fix, fix round
                        3): there is no blur-triggered join line left to protect
@@ -709,23 +740,8 @@
             <i class="fa fa-user-ninja"></i> Add Grunt
           </button>
         </div>
-        <!-- Merge two or more standalone grunts into one linked row
-             (Decision 10). Only offered while it is legal - i.e. while none of
-             the ticked grunts has rolled Initiative for this Combat Turn; the
-             refusal itself is still reported out loud rather than hidden. -->
-        @if (getMergeSelectionCount() > 0) {
-        <div class="mt-2 merge-grunts-bar" data-testid="merge-grunts-bar">
-          <button type="button" class="btn btn-outline-info" data-testid="merge-grunts-btn"
-            [disabled]="!canMergeSelectedGrunts()"
-            (click)="btnMergeSelectedGrunts_Click()"
-            title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn. Their Condition Monitor damage carries over; no wound penalty is applied to the group for damage taken before the merge (house rule).">
-            <i class="fa fa-object-group"></i>
-            Merge {{ getMergeSelectionCount() }} into a Grunt Group
-          </button>
-          <button type="button" class="btn btn-link" data-testid="merge-grunts-clear"
-            (click)="clearMergeSelection()">Clear selection</button>
-        </div>
-        }
+        <!-- The last merge's result, in the GM's words. Kept down here, under
+             the list, so it clearing itself never makes the list jump. -->
         @if (mergeMessage) {
         <div class="small mt-1 merge-grunts-message" data-testid="merge-grunts-message">{{ mergeMessage }}</div>
         }
