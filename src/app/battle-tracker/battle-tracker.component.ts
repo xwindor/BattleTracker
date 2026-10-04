@@ -27,7 +27,8 @@ import { MatrixStateService } from "app/services/matrix-state.service";
 import {
   ParticipantPanelTab, RememberedParticipantPanel,
   readRememberedParticipantPanel, rememberParticipantPanel,
-  readRememberedBottomStripShrunk, rememberBottomStripShrunk
+  readRememberedBottomStripShrunk, rememberBottomStripShrunk,
+  readRememberedMatrixPanelOpen, rememberMatrixPanelOpen
 } from "app/battle-tracker/gm-screen-memory";
 import { OsBand, osBandFor, OsTrackingService } from "app/services/os-tracking.service";
 import { MatrixParticipant, VRMode, DATA_PROCESSING_UNSET } from "Matrix";
@@ -1346,6 +1347,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   set selectedActor(p: IParticipant | null) {
     this._selectedActor = p;
     this.rememberOpenPanel();
+    if (p && this._matrixPanelOpen) {
+      this.setMatrixPanelOpen(false);
+    }
   }
   private _selectedActor: IParticipant | null = null;
 
@@ -1407,20 +1411,28 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * Whether the Matrix run panel is shown. Off by default.
-   *
-   * The Matrix module is still parked (`CLAUDE.md`, "Current focus") and this
-   * is the first and only thing that mounts it — `<app-matrix-run-panel>` had
-   * no consumer anywhere in the app, so the hierarchy editor, access-host
-   * panel, matrix graph and decker cards were all compiled, type-checked and
-   * unit-tested but unreachable at runtime. This toggle exists so the module
-   * can be exercised by hand; it is deliberately not the finished GM workflow
-   * (see `docs/MATRIX_MODULE_PLAN.md`).
+   * Whether the Matrix panel (CONTEXT.md; GM screen overhaul 10, GitHub #13)
+   * holds the right-hand slot. It shares the slot with the participant panel:
+   * opening it closes the participant panel, and opening a participant panel
+   * closes it (see `selectedActor`). Remembered in the GM's browser; it needs
+   * no participant to come back, so a refresh reopens it straight away.
    */
-  showMatrixPanel = false;
+  get matrixPanelOpen(): boolean {
+    return this._matrixPanelOpen;
+  }
+  private _matrixPanelOpen = readRememberedMatrixPanelOpen();
 
+  setMatrixPanelOpen(open: boolean): void {
+    if (open) {
+      this.selectedActor = null;
+    }
+    this._matrixPanelOpen = open;
+    rememberMatrixPanelOpen(open);
+  }
+
+  /** The Matrix button: opens the Matrix panel, or closes it when it is open. */
   toggleMatrixPanel(): void {
-    this.showMatrixPanel = !this.showMatrixPanel;
+    this.setMatrixPanelOpen(!this._matrixPanelOpen);
   }
 
   /**
@@ -1637,8 +1649,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * Escape closes the participant panel - unless a pop-up or a menu is open,
-   * in which case Escape is theirs to close.
+   * Escape closes whichever panel holds the right-hand slot, the participant
+   * panel or the Matrix panel - unless a pop-up or a menu is open, in which
+   * case Escape is theirs to close.
    */
   @HostListener("document:keydown.escape")
   onEscapeKey() {
@@ -1647,6 +1660,8 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
     }
     if (this.selectedActor) {
       this.closeParticipantPanel();
+    } else if (this._matrixPanelOpen) {
+      this.setMatrixPanelOpen(false);
     }
   }
 

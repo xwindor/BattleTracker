@@ -1,6 +1,14 @@
 /* ── Container ───────────────────────────────────────────────────────── */
 
+/* The box fills whatever height its host is given; the drawing inside keeps
+   its own size (see `.mgn-svg`), and the legend stays on the bottom edge. */
+:host {
+  display: flex;
+  flex-direction: column;
+}
+
 .mgn-container {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   background: #050c12;
@@ -200,6 +208,7 @@
 /* ── Legend ──────────────────────────────────────────────────────────── */
 
 .mgn-legend {
+  margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;

@@ -86,3 +86,18 @@ export function readRememberedBottomStripShrunk(): boolean {
 export function rememberBottomStripShrunk(shrunk: boolean): void {
   writeRemembered(BOTTOM_STRIP_MEMORY_KEY, shrunk ? true : null);
 }
+
+/**
+ * Whether the Matrix panel holds the right-hand slot (ticket 10, story 62).
+ * Nothing stored, or anything but `true`, means it is closed. It shares the
+ * slot with the participant panel, so the screen never remembers both open.
+ */
+export const MATRIX_PANEL_MEMORY_KEY = "bt.gmScreen.matrixPanel.v1";
+
+export function readRememberedMatrixPanelOpen(): boolean {
+  return readRemembered(MATRIX_PANEL_MEMORY_KEY, raw => raw === true) ?? false;
+}
+
+export function rememberMatrixPanelOpen(open: boolean): void {
+  writeRemembered(MATRIX_PANEL_MEMORY_KEY, open ? true : null);
+}

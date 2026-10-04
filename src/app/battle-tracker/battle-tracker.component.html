@@ -65,6 +65,13 @@
               End Combat
             </button>
           </div>
+          <!-- Opens the Matrix panel, or closes it (GM screen overhaul 10,
+               GitHub #13). -->
+          <button type="button" class="btn btn-outline-info gm-matrix-btn" data-testid="matrix-btn"
+            [class.active]="matrixPanelOpen" [attr.aria-pressed]="matrixPanelOpen"
+            [title]="matrixPanelOpen ? 'Close the Matrix panel' : 'Open the Matrix panel'" (click)="toggleMatrixPanel()">
+            <i class="fas fa-microchip me-1"></i>Matrix
+          </button>
         </div>
       </div>
       <!-- Item 1 (round 3): a state-driven, non-blocking notice - never a
@@ -195,33 +202,10 @@
     </div>
   </div>
   <br>
-  <!-- Matrix run panel. Off by default and deliberately behind a toggle: the
-       Matrix module is still parked (CLAUDE.md, "Current focus"), and this is
-       the only place in the app that mounts <app-matrix-run-panel>. Before
-       this, the hierarchy editor, access-host panel, matrix graph and decker
-       cards were compiled and unit-tested but unreachable at runtime, so none
-       of the module could be exercised by hand. This is not the finished GM
-       workflow - see docs/MATRIX_MODULE_PLAN.md. -->
-  <div class="row mb-2">
-    <div class="col-12">
-      <button type="button" class="btn btn-sm btn-outline-info"
-              (click)="toggleMatrixPanel()">
-        <i class="fas fa-microchip me-1"></i>{{ showMatrixPanel ? "Hide" : "Show" }} Matrix panel
-      </button>
-      @if (showMatrixPanel) {
-      <div class="mt-2">
-        <app-matrix-run-panel
-          [activeDeckers]="matrixActiveDeckers"
-          (jackInRequested)="onMatrixJackInRequested($event)"
-          (jackOutRequested)="onMatrixJackOutRequested($event)">
-        </app-matrix-run-panel>
-      </div>
-      }
-    </div>
-  </div>
-  <div class="row">
+  <div class="row gm-slot-row" [class.gm-matrix-open]="matrixPanelOpen">
     <!-- The initiative list takes whatever width the participant panel
-         (below) leaves. With the panel closed it takes the full width. -->
+         (below) leaves. With the panel closed it takes the full width. The
+         Matrix panel instead lies over it, so the list never reflows. -->
     <div class="col-12 col-lg gm-list-col">
       <!-- Overwatch reminders. OS rises by the DEFENDER's hits on any Attack
            or Sleaze action (Core p. 232), which this app does not roll - so the GM
@@ -1302,6 +1286,32 @@
             }
           </nav>
           <div [ngbNavOutlet]="nav" class="mt-2"></div>
+        </div>
+      </div>
+    </aside>
+    }
+    <!-- Matrix panel (CONTEXT.md; GM screen overhaul 10, GitHub #13). Opened
+         by the Matrix button; shares the right-hand slot with the participant
+         panel above, so only one is ever open. At laptop width and up it lies
+         over the initiative list from the right, leaving a strip of the list
+         showing and clickable. Closed by its ×, Escape or the Matrix button,
+         and reopened after a refresh. Only this frame is new: the Matrix run
+         panel inside it is unchanged. -->
+    @if (matrixPanelOpen)
+    {
+    <aside class="col-12 gm-matrix-panel" data-testid="matrix-panel" aria-label="Matrix">
+      <div class="gm-matrix-panel-frame">
+        <div class="gm-matrix-panel-header">
+          <h3 data-testid="matrix-panel-title">MATRIX</h3>
+          <button type="button" class="btn-close gm-matrix-panel-close" data-testid="matrix-panel-close"
+            aria-label="Close Matrix panel" title="Close (Escape)" (click)="setMatrixPanelOpen(false)"></button>
+        </div>
+        <div class="gm-matrix-panel-body">
+          <app-matrix-run-panel
+            [activeDeckers]="matrixActiveDeckers"
+            (jackInRequested)="onMatrixJackInRequested($event)"
+            (jackOutRequested)="onMatrixJackOutRequested($event)">
+          </app-matrix-run-panel>
         </div>
       </div>
     </aside>

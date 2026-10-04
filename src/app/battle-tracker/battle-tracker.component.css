@@ -340,7 +340,8 @@
 .npc-row-down-badge                   { order: 7; margin-left: auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  .participant-panel { animation: none; }
+  .participant-panel,
+  .gm-matrix-panel { animation: none; }
 }
 
 /* Lets the initiative list's column actually shrink beside the participant
@@ -865,6 +866,122 @@
   .participant-panel {
     max-height: calc(100vh - var(--bottom-strip-cover) - 1rem);
     overflow-y: auto;
+  }
+}
+
+/* Matrix panel (CONTEXT.md; GM screen overhaul 10, target picture): wide, from
+   the right, lying OVER the initiative list rather than beside it, so the list
+   never reflows and a strip of it - Ini and Name, at least 330px or a quarter
+   of the width - stays showing and clickable on the left. A cyan edge and a
+   shadow mark where it meets that strip; a header line holds MATRIX and its
+   ×. Only this frame is styled here: the Matrix run panel inside is
+   unchanged. Below lg it is an ordinary full-width block under the list. */
+.gm-matrix-panel {
+  margin-top: 0.75rem;
+  animation: participant-panel-in 150ms ease-out;
+}
+
+.gm-matrix-panel-frame {
+  display: flex;
+  flex-direction: column;
+  background: var(--cd-bg-elev, #0a1118);
+  border: 1px solid var(--cd-line, #16313b);
+  border-left-color: var(--cd-cyan, #38d8ff);
+}
+
+.gm-matrix-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 3rem;
+  flex-shrink: 0;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--cd-line, #16313b);
+}
+
+.gm-matrix-panel-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--cd-cyan, #38d8ff);
+}
+
+.gm-matrix-panel-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.gm-matrix-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 1rem 0.75rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cd-line, #16313b) transparent;
+}
+
+@media (min-width: 992px) {
+  /* While it is open the list and the panel share one grid cell row: the list
+     spans the full width underneath, the panel covers all but the first
+     column. Both stay in the page's flow, so the page grows to fit the longer
+     of the two and every part of the panel scrolls into view above the
+     bottom strip, just as the list does. */
+  .row.gm-slot-row.gm-matrix-open {
+    display: grid;
+    grid-template-columns: max(330px, 26%) minmax(0, 1fr);
+    /* Takes every bit of height between the buttons above and the bottom
+       strip (the GM screen is a window-tall column with the strip at its
+       end), so the panel reaches down to the strip, whether expanded or
+       shrunk, without running behind it. */
+    flex: 1 0 auto;
+  }
+
+  .gm-slot-row.gm-matrix-open > .gm-list-col {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  /* Both class names spelled out to outrank Bootstrap's `.row > *` width
+     and gutter padding. */
+  .row > .gm-matrix-panel {
+    grid-column: 2;
+    grid-row: 1;
+    z-index: 15;
+    display: flex;
+    flex-direction: column;
+    width: auto;
+    max-width: none;
+    margin-top: 0;
+    padding: 0;
+  }
+
+  .gm-matrix-panel-frame {
+    flex: 1 1 auto;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    box-shadow: -1.5rem 0 2.5rem rgba(0, 0, 0, 0.6);
+  }
+
+  /* MATRIX and its × stay in view while the GM scrolls a long panel. */
+  .gm-matrix-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--cd-bg-elev, #0a1118);
+  }
+
+  /* Spare height - a big monitor, or the bottom strip shrunk - goes to the
+     run panel, which passes it down to the Matrix map's box. */
+  .gm-matrix-panel-body {
+    overflow-y: visible;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gm-matrix-panel-body > app-matrix-run-panel {
+    flex: 1 1 auto;
   }
 }
 
@@ -1551,9 +1668,26 @@
 
 /* ── Classes replacing template inline styles ──────────────────────────── */
 
-/* Was style="padding-left: 0" on the toolbar column. */
+/* The toolbar column: the round buttons, then the Matrix button beside them
+   (GM screen overhaul 10). The padding was once an inline style. */
 .gm-toolbar-col {
   padding-left: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* The Matrix button in the Matrix colour, lit while its panel is open (the
+   target picture). */
+.btn.gm-matrix-btn,
+.btn.gm-matrix-btn:hover {
+  color: var(--cd-cyan, #38d8ff);
+  border-color: var(--cd-cyan, #38d8ff);
+  background: transparent;
+}
+
+.btn.gm-matrix-btn.active {
+  background: rgba(56, 216, 255, 0.14);
 }
 
 /* ── Responsive layout ─────────────────────────────────────────────────────

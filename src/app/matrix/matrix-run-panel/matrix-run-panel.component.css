@@ -1,5 +1,26 @@
 /* ── Panel shell ─────────────────────────────────────────────────────────── */
 
+/* Given more height than it needs (the GM screen's Matrix panel on a big
+   monitor, or with the bottom strip shrunk), the unfolded panel passes the
+   spare height down to the Matrix map's box. Folded, it keeps to its header. */
+:host {
+  display: flex;
+  flex-direction: column;
+}
+
+.matrix-run-panel-open,
+.matrix-run-panel-open .matrix-panel-body,
+.matrix-run-panel-open .matrix-graph-row,
+.matrix-run-panel-open .mgn-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
+.matrix-run-panel-open .mgn-scroll > app-matrix-graph {
+  flex: 1 1 auto;
+}
+
 .matrix-run-panel {
   border: 1px solid var(--matrix-border, #1a4a1a);
   border-radius: 4px;
