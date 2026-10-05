@@ -366,13 +366,14 @@ describe('Mid-turn combat joiner: reachability of the roll pop-up mid-combat (br
 
       const text = fixture.nativeElement.textContent as string;
       expect(text).not.toContain('Begin Combat Turn');
-      // The mid-combat panel itself is on screen, correctly labelled.
-      const panel = fixture.nativeElement.querySelector('[data-testid="mid-combat-pending-rolls-panel"]');
+      // The rolls-owed bar (GM screen overhaul 14, #17) is on screen in its
+      // place, correctly labelled.
+      const panel = fixture.nativeElement.querySelector('[data-testid="rolls-owed-bar"]');
       expect(panel).not.toBeNull();
-      expect(panel.textContent).toContain('Pending Rolls');
+      expect(panel.textContent).toContain('ROLLS OWED');
     });
 
-    it('the pre-combat Initiative Prep panel is unchanged: still shows "Begin Combat Turn" before combat starts, and the mid-combat panel does not appear', async () => {
+    it('between turns the rolls-owed bar still shows "Begin Combat Turn" before combat starts', async () => {
       makeScored('A', 15, 5);
       // Insert an unrolled participant too, so `initiativePrepActive` has
       // something to prompt for once `btnStartRound_Click` is pressed.
@@ -385,11 +386,11 @@ describe('Mid-turn combat joiner: reachability of the roll pop-up mid-combat (br
 
       expect(CombatManager.started).toBeFalse(); // still prep, not started
       expect(component.initiativePrepActive).toBeTrue();
-      const prepPanel = fixture.nativeElement.querySelectorAll('.card')[0];
-      expect(fixture.nativeElement.textContent).toContain('Initiative Prep');
-      expect(fixture.nativeElement.textContent).toContain('Begin Combat Turn');
-      expect(fixture.nativeElement.querySelector('[data-testid="mid-combat-pending-rolls-panel"]')).toBeNull();
+      // GM screen overhaul 14 (#17): the Prep card is now the rolls-owed
+      // bar, found by its own handle rather than as "the first card".
+      const prepPanel = fixture.nativeElement.querySelector('[data-testid="rolls-owed-bar"]');
       expect(prepPanel).toBeTruthy();
+      expect(prepPanel.textContent).toContain('Begin Combat Turn');
     });
   });
 
@@ -642,12 +643,12 @@ describe('Mid-turn combat joiner: reachability of the roll pop-up mid-combat (br
       expect(component.getAskedRollNames()).toEqual(['Hero']);
 
       fixture.detectChanges();
-      const namesEl = fixture.nativeElement.querySelector('[data-testid="mid-combat-pending-roll-names"]');
-      expect(namesEl.textContent).toContain('Hero');
+      // GM screen overhaul 14 (#17): one names line on the rolls-owed bar,
+      // each asked name marked "(asked)".
+      const namesEl = fixture.nativeElement.querySelector('[data-testid="rolls-owed-names"]');
+      expect(namesEl.textContent).toContain('Hero (asked)');
       expect(namesEl.textContent).toContain('Ganger');
-      const askedEl = fixture.nativeElement.querySelector('[data-testid="mid-combat-asked-roll-names"]');
-      expect(askedEl.textContent).toContain('Hero');
-      expect(askedEl.textContent).not.toContain('Ganger');
+      expect(namesEl.textContent).not.toContain('Ganger (asked)');
 
       void grunt; // referenced only for `getOutstandingRollNames()` above
     });
@@ -666,7 +667,7 @@ describe('Mid-turn combat joiner: reachability of the roll pop-up mid-combat (br
 
       fixture.detectChanges();
       const btn = fixture.nativeElement.querySelector(
-        '[data-testid="mid-combat-roll-remaining-nonplayer-btn"]'
+        '[data-testid="rolls-owed-roll-npcs-btn"]'
       ) as HTMLButtonElement;
       expect(btn.disabled).toBeFalse();
 
@@ -688,9 +689,11 @@ describe('Mid-turn combat joiner: reachability of the roll pop-up mid-combat (br
 
       expect(component.initiativePrepActive).toBeTrue();
       expect(CombatManager.started).toBeFalse();
-      const prepCard = fixture.nativeElement.querySelectorAll('.card')[0];
-      const buttons: HTMLButtonElement[] = Array.from(prepCard.querySelectorAll('button'));
-      const btn = buttons.find(b => b.textContent?.includes('Roll Remaining Non-Player'));
+      // GM screen overhaul 14 (#17): found on the rolls-owed bar by its
+      // own handle rather than as "the first card on the page".
+      const btn = fixture.nativeElement.querySelector(
+        '[data-testid="rolls-owed-bar"] [data-testid="rolls-owed-roll-npcs-btn"]'
+      ) as HTMLButtonElement | null;
       expect(btn?.disabled).toBeTrue();
       void unrolledGrunt;
     });
@@ -1728,8 +1731,9 @@ describe('Round 3 item 7: "who has been asked" display', () => {
     component.btnRequestPlayerRolls_Click();
     fixture.detectChanges();
 
-    const askedEl = fixture.nativeElement.querySelector('[data-testid="prep-asked-roll-names"]');
-    expect(askedEl.textContent).toContain('Hero');
+    // GM screen overhaul 14 (#17): the Prep card is now the rolls-owed bar.
+    const askedEl = fixture.nativeElement.querySelector('[data-testid="rolls-owed-names"]');
+    expect(askedEl.textContent).toContain('Hero (asked)');
   });
 });
 

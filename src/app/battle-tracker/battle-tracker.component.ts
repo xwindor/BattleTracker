@@ -10307,8 +10307,9 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
-   * Template-facing predicate for the mid-combat "Pending Rolls" panel
-   * (briefs/mid-turn-joiner-spec.md, "Affected paths"). Deliberately its own
+   * Whether a roll is owed mid-turn (briefs/mid-turn-joiner-spec.md,
+   * "Affected paths"). It once gated the mid-combat card the rolls-owed bar
+   * replaced (GM screen overhaul 14, #17); `rollsOwedBarVisible()` now does. Deliberately its own
    * method rather than overloading `initiativePrepActive`: that field's
    * documented meaning is "the pre-combat prep panel shows," and it is
    * cleared by `beginCombatTurn()`, `btnReset_Click()` and session teardown -
@@ -10328,14 +10329,35 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
   }
 
   /**
+   * GM screen overhaul 14 (#17): the rolls-owed bar shows where either old
+   * card did - the Initiative Prep card (`initiativePrepActive`, between
+   * turns) or the Pending Rolls card (mid-turn) - but only while someone
+   * still owes a roll (user story 13).
+   */
+  rollsOwedBarVisible(): boolean {
+    return (this.combatManager.started || this.initiativePrepActive) && this.hasPendingInitiativeRolls();
+  }
+
+  /** "Hero (asked), Ganger": everyone owing a roll, marking who was asked. */
+  rollsOwedNamesLine(): string {
+    return this.combatManager.participants.items
+      .filter(p => !p.ooc && p.diceIni <= 0)
+      .map(p => {
+        const name = p.name || "Unnamed";
+        return this.isAskedToRoll(p, true) ? `${name} (asked)` : name;
+      })
+      .join(", ");
+  }
+
+  /**
    * Item B: a per-row visual marker for a participant who still owes an
    * Initiative roll mid-combat (a just-joined late entrant, most commonly) -
    * a cue only, never an interruption, per the brief: it does not open
    * anything, gate any button, or warn on its own. Same predicate as
    * `getOutstandingRollNames()`/`getPendingOutstandingRollCount()`
    * (`!p.ooc && p.diceIni <= 0`), scoped to `started` so it never marks a
-   * row before combat has begun (the pre-combat Initiative Prep panel
-   * already covers that case for everyone at once).
+   * row before combat has begun (the rolls-owed bar already covers that
+   * case for everyone at once).
    */
   participantNeedsInitiativeRoll(p: IParticipant): boolean {
     return this.combatManager.started && !p.ooc && p.diceIni <= 0;
@@ -10346,7 +10368,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
    * on the participant's own row, unconditional on `combatManager.started`
    * (unlike `participantNeedsInitiativeRoll()` above) - a player can be
    * asked before Start Round is ever pressed, via the pre-combat Initiative
-   * Prep panel's own "Request Player Rolls" or the per-row ask button, and
+   * rolls-owed bar's "Request player rolls" or the per-row ask button, and
    * the row should say so at that point too. Template-facing wrapper over
    * the private `isAskedToRoll()` choke point (`buildSharedParticipant()`
    * reads the same one), so this can never disagree with what the wire
@@ -10374,7 +10396,7 @@ export class BattleTrackerComponent implements OnInit, OnDestroy, AfterViewCheck
 
   /**
    * D6(a) fix (validation round 1, `briefs/mid-turn-joiner-spec.md`): the
-   * mid-combat "Pending Rolls" panel names who is still owed a roll, rather
+   * rolls-owed bar names who is still owed a roll, rather
    * than only showing a bare count. Same predicate as
    * `getPendingOutstandingRollCount()` (`!p.ooc && p.diceIni <= 0`), so the
    * two can never silently disagree on who counts as outstanding.

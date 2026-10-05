@@ -162,104 +162,6 @@
       }
     </div>
   </div>
-  <div class="row">
-    <div class="col-12">
-      @if(!combatManager.started && initiativePrepActive) {
-      <div class="card mt-2 mb-2">
-        <div class="card-header">Initiative Prep</div>
-        <div class="card-body py-2">
-          <div class="small mb-2">
-            Pending rolls: {{ getPendingOutstandingRollCount() }}
-            (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
-          </div>
-          <!-- Item 7 (round 3): who has actually been asked, in the
-               pre-combat panel too - previously only shown mid-combat. -->
-          <div class="small mb-2" data-testid="prep-asked-roll-names">
-            @if(getAskedRollNames().length > 0) {
-            Asked and still outstanding: {{ getAskedRollNames().join(', ') }}
-            } @else {
-            Nobody currently owed a roll has been asked yet.
-            }
-          </div>
-          <div class="btn-group" role="group">
-            <button type="button" class="btn btn-outline-primary" (click)="btnRequestPlayerRolls_Click()"
-              [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">
-              Request Player Rolls
-            </button>
-            <button type="button" class="btn btn-outline-secondary" (click)="btnRollRemainingNonPlayer_Click()"
-              [disabled]="getPendingNonPlayerRollCount() <= 0 || getPendingPlayerRollCount() > 0">
-              Roll Remaining Non-Player
-            </button>
-            <button type="button" class="btn btn-outline-warning" (click)="btnForceRollOutstanding_Click()"
-              [disabled]="getPendingOutstandingRollCount() <= 0">
-              Force Roll Outstanding
-            </button>
-            <button type="button" class="btn btn-success" (click)="btnBeginCombatTurn_Click()"
-              [disabled]="getPendingOutstandingRollCount() > 0">
-              Begin Combat Turn
-            </button>
-          </div>
-        </div>
-      </div>
-      }
-      <!-- Mid-combat "Pending Rolls" panel (briefs/mid-turn-joiner-spec.md). A
-           sibling of the pre-combat Initiative Prep card above, not a reuse of
-           it: this one is gated on `combatManager.started` being true, and
-           deliberately has no "Begin Combat Turn" button, which must never
-           render once a Combat Turn is already running. It exists so a GM can
-           ask a late joiner (a new "+ Participant"/"+ Grunt Group"/etc. row,
-           or a brand-new player who registers mid-fight) to roll Initiative
-           through the same locked roll pop-up used before combat starts,
-           instead of only being able to type a Score onto their card or use
-           the per-row dice button. -->
-      @if(combatManager.started && hasOutstandingMidCombatRolls()) {
-      <div class="card mt-2 mb-2" data-testid="mid-combat-pending-rolls-panel">
-        <div class="card-header">Pending Rolls</div>
-        <div class="card-body py-2">
-          <div class="small mb-2">
-            Pending rolls: {{ getPendingOutstandingRollCount() }}
-            (Players: {{ getPendingPlayerRollCount() }}, Non-player: {{ getPendingNonPlayerRollCount() }})
-          </div>
-          <!-- D6(a) - name everyone still owed a roll, not just a count. -->
-          <div class="small mb-2" data-testid="mid-combat-pending-roll-names">
-            Still owed a roll: {{ getOutstandingRollNames().join(', ') }}
-          </div>
-          <!-- F fix (validation round 2 redesign): replaces round-1's
-               table-wide "request outstanding" boolean line with the
-               per-person picture item A's redesign requires - who has
-               actually been asked, not just whether anyone anywhere has. -->
-          <div class="small mb-2" data-testid="mid-combat-asked-roll-names">
-            @if(getAskedRollNames().length > 0) {
-            Asked and still outstanding: {{ getAskedRollNames().join(', ') }}
-            } @else {
-            Nobody currently owed a roll has been asked yet.
-            }
-          </div>
-          <div class="btn-group" role="group">
-            <button type="button" class="btn btn-outline-primary" data-testid="mid-combat-request-player-rolls-btn"
-              (click)="btnRequestPlayerRolls_Click()"
-              [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">
-              Request Player Rolls
-            </button>
-            <!-- D6(c) - mid-combat only, this stays enabled even while a player
-                 still owes a roll (unlike the pre-combat panel above, which is
-                 unchanged). -->
-            <button type="button" class="btn btn-outline-secondary" data-testid="mid-combat-roll-remaining-nonplayer-btn"
-              (click)="btnRollRemainingNonPlayer_Click()"
-              [disabled]="getPendingNonPlayerRollCount() <= 0">
-              Roll Remaining Non-Player
-            </button>
-            <button type="button" class="btn btn-outline-warning" data-testid="mid-combat-force-roll-outstanding-btn"
-              (click)="btnForceRollOutstanding_Click()"
-              [disabled]="getPendingOutstandingRollCount() <= 0">
-              Force Roll Outstanding
-            </button>
-          </div>
-        </div>
-      </div>
-      }
-    </div>
-  </div>
   <br>
   <div class="row gm-slot-row" [class.gm-matrix-open]="matrixPanelOpen"
     [class.gm-participant-open]="selectedActor !== null && selectedActor !== undefined">
@@ -284,6 +186,43 @@
             title="Combine the ticked grunts into one group on a single shared Initiative Score. Only possible before any of them has rolled this Combat Turn. Their Condition Monitor damage carries over; no wound penalty is applied to the group for damage taken before the merge (house rule).">Merge</button>
           <button type="button" class="btn btn-sm" data-testid="merge-grunts-cancel"
             (click)="cancelMergePicking()">Cancel</button>
+        </div>
+      </div>
+      }
+      <!-- Rolls-owed bar (CONTEXT.md; GM screen overhaul 14, GitHub #17; user
+           stories 9-13): one line replacing the between-turns Initiative Prep
+           card and the mid-combat Pending Rolls card. It shows where either
+           card did (once Start Combat Turn has been pressed, or any time
+           mid-turn) while someone still owes a roll, and goes when nobody
+           does; the top bar's Start Combat Turn then begins the turn. Every
+           button calls the same handler under the same on/off rule as on its
+           old card, including Roll remaining NPCs waiting for the players
+           between turns but not mid-turn. -->
+      @if (rollsOwedBarVisible()) {
+      <div class="gm-rolls-owed-bar" data-testid="rolls-owed-bar">
+        <span class="gm-rolls-owed-title"
+          [attr.title]="'Players: ' + getPendingPlayerRollCount() + ', non-player: ' + getPendingNonPlayerRollCount()">ROLLS OWED ({{ getPendingOutstandingRollCount() }})</span>
+        @let owedLine = rollsOwedNamesLine();
+        <span class="gm-rolls-owed-names" data-testid="rolls-owed-names" [attr.title]="owedLine">{{ owedLine }}</span>
+        <div class="gm-rolls-owed-buttons">
+          <button type="button" class="btn btn-sm" data-testid="rolls-owed-request-btn"
+            title="Ask every player who still owes a roll to roll Initiative"
+            (click)="btnRequestPlayerRolls_Click()"
+            [disabled]="getPendingPlayerRollCount() <= 0 || !shareRoomCode">Request player rolls</button>
+          <button type="button" class="btn btn-sm" data-testid="rolls-owed-roll-npcs-btn"
+            [title]="combatManager.started ? 'Roll Initiative for every non-player still owing one' : 'Roll Initiative for every non-player still owing one. Between turns, this waits until every player has rolled.'"
+            (click)="btnRollRemainingNonPlayer_Click()"
+            [disabled]="getPendingNonPlayerRollCount() <= 0 || (!combatManager.started && getPendingPlayerRollCount() > 0)">Roll remaining NPCs</button>
+          <button type="button" class="btn btn-sm" data-testid="rolls-owed-force-btn"
+            title="Roll Initiative for everyone still owing one, players included (asks first)"
+            (click)="btnForceRollOutstanding_Click()"
+            [disabled]="getPendingOutstandingRollCount() <= 0">Force roll outstanding</button>
+          @if (!combatManager.started) {
+          <button type="button" class="btn btn-sm btn-primary" data-testid="rolls-owed-begin-btn"
+            title="Begin the Combat Turn once every roll is in"
+            (click)="btnBeginCombatTurn_Click()"
+            [disabled]="getPendingOutstandingRollCount() > 0">Begin Combat Turn</button>
+          }
         </div>
       </div>
       }
